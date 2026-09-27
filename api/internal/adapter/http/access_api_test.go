@@ -104,9 +104,9 @@ func TestAnOwnerSeesEveryMembersTokensAndChats(t *testing.T) {
 	}
 }
 
-// PRD 15. The owner has a token and a chat too, so a handler that served
-// the household view to everyone fails this test rather than passing it by
-// accident.
+// TestALimitedMemberSeesOnlyTheirOwnTokensAndChat gives the owner a token
+// and a chat too, so a handler that served the household view to everyone
+// fails this test rather than passing it by accident.
 func TestALimitedMemberSeesOnlyTheirOwnTokensAndChat(t *testing.T) {
 	env := newTestEnv(t)
 	env.withBot()
@@ -128,8 +128,8 @@ func TestALimitedMemberSeesOnlyTheirOwnTokensAndChat(t *testing.T) {
 	}
 }
 
-// Decision 5: a leaked token must not be able to map the household's other
-// credentials.
+// TestTheAccessListRefusesAnAPIToken guards against a leaked token being
+// used to map the household's other credentials.
 func TestTheAccessListRefusesAnAPIToken(t *testing.T) {
 	env := newTestEnv(t)
 	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
@@ -174,7 +174,8 @@ func TestWithNoBotConfiguredTheAccessListHasNoChats(t *testing.T) {
 	}
 }
 
-// Decision 9: the chat id is a Telegram identifier the list does not need.
+// TestTheAccessListNeverSendsAChatID: the chat id is a Telegram identifier
+// the list does not need.
 func TestTheAccessListNeverSendsAChatID(t *testing.T) {
 	env := newTestEnv(t)
 	env.withBot()
@@ -198,8 +199,9 @@ func TestAnEmptyAccessListAnswersEmptyListsNotNull(t *testing.T) {
 	}
 }
 
-// Decision 6: seeing a partner's token is not the power to revoke it. The
-// existing DELETE is scoped to the token's owner, and this pins it.
+// TestAnOwnerCannotRevokeAnotherMembersToken pins that seeing a partner's
+// token is not the power to revoke it: the existing DELETE stays scoped to
+// the token's owner.
 func TestAnOwnerCannotRevokeAnotherMembersToken(t *testing.T) {
 	env := newTestEnv(t)
 	ownerSession, ownerCSRF := env.signIn(t, env.ownerEmail, env.ownerPassword)

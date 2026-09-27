@@ -18,15 +18,12 @@ import (
 func text(s string) *string { return &s }
 
 // nullableText implements the "" <-> SQL NULL convention documented on
-// usecase.StoredUser.PasswordHash and UserRepository.Create: an empty
-// domain string is stored as NULL, never as an empty-string column value.
-// users.email is citext UNIQUE and nullable for the same reason
-// password_hash is nullable — a household's children are created with no
-// email of their own, and storing ” for each of them would collide on the
-// unique index where storing NULL does not. The brief's own test
-// (`users.Create(ctx, "", "", "Ethan")`) exercises exactly this path, so the
-// convention is applied to both columns, as StoredUser's doc comment spells
-// out for each.
+// usecase.StoredUser.PasswordHash and UserRepository.Create: an empty domain
+// string is stored as NULL, never as an empty-string column value.
+// users.email is citext UNIQUE and nullable for the same reason as
+// password_hash -- a household's children have no email of their own, and
+// storing "" for each would collide on the unique index where NULL does
+// not.
 func nullableText(s string) *string {
 	if s == "" {
 		return nil
@@ -76,20 +73,15 @@ func nullableUUID(id *string) pgtype.UUID {
 }
 
 // uuidLooksValid reports whether id parses as a UUID, without the silent
-// fall-through to the zero value uuid() and nullableUUID() both use. Their
-// own doc comments' reasoning -- "a parse failure here can only mean a
-// caller passed a malformed id, and the resulting query simply matches no
-// row" -- holds for every ordinary equality comparison (a malformed id just
-// fails to match, same as a real id from another household), but breaks for
-// a column compared with "$n IS NULL OR ...": there, a parse failure and a
-// genuinely absent value both produce the identical zero pgtype.UUID{}, so
-// the query cannot tell "malformed" apart from "legitimately not set" --
-// only a caller that checks before the id ever reaches SQL can. Every id in
-// this repository is either compared this second way (retro_actions.
-// carried_from, via AddRetroAction's own comment) or originates from a row
-// this package already produced (every other id) — this exists for the
-// first case, where the id can instead arrive from a request body a caller
-// outside this package constructed.
+// fall-through to the zero value uuid() and nullableUUID() use. Their "a
+// malformed id just matches no row" reasoning holds for an ordinary equality
+// comparison, but breaks for a column compared with "$n IS NULL OR ...":
+// there, a parse failure and a genuinely absent value both produce the same
+// zero pgtype.UUID{}, so only a caller that checks before the id reaches SQL
+// can tell them apart. That case is retro_actions.carried_from (see
+// AddRetroAction's own comment), where the id can arrive from a request body
+// this package did not construct -- unlike every other id here, which
+// originates from a row this package already produced.
 func uuidLooksValid(id string) bool {
 	var u pgtype.UUID
 	return u.Scan(id) == nil
@@ -194,18 +186,16 @@ func toNotificationPreferences(row sqlcgen.NotificationPreference) usecase.Notif
 // toRole and toCapabilities refuse values this code did not write -- the
 // fail-closed rule every other enum column read in this package follows
 // (toBill's cadence, toCategory's kind, admin_directory_repo's member roles).
-// migrations/00002_identity.sql's CHECK constraints (role,
-// capabilities_are_known, limited_members_have_no_marriage,
-// owners_hold_all_capabilities) are the first gate; parsing on read is the
-// second, and costs a string compare.
+// migrations/00002_identity.sql's CHECK constraints are the first gate;
+// parsing on read is the second, and costs only a string compare.
 //
-// This reverses an earlier choice to trust the CHECKs alone (2026-09-13
-// review). A role is the input to authorisation at every inbound edge, so an
-// impossible one must fail the request, not reach a guard that compares it
-// with "owner" and quietly treats it as something else.
+// Don't trust the CHECK alone: a role is the input to authorisation at
+// every inbound edge, so an impossible one must fail the request, not reach
+// a guard that compares it with "owner" and quietly treats it as something
+// else.
 //
 // domain.Space.RequiredCapability's "" (no capability required) is a
-// legitimate stored value ParseCapabilities would refuse, which is why
+// legitimate stored value that ParseCapabilities would refuse, which is why
 // toDomainSpace does not go through toCapabilities.
 func toRole(s string) (domain.Role, error) {
 	role, err := domain.ParseRole(s)
@@ -247,18 +237,14 @@ func toMembership(id, householdID, userID pgtype.UUID, role string, capabilities
 
 // dateOnly converts a domain time into the pgtype.Date that
 // opening_balance_as_of is stored as. The column is a date, not a
-// timestamptz, deliberately: "the balance was true on the 26th" is a calendar
-// fact, and storing an instant would make it depend on the zone the request
-// arrived from.
+// timestamptz, on purpose: "the balance was true on the 26th" is a calendar
+// fact independent of the zone the request arrived from.
 //
-// t.Date() is why this holds: it reads the calendar day out of t in t's own
-// location, before any conversion happens. t.UTC().Truncate(24*time.Hour)
-// looks equivalent but is not -- it converts to UTC first and truncates
-// second, so it silently changes the calendar day for anything not already
-// UTC midnight (07:00 SGT on the 26th is 23:00 UTC on the 25th, and
-// truncating that lands on the 25th). Every existing caller happens to pass
-// UTC midnight today, which is exactly why that bug shipped once already
-// with all tests green; see
+// Don't replace t.Date() with t.UTC().Truncate(24*time.Hour): it converts to
+// UTC before truncating, so it silently changes the calendar day for
+// anything not already UTC midnight (07:00 SGT on the 26th truncates to the
+// 25th). Every caller happens to pass UTC midnight today, which is exactly
+// why that bug shipped once with all tests green; see
 // TestOpeningBalanceAsOfKeepsItsCalendarDayRegardlessOfZone.
 func dateOnly(t time.Time) pgtype.Date {
 	y, m, d := t.Date()

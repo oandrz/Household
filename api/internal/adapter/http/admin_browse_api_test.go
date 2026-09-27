@@ -18,14 +18,13 @@ import (
 // stubBrowser is the usecase.DatabaseBrowser a configured test env holds.
 // Each test sets only the field it cares about.
 //
-// calls is not decoration. Two of the answers this file asserts on --
-// NOT_FOUND for an unknown table, and INVALID_RANGE for a range that cannot
-// be served -- are bodies the router already produces for a path that does
-// not exist at all, so without a count of how many questions actually
-// reached the browser, both tests pass against a build with no routes in it.
-// Counting them is what makes "the route matched and the browse answered"
-// distinguishable from "chi's NotFound answered", and what proves an
-// unusable range is refused BEFORE any query runs.
+// calls is not decoration: NOT_FOUND for an unknown table and INVALID_RANGE
+// for an unusable range are bodies the router already produces for a path
+// that doesn't exist at all, so without counting how many questions reached
+// the browser, both tests would pass against a build with no routes.
+// Counting distinguishes "the route matched and the browse answered" from
+// "chi's NotFound answered", and proves an unusable range is refused
+// BEFORE any query runs.
 type stubBrowser struct {
 	tables []usecase.TableInfo
 	page   usecase.RowPage
@@ -80,12 +79,11 @@ func sampleBrowse() *stubBrowser {
 	}
 }
 
-// browseRouter builds a router sharing every one of env's dependencies except
-// AdminBrowse, which is the browse service wrapped around the double passed
-// in. It is the seam adminRouterWith already established, used here for a
-// reason particular to this feature: env.router is the UNCONFIGURED install
-// (Deps.AdminBrowse nil), which is the state the two 503 tests need, so a
-// configured router has to be built beside it rather than replacing it.
+// browseRouter builds a router sharing every one of env's dependencies
+// except AdminBrowse, wrapped around the double passed in -- the same seam
+// adminRouterWith uses. env.router stays the UNCONFIGURED install
+// (Deps.AdminBrowse nil) the two 503 tests need, so a configured router is
+// built beside it rather than replacing it.
 //
 // The grant lives in Postgres, not in the router, so a session granted
 // through env.router opens this one too.
@@ -96,9 +94,9 @@ func (env *testEnv) browseRouter(browser usecase.DatabaseBrowser) http.Handler {
 }
 
 // The key sets are asserted exactly, the same way the mail and households
-// tests assert theirs: Task 8 mirrors these shapes in Zod, so a field added
-// or renamed by accident must fail here rather than reach a frontend that
-// parses it into nothing.
+// tests assert theirs: the frontend's Zod schemas mirror these shapes, so a
+// field added or renamed by accident must fail here rather than reach a
+// frontend that parses it into nothing.
 func TestAdminDatabaseTablesAnswersTheTableList(t *testing.T) {
 	env := newTestEnv(t)
 	session := grantedAdmin(t, env)
@@ -249,11 +247,10 @@ func TestAdminDatabaseRowsClampsALargeLimit(t *testing.T) {
 // The 404 for a table that is not there, which the adapter answers with
 // domain.ErrNotFound.
 //
-// The calls assertion is what gives this test teeth. writeNotFound and this
-// 404 deliberately share one body (router.go's own comment says why), so
-// before the route existed the assertion on the envelope alone was already
-// green against chi's NotFound. Counting the question proves the request
-// reached the browse and came back, rather than never being routed at all.
+// The calls assertion gives this test teeth: writeNotFound and this 404
+// deliberately share one body (router.go explains why), so an envelope-only
+// assertion would pass even if the route did not exist. Counting the
+// question proves the request reached the browse and came back.
 func TestAdminDatabaseUnknownTableIs404(t *testing.T) {
 	env := newTestEnv(t)
 	session := grantedAdmin(t, env)
@@ -299,13 +296,12 @@ func TestAdminDatabaseAnswers503WhenUnconfigured(t *testing.T) {
 // set and the connection is broken" sends them to the box and the
 // hearth_readonly role. Collapsing the two would send them to the wrong one.
 //
-// The log assertion is the other half, and it is not decoration. The response
-// body is deliberately generic, so the log line is the ONLY place the cause
-// survives -- browse_repo.go's browseErr wraps the failing operation and the
-// pg error into this sentinel precisely so this layer can record them. The
-// stub's error carries an operation phrase for exactly that reason: asserting
-// only that "something was logged" would still pass if the branch logged the
-// bare sentinel and threw the cause away.
+// The log assertion is the other half, not decoration: the response body
+// is deliberately generic, so the log line is the ONLY place the cause
+// survives. browse_repo.go's browseErr wraps the failing operation and the
+// pg error into this sentinel so this layer can record them, and the
+// stub's error carries an operation phrase so a log of the bare sentinel
+// (with the cause thrown away) would still fail this assertion.
 func TestAdminDatabaseAnswers503WhenTheBrowseIsBroken(t *testing.T) {
 	env := newTestEnv(t)
 	session := grantedAdmin(t, env)

@@ -10,11 +10,10 @@ import (
 	"strings"
 )
 
-// cmdAPI is the escape hatch: any method, any path, an optional JSON body.
-// It is what makes every route reachable without a typed verb for each,
-// and what an agent uses for anything `routes` lists that has no verb.
-// idempotencyKeyHeader is the server's name for the header (the IETF
-// draft's), copied from internal/adapter/http/transaction_handlers.go.
+// cmdAPI is the escape hatch: any method, any path, an optional JSON body,
+// reaching any route `routes` lists that has no typed verb.
+// idempotencyKeyHeader is the IETF draft's header name, copied from
+// internal/adapter/http/transaction_handlers.go.
 const idempotencyKeyHeader = "Idempotency-Key"
 
 func cmdAPI(ctx context.Context, c *client, args []string, stdout io.Writer) error {

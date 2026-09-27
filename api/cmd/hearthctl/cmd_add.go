@@ -9,15 +9,14 @@ import (
 )
 
 // The typed inserts. Each one builds exactly the JSON the matching handler
-// decodes -- the field names are copied from the request structs in
+// decodes: field names are copied from the request structs in
 // internal/adapter/http/*_handlers.go and pinned by cmd_add_test.go. Amounts
-// are minor units on the command line as they are on the wire
-// (--amount-minor=1234 is 12.34), so no decimal parsing and no float64
-// anywhere in this tool.
+// are minor units on the command line as on the wire (--amount-minor=1234
+// is 12.34), so this tool never parses a decimal or uses float64.
 //
-// An optional string flag left empty is omitted from the body rather than
-// sent as "", because the handlers take pointers for optional ids and treat
-// an empty string as a present-but-empty id, which the service refuses.
+// An optional string flag left empty is omitted from the body, not sent as
+// "": the handlers take pointers for optional ids, and an empty string
+// means a present-but-empty id, which the service refuses.
 
 // insert is one typed verb: which route it posts to and how to turn flags
 // into a body. Keeping the two together is what lets cmdAdd stay generic.
@@ -27,9 +26,8 @@ type insert struct {
 }
 
 // keyFlag is the one flag that is not part of the body: it becomes the
-// Idempotency-Key header. Only transactions honour it server-side today, so
-// only transaction add declares it (buildTransaction pops it off the body
-// under this name before the body is sent).
+// Idempotency-Key header. Only transactions honour it server-side, so only
+// buildTransaction sets it; cmdAdd pops it off the body into the header.
 const keyFlag = "__idempotencyKey"
 
 var inserts = map[string]insert{

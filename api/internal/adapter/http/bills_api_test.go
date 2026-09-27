@@ -9,10 +9,9 @@ import (
 	"time"
 )
 
-// --- Task 9: bill routes -----------------------------------------------
+// --- bill routes: DTOs and fixtures -------------------------------------
 
-// billDTOBody mirrors bill_handlers.go's billDTO wire shape -- the brief's
-// own field list, verbatim.
+// billDTOBody mirrors bill_handlers.go's billDTO wire shape, field for field.
 type billDTOBody struct {
 	ID                 string  `json:"id"`
 	Name               string  `json:"name"`
@@ -130,38 +129,35 @@ func (env *testEnv) mustCreateAccountWithCurrency(t *testing.T, session, csrf *h
 }
 
 // farFutureDate is a next_due comfortably outside every "due soon" and
-// "overdue" window, regardless of which day this suite happens to run on --
-// the fixture every test below uses unless it is specifically exercising
-// those derived flags, which usecase/bill_test.go already covers in far more
-// depth than an HTTP-layer wiring test needs to repeat.
+// "overdue" window regardless of which day this suite runs on -- the
+// fixture every test below uses unless it is exercising those derived
+// flags, which usecase/bill_test.go already covers in more depth than an
+// HTTP-layer wiring test needs to repeat.
 func farFutureDate() string {
 	return time.Now().UTC().AddDate(0, 0, 400).Format("2006-01-02")
 }
 
 // --- route-walk matrix ------------------------------------------------------
 
-// TestBillRoutesRequireMoneyAndOwner is TestGoalRoutesRequireMoneyAndOwner's
+// TestBillsRoutesRequireMoneyAndOwner is TestGoalRoutesRequireMoneyAndOwner's
 // shape applied to the five bill routes: reads and writes alike sit behind
-// CapMoney AND requireOwner, the same as transactions, categories, budgets
-// and goals -- a bills screen with every figure blank reads as broken for a
-// limited member the same way a half-redacted ledger would (router.go's own
+// CapMoney AND requireOwner, like transactions, categories, budgets and
+// goals -- a bills screen with every figure blank reads as broken for a
+// limited member the same way a half-redacted ledger would (router.go's
 // comment on the txn group).
 //
 // wantOwner pins the exact status an owner receives, not merely "not
 // 401/403": a route wired with a nil deps.Bills would pass both guards and
-// panic into a 500, which a bare non-401/403 check would let slide by
-// unnoticed.
+// panic into a 500, which a bare non-401/403 check would let slide by.
 //
-// The archive and restore rows carry a second check the generic matrix
-// above them does not: chi's own route-not-found catch-all
-// (router.go's r.NotFound) answers the identical {404, "NOT_FOUND"} shape a
-// real BillService.SetArchived refusal would, so a mistyped or never-wired
-// route would still show 404 here and pass for the wrong reason. Asserting
-// the message text -- "That could not be found." only comes from
-// errors.go's domain.ErrNotFound case, never from the router's own catch-all
-// message "That endpoint does not exist." -- is what budget_api_test.go's
-// TestBudgetRolloverNoBudgetRowIsNotFound already does for the identical
-// hazard on the rollover route.
+// The archive and restore rows carry a second check: chi's own
+// route-not-found catch-all (router.go's r.NotFound) answers the identical
+// {404, "NOT_FOUND"} shape a real BillService.SetArchived refusal would, so
+// a mistyped or never-wired route would still pass for the wrong reason.
+// Asserting the message text -- "That could not be found." comes only from
+// errors.go's domain.ErrNotFound case, never the router's own "That
+// endpoint does not exist." -- mirrors budget_api_test.go's
+// TestBudgetRolloverNoBudgetRowIsNotFound on the identical hazard.
 func TestBillsRoutesRequireMoneyAndOwner(t *testing.T) {
 	env := newTestEnv(t)
 	zeroUUID := "00000000-0000-0000-0000-000000000000"
@@ -231,7 +227,7 @@ func TestBillsRoutesRequireMoneyAndOwner(t *testing.T) {
 	}
 }
 
-// TestBillWriteRoutesRequireCSRF mirrors TestCategoryWriteRoutesRequireCSRF
+// TestBillsWriteRoutesRequireCSRF mirrors TestCategoryWriteRoutesRequireCSRF
 // for the four mutating bill routes: no token at all, and a token that does
 // not match the cookie, both refused by the CSRF_INVALID code specifically.
 func TestBillsWriteRoutesRequireCSRF(t *testing.T) {
@@ -270,11 +266,11 @@ func TestBillsWriteRoutesRequireCSRF(t *testing.T) {
 
 // --- behaviour tests ---------------------------------------------------
 
-// TestBillCreateRoundTripsThroughGet is the wire-level pin that a created
-// bill's own response and a follow-up GET describe the same row, joined names
-// included -- CategoryName and AccountName only exist because BillRecord joins
-// them (usecase.BillRecord's own doc comment), so this is what proves the join
-// reaches the wire, not just the ids.
+// TestBillsCreateRoundTripsThroughGet pins that a created bill's response and
+// a follow-up GET describe the same row, joined names included --
+// CategoryName and AccountName only exist because BillRecord joins them
+// (usecase.BillRecord's own doc comment), so this proves the join reaches
+// the wire, not just the ids.
 func TestBillsCreateRoundTripsThroughGet(t *testing.T) {
 	env := newTestEnv(t)
 	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
@@ -331,15 +327,14 @@ func TestBillsCreateRoundTripsThroughGet(t *testing.T) {
 	}
 }
 
-// TestBillCreateSerialisesSettledAndNullableFields pins two wire-shape facts
+// TestBillsCreateSerialisesSettledAndNullableFields pins two wire-shape facts
 // a Go zero-value round-trip cannot distinguish from their absence: settled
-// must be a real JSON key (Task 7's own review found it missing from an
-// earlier sketch of this DTO -- decoding into a Go bool cannot tell "the
-// server sent false" from "the server sent nothing at all", the exact trap
+// must be a real JSON key, since decoding into a Go bool cannot tell "the
+// server sent false" from "sent nothing at all" (the same trap
 // assertRolloverFieldsNull's own comment names for a *time.Time field), and
-// archivedAt must serialise as literal null, not be an absent key -- the
-// distinction createGoalRequest's own currency-field comment and Task 11's
-// zod schemas both rely on.
+// archivedAt must serialise as literal null, not an absent key -- the same
+// distinction createGoalRequest's currency-field comment and the frontend's
+// zod schemas rely on.
 func TestBillsCreateSerialisesSettledAndNullableFields(t *testing.T) {
 	env := newTestEnv(t)
 	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
@@ -375,10 +370,10 @@ func TestBillsCreateSerialisesSettledAndNullableFields(t *testing.T) {
 	}
 }
 
-// TestBillCreateDuplicateNameOffersRestoreWhenArchived is the brief's
-// "ErrBillNameTaken -> 409 whose body names the taken name and whether the
-// holder is archived" case, following writeGoalNameConflict's own precedent:
-// an archived collision gets the richer 409 with the archived bill's id in
+// TestBillsCreateDuplicateNameOffersRestoreWhenArchived pins the
+// "ErrBillNameTaken -> 409 naming the taken name and whether the holder is
+// archived" rule, following writeGoalNameConflict's own precedent: an
+// archived collision gets the richer 409 with the archived bill's id in
 // details, so the modal can offer Restore instead of a dead end.
 func TestBillsCreateDuplicateNameOffersRestoreWhenArchived(t *testing.T) {
 	env := newTestEnv(t)
@@ -407,12 +402,11 @@ func TestBillsCreateDuplicateNameOffersRestoreWhenArchived(t *testing.T) {
 }
 
 // TestBillsRefuseAnIncomeCategoryOnBothWritePaths is the wire-level half of
-// the category rule. The Add-bill modal only ever offers expense categories,
-// so this is the case that only an API caller can reach -- and it had to be
-// closed here rather than there, because a bill's category is copied onto the
-// real expense MarkPaid writes, and Budget's category rows are built from
-// expense categories only: an income-categorised bill would put money in
-// Spent that appears against no category at all.
+// the category rule: the Add-bill modal only offers expense categories, so
+// only an API caller can reach this, and it must be refused server-side
+// too -- a bill's category is copied onto its MarkPaid writes, and Budget's
+// category rows are expense-only, so an income-categorised bill would put
+// spend in Budget's Spent against no category at all.
 //
 // Both write paths are asserted, not just Create: Update takes the category
 // as its own field and would otherwise be a second, open door to the same
@@ -441,12 +435,11 @@ func TestBillsRefuseAnIncomeCategoryOnBothWritePaths(t *testing.T) {
 	assertErrorResponse(t, patchRec, http.StatusUnprocessableEntity, "INVALID_CATEGORY")
 }
 
-// TestBillUpdateCurrencyMismatchNamesBothCurrencies is BillService.Update's
-// own doc comment realised on the wire: the service returns the bare
-// domain.ErrBillCurrencyImmutable sentinel deliberately, and "the message
-// naming both currencies is the HTTP layer's job, not this one's" -- so this
-// asserts the message actually names them, not merely that the status is
-// 422.
+// TestBillsUpdateCurrencyMismatchNamesBothCurrencies realises
+// BillService.Update's own doc comment on the wire: the service returns the
+// bare domain.ErrBillCurrencyImmutable sentinel because naming both
+// currencies is deliberately the HTTP layer's job, so this asserts the
+// message actually names them, not merely that the status is 422.
 func TestBillsUpdateCurrencyMismatchNamesBothCurrencies(t *testing.T) {
 	env := newTestEnv(t)
 	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
@@ -466,14 +459,13 @@ func TestBillsUpdateCurrencyMismatchNamesBothCurrencies(t *testing.T) {
 	}
 }
 
-// TestBillArchiveOmitsFromListRestoreUndoes mirrors
+// TestBillsArchiveOmitsFromListRestoreUndoes mirrors
 // TestCategoryArchiveOmitsFromListRestoreUndoes: the default list must stop
 // offering an archived bill, ?include_archived=true must keep showing it
-// with archivedAt set, and Restore must put it straight back in the default
-// list -- and every one of the three responses (archive, list, restore)
-// must itself carry a body, since SetArchived's own doc comment says it
-// returns the full record specifically so this handler never needs a second
-// Get to answer.
+// with archivedAt set, and Restore must put it straight back -- and each of
+// the three responses (archive, list, restore) must itself carry a body,
+// since SetArchived's own doc comment says it returns the full record so
+// this handler never needs a second Get.
 func TestBillsArchiveOmitsFromListRestoreUndoes(t *testing.T) {
 	env := newTestEnv(t)
 	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
@@ -538,11 +530,10 @@ func TestBillsArchiveOmitsFromListRestoreUndoes(t *testing.T) {
 	}
 }
 
-// TestBillCreateValidationErrors covers the per-field create guards: an
+// TestBillsCreateValidationErrors covers the per-field create guards: an
 // empty name, a non-positive amount, and a cadence this code did not
-// construct -- the same "arrives from a request body, refused the same way
-// a bad database column would be" rule ErrUnknownCadence's own comment in
-// domain/errors.go states.
+// construct -- the same fail-closed rule ErrUnknownCadence's own comment in
+// domain/errors.go states for a value arriving from a request body.
 func TestBillsCreateValidationErrors(t *testing.T) {
 	env := newTestEnv(t)
 	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
@@ -581,12 +572,11 @@ func TestBillsCreateValidationErrors(t *testing.T) {
 	}
 }
 
-// TestBillCreateForbiddenWhenAccountArchived is BillService.Create's own
-// "an archived pay-from account" refusal (domain.ErrForbidden), realised on
-// the wire with a message naming the reason -- MapDomainError's own generic
-// ErrForbidden case answers a bare 403 with no detail, so this proves
-// handleCreateBill intercepts the sentinel before that shared case ever
-// sees it.
+// TestBillsCreateForbiddenWhenAccountArchived realises BillService.Create's
+// own "archived pay-from account" refusal (domain.ErrForbidden) on the
+// wire, naming the reason -- MapDomainError's generic ErrForbidden case
+// answers a bare 403 with no detail, so this proves handleCreateBill
+// intercepts the sentinel first.
 func TestBillsCreateForbiddenWhenAccountArchived(t *testing.T) {
 	env := newTestEnv(t)
 	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
@@ -604,8 +594,8 @@ func TestBillsCreateForbiddenWhenAccountArchived(t *testing.T) {
 	assertErrorResponse(t, rec, http.StatusUnprocessableEntity, "ACCOUNT_ARCHIVED")
 }
 
-// TestBillCreatePayerFromAnotherHouseholdIsInvalidOwner confirms the brief's
-// item 5: domain.ErrAccountOwnerNotInHousehold is already mapped to 422
+// TestBillsCreatePayerFromAnotherHouseholdIsInvalidOwner confirms
+// domain.ErrAccountOwnerNotInHousehold is already mapped to 422
 // INVALID_OWNER by the shared switch in errors.go, and BillService.Create
 // returns it unchanged when paidByMembershipId names a membership this
 // household does not have -- nothing bill-specific needed to be added for
@@ -624,7 +614,7 @@ func TestBillsCreatePayerFromAnotherHouseholdIsInvalidOwner(t *testing.T) {
 	assertErrorResponse(t, rec, http.StatusUnprocessableEntity, "INVALID_OWNER")
 }
 
-// --- Task 10: pay and undo ----------------------------------------------
+// --- pay and undo ---------------------------------------------------------
 
 // billPaymentResponseBody mirrors bill_handlers.go's billPaymentResponse --
 // POST /bills/{id}/pay's whole body.
@@ -656,11 +646,11 @@ func (env *testEnv) mustPayBill(t *testing.T, session, csrf *http.Cookie, billID
 
 // TestBillsMarkPaidDefaultsAmountAdvancesNextDueAndAnswersPaymentAndBill is
 // the happy path: amountMinor omitted falls back to the bill's own stored
-// figure (the brief's own default), the response carries both halves the
-// brief promises ({"payment": ..., "bill": ...}), DueOn is the occurrence
-// that was due (not paidOn), and NextDue advances by one cadence period from
-// that due date -- the same rule TestMarkPaidAdvancesNextDueByTheCadenceFromTheDueDate
-// pins at the service layer, now proven to reach the wire.
+// figure, the response carries both halves ({"payment": ..., "bill": ...}),
+// DueOn is the occurrence that was due (not paidOn), and NextDue advances by
+// one cadence period from that due date -- the same rule
+// TestMarkPaidAdvancesNextDueByTheCadenceFromTheDueDate pins at the service
+// layer, now proven to reach the wire.
 func TestBillsMarkPaidDefaultsAmountAdvancesNextDueAndAnswersPaymentAndBill(t *testing.T) {
 	env := newTestEnv(t)
 	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
@@ -695,11 +685,11 @@ func TestBillsMarkPaidDefaultsAmountAdvancesNextDueAndAnswersPaymentAndBill(t *t
 	}
 }
 
-// TestBillsMarkPaidTwiceOnTheSameOccurrenceIsConflict is the brief's own
-// "paying an occurrence twice is 409". next_due always advances after a
-// successful pay, so the only way to present the SAME due_on twice through
-// the API is to pay, then PATCH nextDue back to the occurrence just paid --
-// UNIQUE (bill_id, due_on) is what refuses the second pay, exactly the
+// TestBillsMarkPaidTwiceOnTheSameOccurrenceIsConflict pins "paying an
+// occurrence twice is 409." next_due always advances after a successful
+// pay, so presenting the SAME due_on twice through the API means paying,
+// then patching nextDue back to the occurrence just paid -- UNIQUE
+// (bill_id, due_on) is what refuses the second pay, the
 // backstop-behind-a-race the design's own error table describes.
 func TestBillsMarkPaidTwiceOnTheSameOccurrenceIsConflict(t *testing.T) {
 	env := newTestEnv(t)
@@ -725,14 +715,11 @@ func TestBillsMarkPaidTwiceOnTheSameOccurrenceIsConflict(t *testing.T) {
 	assertErrorResponse(t, rec, http.StatusConflict, "ALREADY_EXISTS")
 }
 
-// TestBillsMarkPaidRejectsANonPositiveAmount is item 1 of the task's "two
-// things to get right": MarkPaid does not itself validate AmountMinor > 0
-// (unlike Create and Update), so without a guard a non-positive amount would
-// reach bill_payments' own CHECK (amount_minor > 0) as a raw constraint
-// violation and surface as a 500 -- not an acceptable answer to a bad
-// request body. The guard lives in BillService.MarkPaid (see the task
-// report for why), which is why this is a behaviour test here rather than a
-// handler-only one: it proves the whole path, not just a decode check.
+// TestBillsMarkPaidRejectsANonPositiveAmount pins BillService.MarkPaid's
+// own amount guard: without it, a non-positive amountMinor would reach
+// bill_payments' CHECK (amount_minor > 0) as a raw constraint violation
+// and surface as a 500. The guard lives in the service, not the handler,
+// so this is a behaviour test proving the whole path, not a decode check.
 func TestBillsMarkPaidRejectsANonPositiveAmount(t *testing.T) {
 	env := newTestEnv(t)
 	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
@@ -749,11 +736,11 @@ func TestBillsMarkPaidRejectsANonPositiveAmount(t *testing.T) {
 	}
 }
 
-// TestBillsMarkPaidRejectsAnUnparseablePaidOn is item 2 of the task's "two
-// things to get right": paidOn is a date from a request body, and must fail
-// closed -- an empty string (an omitted key round-trips as one, since
-// payBillRequest's own field is a plain string) or garbage both answer 422,
-// never a zero time silently written as the payment date.
+// TestBillsMarkPaidRejectsAnUnparseablePaidOn pins that paidOn, a date from
+// a request body, must fail closed: an empty string (an omitted key
+// round-trips as one, since payBillRequest's field is a plain string) or
+// garbage both answer 422, never a zero time silently written as the
+// payment date.
 func TestBillsMarkPaidRejectsAnUnparseablePaidOn(t *testing.T) {
 	env := newTestEnv(t)
 	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
@@ -779,26 +766,23 @@ func TestBillsMarkPaidRejectsAnUnparseablePaidOn(t *testing.T) {
 	}
 }
 
-// TestBillsMarkPaidInAnotherHouseholdIsNotFound is the brief's own "paying a
-// bill in another household is 404". zeroUUID stands in for "a bill in
-// another household" -- the goals_api_test.go/budget_api_test.go convention
-// (this suite has no second-household fixture to build a real
-// cross-household id from), valid here because BillRepository.Get's own
-// contract makes the two indistinguishable: both simply match no row scoped
-// to this household.
+// TestBillsMarkPaidInAnotherHouseholdIsNotFound pins "paying a bill in
+// another household is 404." zeroUUID stands in for "a bill in another
+// household" -- this suite has no second-household fixture to build a real
+// cross-household id from, so it relies on BillRepository.Get's contract
+// that an unknown id and a cross-household id are indistinguishable: both
+// simply match no row scoped to this household.
 //
-// Both the amount-supplied and amount-omitted paths are covered: the first
-// reaches MarkPaid's own Bills.Get, the second reaches the handler's own
-// default-amount lookup first -- two different code paths that must both
-// answer the same 404.
+// Both the amount-supplied and amount-omitted paths are covered: they reach
+// different code (MarkPaid's own Bills.Get vs. the handler's own
+// default-amount lookup first) but must both answer the same 404.
 //
 // The message is checked, not just the code: chi's own route-not-found
-// catch-all (router.go's r.NotFound) answers the identical {404,
-// "NOT_FOUND"} CODE a real refusal would, with a different MESSAGE ("That
-// endpoint does not exist." vs "That could not be found.") -- exactly the
-// hazard TestBillsRoutesRequireMoneyAndOwner's own comment names, and
-// without this check a route that was never wired at all would pass this
-// test for the wrong reason.
+// catch-all answers the identical {404, "NOT_FOUND"} code with a different
+// message ("That endpoint does not exist." vs "That could not be found.")
+// -- the same hazard TestBillsRoutesRequireMoneyAndOwner's comment names --
+// so a route that was never wired at all would otherwise pass for the
+// wrong reason.
 func TestBillsMarkPaidInAnotherHouseholdIsNotFound(t *testing.T) {
 	env := newTestEnv(t)
 	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
@@ -824,12 +808,12 @@ func TestBillsMarkPaidInAnotherHouseholdIsNotFound(t *testing.T) {
 	}
 }
 
-// TestBillsMarkPaidRefusesAnArchivedPayFromAccountWithNamedMessage is the
-// design's own "Paying from an archived account | 422, naming the account"
-// row: MarkPaid's domain.ErrForbidden used to fall through to
-// MapDomainError's generic, contextless 403 -- this pins the fix
-// (writeMarkPaidError) at the wire, the same "assert the message, not just
-// the status" hardening the two NOT_FOUND tests above already needed.
+// TestBillsMarkPaidRefusesAnArchivedPayFromAccountWithNamedMessage pins the
+// design's "Paying from an archived account | 422, naming the account" row:
+// without writeMarkPaidError, MarkPaid's domain.ErrForbidden falls through
+// to MapDomainError's generic, contextless 403 -- the same "assert the
+// message, not just the status" hardening the two NOT_FOUND tests above
+// needed.
 func TestBillsMarkPaidRefusesAnArchivedPayFromAccountWithNamedMessage(t *testing.T) {
 	env := newTestEnv(t)
 	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
@@ -852,10 +836,10 @@ func TestBillsMarkPaidRefusesAnArchivedPayFromAccountWithNamedMessage(t *testing
 	}
 }
 
-// TestBillsMarkPaidRefusesASettledOneOffWithNamedMessage is the design's
-// own "Paying a settled one-off | 422" row: a one-off bill's first pay
-// settles it (NextDue -> nil), and a second pay attempt used to answer the
-// same generic 403 the archived-account case did.
+// TestBillsMarkPaidRefusesASettledOneOffWithNamedMessage pins the design's
+// "Paying a settled one-off | 422" row: a one-off bill's first pay settles
+// it (NextDue -> nil); a second pay attempt answers its own named 422, not
+// the generic 403 -- the same guard the archived-account case has.
 func TestBillsMarkPaidRefusesASettledOneOffWithNamedMessage(t *testing.T) {
 	env := newTestEnv(t)
 	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
@@ -879,12 +863,11 @@ func TestBillsMarkPaidRefusesASettledOneOffWithNamedMessage(t *testing.T) {
 	}
 }
 
-// TestBillsMarkPaidRefusesAnArchivedBillWithARestoreMessage is the row the
-// design's own table has none for -- paying an archived bill -- ruled on
-// specifically for this task: named, not a bare 403, and framed as
-// Archive/Restore (the household's own reversible act) rather than a
-// permission failure, the same framing every other archived-thing message
-// in this product uses.
+// TestBillsMarkPaidRefusesAnArchivedBillWithARestoreMessage pins the row
+// the design's table has none for -- paying an archived bill -- ruled here
+// as named, not a bare 403, and framed as Archive/Restore (the household's
+// own reversible act) rather than a permission failure, the same framing
+// every other archived-thing message in this product uses.
 func TestBillsMarkPaidRefusesAnArchivedBillWithARestoreMessage(t *testing.T) {
 	env := newTestEnv(t)
 	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
@@ -908,10 +891,10 @@ func TestBillsMarkPaidRefusesAnArchivedBillWithARestoreMessage(t *testing.T) {
 }
 
 // TestBillsUndoDeletesThePaymentRewindsNextDueAndAnswers204WithNoBody proves
-// step 7's own self-review question directly: the DELETE response really
-// carries zero bytes (not merely status 204), and undoing genuinely rewinds
-// next_due back to the undone payment's own due date -- the same
-// TestUndoReversesAllThreeWrites assertion, now proven to reach the wire.
+// the DELETE response really carries zero bytes (not merely status 204),
+// and undoing genuinely rewinds next_due back to the undone payment's own
+// due date -- the same TestUndoReversesAllThreeWrites assertion, now proven
+// to reach the wire.
 func TestBillsUndoDeletesThePaymentRewindsNextDueAndAnswers204WithNoBody(t *testing.T) {
 	env := newTestEnv(t)
 	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
@@ -950,14 +933,13 @@ func TestBillsUndoDeletesThePaymentRewindsNextDueAndAnswers204WithNoBody(t *test
 	}
 }
 
-// TestBillsUndoRefusesAnOlderPaymentNamingTheUndoable is the brief's own
-// "undoing an older payment is 409 naming the payment that can be undone" --
-// the design's identical wording, appearing three times in its own spec.
-// The repository already knows which due date WOULD be accepted (it
-// computes MAX(due_on) to decide THIS one wasn't it); this proves that fact
+// TestBillsUndoRefusesAnOlderPaymentNamingTheUndoable pins "undoing an
+// older payment is 409 naming the payment that can be undone." The
+// repository already knows which due date WOULD be accepted -- it computes
+// MAX(due_on) to decide this one wasn't it -- and this proves that fact
 // reaches the wire as BILL_PAYMENT_NOT_LATEST, both in the message and in
-// details.undoableDueOn -- Task 14's frontend needs the latter to read
-// without parsing prose out of the former.
+// details.undoableDueOn, which the frontend needs to read without parsing
+// prose out of the message.
 func TestBillsUndoRefusesAnOlderPaymentNamingTheUndoable(t *testing.T) {
 	env := newTestEnv(t)
 	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
@@ -986,13 +968,13 @@ func TestBillsUndoRefusesAnOlderPaymentNamingTheUndoable(t *testing.T) {
 	}
 }
 
-// TestBillsUndoInAnotherHouseholdIsNotFound is TestBillsMarkPaidInAnotherHouseholdIsNotFound's
-// undo-side mirror, and the identical GoalRepository/BillRepository
-// household-scoping contract handleDeleteGoalContribution's own comment
-// states for contributions: a payment id from another household is not
-// found, not forbidden. The message check is the same defence against
-// chi's own route-not-found catch-all -- see the pay-side test's own
-// comment.
+// TestBillsUndoInAnotherHouseholdIsNotFound is
+// TestBillsMarkPaidInAnotherHouseholdIsNotFound's undo-side mirror: the
+// identical GoalRepository/BillRepository household-scoping contract
+// handleDeleteGoalContribution's comment states for contributions -- a
+// payment id from another household is not found, not forbidden. The
+// message check guards the same chi route-not-found hazard as the pay-side
+// test.
 func TestBillsUndoInAnotherHouseholdIsNotFound(t *testing.T) {
 	env := newTestEnv(t)
 	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
@@ -1008,14 +990,13 @@ func TestBillsUndoInAnotherHouseholdIsNotFound(t *testing.T) {
 	}
 }
 
-// --- Part 2/3: Update's archived-account gap ----------------------------
+// --- Update's archived-account check --------------------------------------
 
-// TestBillsUpdatePayFromArchivedAccountAnswersNamedMessageNot403 is Part 3's
-// own required test: once Part 2 closes Update's archived-account gap
-// (bill.go's own comment on why Create and Update must agree), its
-// domain.ErrForbidden must reach the SAME named 422 ACCOUNT_ARCHIVED message
-// Create already gives -- via writeBillWriteError, now shared by both
-// callers -- not MapDomainError's generic, contextless 403.
+// TestBillsUpdatePayFromArchivedAccountAnswersNamedMessageNot403 pins that
+// Update's archived-account check (bill.go's own comment on why Create and
+// Update must agree) reaches the SAME named 422 ACCOUNT_ARCHIVED message
+// Create gives -- via writeBillWriteError, shared by both callers -- not
+// MapDomainError's generic, contextless 403.
 //
 // secondAccount is created in the SAME currency as the bill (SGD, via
 // mustCreateAccountID both times): a currency mismatch would answer

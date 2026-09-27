@@ -7,10 +7,10 @@ import (
 	"text/tabwriter"
 )
 
-// route is one line of the manual `routes` prints. guard says who may call
-// it in the server's own vocabulary: session (any signed-in member), owner,
-// money / marriage (the capability), csrf (a write; the CLI adds the header
-// itself). body is the request shape, or "-" for none.
+// route is one line the `routes` command prints. guard is who may call it,
+// in the server's vocabulary: session (any signed-in member), owner, money
+// / marriage (a capability), or csrf (a write; the CLI adds that header).
+// body is the request shape, or "-" for none.
 type route struct {
 	method, path, guard, body string
 }
@@ -25,10 +25,10 @@ type routeJSON struct {
 	Body   string `json:"body"`
 }
 
-// routeTable is hand-maintained and checked by routes_test.go against
-// internal/adapter/http/router.go: every path here must exist there, so a
-// route that is renamed or removed fails the build rather than misleading
-// the agent that reads this. Add a line when a route is added.
+// routeTable is hand-maintained and checked against
+// internal/adapter/http/router.go by routes_test.go, so a route that is
+// renamed or removed fails the build instead of misleading the agent that
+// reads this. Add a line here when a route is added.
 var routeTable = []route{
 	{"POST", "/auth/sign-in", "public", `{"email","password"}`},
 	{"POST", "/auth/sign-out", "session+csrf", "-"},
@@ -87,10 +87,10 @@ var routeTable = []route{
 	{"POST", "/goals/{id}/contributions", "money+owner+csrf", `{"amountMinor","occurredOn","note"?,"currency"?}`},
 	{"DELETE", "/goals/{id}/contributions/{contributionId}", "money+owner+csrf", "-"},
 
-	// Holdings: the portfolio. Quantities cross as strings ("300.5"), never as
-	// nano integers to be divided in a browser; amounts are minor units like
-	// every other money field. A valuation POSTs but upserts -- one price per
-	// holding per day -- and answers 200 rather than 201 for that reason.
+	// Holdings: the portfolio. Quantities cross as strings ("300.5"), not
+	// nano integers to divide in a browser; amounts are minor units like
+	// every other money field. A valuation POSTs but upserts -- one price
+	// per holding per day -- so it answers 200, not 201.
 	{"GET", "/holdings", "money+owner", "-"},
 	{"GET", "/holdings/report", "money+owner", `?kind=quarter|half|year&count=N (default 6|4|3, max 12)`},
 	{"POST", "/holdings", "money+owner+csrf", `{"accountId","name","instrument","unit","currency"?}`},
@@ -133,11 +133,10 @@ var routeTable = []route{
 	{"POST", "/marriage/agreements/proposals/{id}/withdraw", "marriage+owner+csrf", "-"},
 }
 
-// cmdRoutes prints the table. It is a manual for whoever drives the CLI,
-// human or agent, and the one place the whole API can be read at a glance
-// without opening router.go. Body shapes marked `?` are optional; `{...}`
-// means "see the handler" -- the shape is bigger than fits on a line, and
-// `hearthctl api` passes any JSON through untouched.
+// cmdRoutes prints the table: a manual for whoever drives the CLI, human or
+// agent, and the one place to read the whole API without opening router.go.
+// `?` marks an optional field; `{...}` means "see the handler" (the shape
+// doesn't fit on a line) -- `hearthctl api` passes any JSON through as-is.
 func cmdRoutes(args []string, stdout io.Writer) error {
 	if len(args) == 1 && args[0] == "--json" {
 		out := make([]routeJSON, 0, len(routeTable))

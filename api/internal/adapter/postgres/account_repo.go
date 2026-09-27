@@ -159,14 +159,13 @@ func optionalID(id string) *string {
 	return &id
 }
 
-// toAccount maps an accounts row into the domain type. Every account query
-// either returns sqlcgen.Account itself (the RETURNING queries) or carries one
-// through sqlc.embed(a) (the view queries), so this mapping exists once.
+// toAccount maps an accounts row into domain.Account. Every account query
+// returns sqlcgen.Account, directly or via sqlc.embed(a), so this mapping
+// exists once.
 //
-// type goes through domain.ParseAccountType. accounts.type has a CHECK, but a
-// value this code did not construct is refused here rather than carried up --
-// the rule toCategory and toBill follow -- because AccountService's type
-// rules (which types may hold holdings, count toward net worth) branch on it.
+// Type parses through domain.ParseAccountType and fails closed on a bad
+// value rather than carrying it up -- the same rule toCategory and toBill
+// follow, since AccountService branches on type for holdings and net worth.
 func toAccount(a sqlcgen.Account) (domain.Account, error) {
 	accountType, err := domain.ParseAccountType(a.Type)
 	if err != nil {
@@ -196,16 +195,12 @@ func optionalIDToString(u pgtype.UUID) string {
 	return uuidToString(u)
 }
 
-// buildView is where AccountView.Balance is decided. It is the opening
-// balance plus every transaction dated on or after opening_balance_as_of,
-// summed in SQL -- see the balance_minor column in queries/account.sql for
-// why the comparison is >= (start-of-day rule) and why the incoming side
-// prefers received_amount_minor.
-//
-// The currency is the account's own. Every transaction on an account is
-// denominated in that account's currency, so nothing here converts, and a
-// mixed-currency household's accounts each stay in their own unit until
-// AccountService.Summary converts them.
+// buildView decides AccountView.Balance: opening balance plus every
+// transaction on or after opening_balance_as_of, summed in SQL in the
+// account's own currency (every transaction on it shares that currency, so
+// nothing here converts). See balance_minor in queries/account.sql for the
+// >= rule and why incoming prefers received_amount_minor; mixed-currency
+// households convert only in AccountService.Summary.
 func buildView(a domain.Account, ownerName *string, balanceMinor int64) usecase.AccountView {
 	return usecase.AccountView{
 		Account:   a,
@@ -217,8 +212,8 @@ func buildView(a domain.Account, ownerName *string, balanceMinor int64) usecase.
 // toAccountView is the one converter for ListAccounts,
 // ListAccountsIncludingArchived and GetAccount. sqlc generates a distinct row
 // type for each, but all three select sqlc.embed(a) plus the same owner name
-// and balance, so each call site passes those three fields and nothing is
-// copied column by column.
+// and balance, so passing those three fields is enough -- no column-by-column
+// copy.
 func toAccountView(a sqlcgen.Account, ownerName *string, balanceMinor int64) (usecase.AccountView, error) {
 	account, err := toAccount(a)
 	if err != nil {

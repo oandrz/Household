@@ -1,8 +1,7 @@
--- The operator's read-only view across every household. Nothing here
--- writes. "When was this session last used" is COALESCE(last_seen_at,
--- created_at) -- a session from before migration 00013, or one never
--- touched, counts from its creation -- and that expression appears only in
--- this file so it cannot drift.
+-- The operator's read-only view across every household. "When was this
+-- session last used" is COALESCE(last_seen_at, created_at) -- a session
+-- from before migration 00013, or one never touched, counts from its
+-- creation -- and the expression lives only here so it cannot drift.
 
 -- name: CountHouseholds :one
 SELECT COUNT(*) FROM households;
@@ -16,12 +15,12 @@ WHERE EXISTS (
 );
 
 -- name: CountSignupsSinceForAdmin :one
--- Named ...ForAdmin (unlike the other Count* queries here) because
--- queries/signup.sql already has a CountSignupsSince -- a single-column
--- count used for per-address rate limiting -- and sqlc rejects a duplicate
--- query name across files even though the shapes differ.
--- Both channels: the table's own CHECK guarantees exactly one of email or
--- telegram_chat_id is set, so a plain count is a count of sign-ups.
+-- Named ...ForAdmin, unlike this file's other Count* queries, because
+-- queries/signup.sql already has a narrower CountSignupsSince (a
+-- per-address rate-limit count) and sqlc rejects duplicate query names
+-- across files even when the shapes differ. The signups CHECK constraint
+-- guarantees exactly one of email or telegram_chat_id is set, so a plain
+-- count here covers both channels.
 SELECT
     COUNT(*)::bigint AS requested,
     COUNT(*) FILTER (WHERE consumed_at IS NOT NULL)::bigint AS completed
@@ -32,19 +31,17 @@ WHERE created_at >= $1;
 SELECT COUNT(*) FROM invites WHERE accepted_at IS NULL AND expires_at > $1;
 
 -- name: SearchHouseholds :many
--- pattern is the caller-escaped '%q%' (see likePattern in the repo);
--- has_query is false for an empty search, which must return every
--- household and name no matched member. The first LATERAL join finds the
--- id of the first member (by joined_at) whose name or email matched, so a
--- row can say why it appeared when the household itself did not match --
--- its id alone is selected there, never its display_name/email, because
--- sqlc's nullability analysis for a LEFT JOIN onto a derived subquery
--- (LATERAL or not -- sqlc-dev/sqlc#3667) does not mark a NOT NULL source
--- column nullable, and a match_name generated as plain string then fails at
--- scan time with "cannot scan NULL into *string" on every row with no
--- match. The second, plain `LEFT JOIN users mu` fetches that member's name
--- and email; a LEFT JOIN straight onto a real table is the pattern
--- GetTransaction's paid_by_name already relies on and sqlc infers correctly.
+-- pattern is the caller-escaped '%q%' (see likePattern); has_query false
+-- (empty search) returns every household with no member named as a match.
+--
+-- The LATERAL join finds the first matching member's id (by joined_at), so
+-- a row can say why it appeared when the household itself did not match,
+-- and selects only that id, never display_name/email: sqlc's nullability
+-- analysis for a LEFT JOIN onto a derived subquery doesn't mark a NOT NULL
+-- source column nullable (sqlc-dev/sqlc#3667), so a plain-string match_name
+-- would fail to scan NULL on every non-matching row. The plain `LEFT JOIN
+-- users mu` fetches that member's name and email instead -- the same
+-- pattern GetTransaction's paid_by_name uses, which sqlc infers correctly.
 SELECT
     h.id,
     h.name,

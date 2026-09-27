@@ -8,10 +8,6 @@ import (
 	"github.com/andreasoentoro/hearth/api/internal/domain"
 )
 
-// NewMoney's currency check now delegates to domain.ParseCurrency, the single
-// membership check against the active ISO 4217 list, rather than the old
-// structural check of "three uppercase letters". A currency string with the
-// wrong number of letters is still rejected regardless of case.
 func TestNewMoneyRejectsWrongLengthCurrencyStrings(t *testing.T) {
 	if _, err := domain.NewMoney(100, "SG"); err == nil {
 		t.Fatal("expected a two-letter currency to be rejected")
@@ -21,10 +17,8 @@ func TestNewMoneyRejectsWrongLengthCurrencyStrings(t *testing.T) {
 	}
 }
 
-// NewMoney now normalises a lowercase code through ParseCurrency instead of
-// rejecting it -- it used to require the caller to have already uppercased
-// the string, which sign-up's stranger-supplied input cannot be trusted to
-// have done.
+// Don't require the caller to have already uppercased the currency string --
+// sign-up passes through a stranger's raw input.
 func TestNewMoneyNormalisesLowercaseCurrency(t *testing.T) {
 	m, err := domain.NewMoney(100, "sgd")
 	if err != nil {
@@ -35,13 +29,9 @@ func TestNewMoneyNormalisesLowercaseCurrency(t *testing.T) {
 	}
 }
 
-// NewMoney now validates against the active ISO 4217 list via ParseCurrency,
-// rather than accepting any three uppercase letters. This used to be named
-// TestNewMoneyAcceptsAnyWellFormedCode and asserted the opposite of this,
-// using "QQQ" as its exemplar of a well-formed but nonexistent code. ZZZ is
-// three uppercase letters, which is all NewMoney used to check, and it is not
-// an ISO 4217 code -- sign-up is the first place a stranger picks this value,
-// so it must be refused.
+// ZZZ is well-formed (three uppercase letters) but not a real ISO 4217 code.
+// Don't accept it: sign-up is the first place a stranger picks this value, so
+// a well-formed-but-invalid code must be refused.
 func TestNewMoneyRejectsAWellFormedNonCurrency(t *testing.T) {
 	if _, err := domain.NewMoney(100, "ZZZ"); !errors.Is(err, domain.ErrInvalidMoney) {
 		t.Fatalf("NewMoney(ZZZ) error = %v, want ErrInvalidMoney", err)
@@ -84,10 +74,10 @@ func TestStringPrefixesOrdinaryNegativeAmountsWithAMinus(t *testing.T) {
 	}
 }
 
-// TestStringHandlesTheMostNegativeInt64 guards against a specific two's
-// complement trap: negating math.MinInt64 returns itself, so any
-// implementation of String() that negates m.Amount directly corrupts the
-// output for this one value instead of panicking or erroring.
+// TestStringHandlesTheMostNegativeInt64 guards the two's-complement trap:
+// negating math.MinInt64 returns itself, so an implementation that negates
+// m.Amount directly corrupts the output for this one value instead of
+// erroring.
 func TestStringHandlesTheMostNegativeInt64(t *testing.T) {
 	m, _ := domain.NewMoney(math.MinInt64, "SGD")
 	want := "-SGD 92233720368547758.08"

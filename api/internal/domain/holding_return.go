@@ -5,10 +5,9 @@ import (
 	"time"
 )
 
-// BlankReason says why a figure the report would normally show is absent. It
-// is never "we computed zero" -- zero is a claim about the household's money,
-// and the truth in these cases is that the figure cannot be known. The net
-// worth card blanks the same way and for the same reason.
+// BlankReason says why a figure the report would normally show is absent --
+// never "we computed zero": the truth is the figure can't be known, the same
+// reason the net worth card blanks.
 type BlankReason string
 
 const (
@@ -16,30 +15,23 @@ const (
 	ReasonNoClosingPrice BlankReason = "no_closing_price"
 )
 
-// ReturnComponent is one figure in both currencies at once: the holding's own,
-// and the household's. They are separate numbers rather than one converted
-// into the other -- a US stock flat in USD while SGD strengthened made the
-// household poorer, and only the primary figure says so.
+// ReturnComponent holds one figure in both currencies, kept separate rather
+// than converted -- a US stock flat in USD while SGD strengthened still made
+// the household poorer, which only the primary figure shows.
 type ReturnComponent struct {
 	Native  Money
 	Primary Money
 }
 
 // PeriodReturn is what one holding earned over one period, split the three
-// ways the PRD pins.
-//
-// Unrealised and Total are pointers because they are the two that can be
-// unknowable: both need a market price at each end of the period that the
-// household was still holding through. When they are nil, Reason says which
-// price was missing.
-//
-// Realised, Income and Fees are never nil. They are computed from amounts that
-// actually changed hands, so no price is involved and a missing valuation
-// cannot take them away. A quarter where the owner sold at a profit and forgot
-// to record a price is not an unknowable quarter.
-//
-// Fees are POSITIVE and already subtracted inside Total. They are reported
-// separately so a screen can show what was charged rather than only its effect.
+// ways the PRD pins. Unrealised and Total are pointers: the two figures that
+// can be unknowable, since each needs a market price at every end of the
+// period the household was still holding through; Reason says which price was
+// missing when they're nil. Realised, Income and Fees are never nil --
+// computed from amounts that actually changed hands, so no missing valuation
+// can take them away. Fees are POSITIVE and already subtracted inside Total,
+// reported separately so a screen shows what was charged, not just its
+// effect.
 type PeriodReturn struct {
 	Period     Period
 	Unrealised *ReturnComponent
@@ -49,36 +41,26 @@ type PeriodReturn struct {
 	Total      *ReturnComponent
 	Reason     BlankReason
 
-	// The day each end was measured at, so a screen can show how old the
-	// figure is. The PRD's top product risk is valuations quietly going
-	// stale, and an age nobody can see is how that goes unnoticed.
-	//
-	// Nil means no price was used at that end -- which happens when nothing
-	// was held there, since nothing is worth nothing without asking anybody.
-	// A date there would claim a measurement nobody made.
+	// The day each end was measured at, so a screen can show how old the figure
+	// is -- valuations quietly going stale is the PRD's top risk, and an
+	// invisible age is how that's missed. Nil means no price was used at that
+	// end, since nothing was held there -- nothing is worth nothing without
+	// asking anybody, and a date there would claim a measurement nobody made.
 	OpeningPriceAsOf *time.Time
 	ClosingPriceAsOf *time.Time
 }
 
-// ReturnOver computes what this holding earned over one period.
-//
-// The shape is cost-carried: each end of the period is measured as (market
-// value - cost of what is held), and the period's unrealised figure is the
-// difference between the two ends. That is what makes the PRD's most important
-// rule -- "buying more must never read as profit" -- true by construction: a
-// purchase adds the same amount to both sides, so it moves the figure by
-// exactly zero. There is no net-contributions term to forget.
-//
-// It also gets the PRD's two mid-period rules for free. A holding bought
-// inside the period held nothing at the start, so the opening term is zero and
-// the figure is its gain since acquisition. A holding sold inside the period
-// holds nothing at the end, so the gain it carried in is removed from
-// unrealised at the same moment realised picks it up, and the two do not
-// double-count.
-//
-// events, income and prices are this HOLDING's rows, in any order. Passing
-// another holding's rows would produce a wrong answer quietly, so callers group
-// first -- see usecase.HoldingService.Report.
+// ReturnOver computes what this holding earned over one period, on a
+// cost-carried shape: each end is (market value - cost of what is held), and
+// unrealised is the difference between the two -- which makes the PRD's core
+// rule, "buying more must never read as profit", true by construction, since a
+// purchase adds equally to both sides. It also gets two mid-period rules for
+// free: a holding bought inside the period held nothing at the start, so the
+// figure is its gain since acquisition; one sold inside it holds nothing at
+// the end, so the carried-in gain moves from unrealised to realised at that
+// moment without double-counting. events, income and prices must be this
+// HOLDING's rows, in any order -- another holding's rows would give a silently
+// wrong answer, so callers group first (see usecase.HoldingService.Report).
 func (h Holding) ReturnOver(
 	period Period,
 	events []HoldingEvent,
@@ -89,10 +71,10 @@ func (h Holding) ReturnOver(
 	zeroNative := Money{Amount: 0, Currency: h.Currency}
 	zeroPrimary := Money{Amount: 0, Currency: primaryCurrency}
 
-	// Both ends are folded from the BEGINNING of the holding's life, not from
-	// the period boundary. Average cost depends on every event before the
-	// window, so a fold that started at the boundary would price a sale off
-	// the wrong basis -- silently, and only for holdings bought earlier.
+	// Both ends are folded from the BEGINNING of the holding's life, not the
+	// period boundary: average cost depends on every event before the window, so
+	// starting there would price a sale off the wrong basis, silently, for
+	// holdings bought earlier.
 	open, err := h.Position(eventsBefore(events, period.Start()), primaryCurrency)
 	if err != nil {
 		return PeriodReturn{}, err
@@ -133,10 +115,9 @@ func (h Holding) ReturnOver(
 		return out, nil
 	}
 	out.ClosingPriceAsOf = closedAt
-	// A period's opening value is the preceding period's closing value, so the
-	// opening price has to have been recorded in that preceding period. A
-	// March price is not what June was worth: computing from it would be the
-	// stale-data failure the PRD names as its top product risk.
+	// A period opens at the preceding period's closing value, so the opening
+	// price must come from that period -- a March price isn't what June was
+	// worth, and using it would be the PRD's top-risk stale-data failure.
 	previous, err := period.Previous()
 	if err != nil {
 		return PeriodReturn{}, err
@@ -180,16 +161,13 @@ func (h Holding) ReturnOver(
 	return out, nil
 }
 
-// valueAtClose is what `held` was worth at the end of `window`, using the
-// latest price recorded INSIDE that window.
-//
-// The second return is false when no usable price exists, which is what blanks
-// the figure rather than producing a zero. Holding nothing is the exception:
-// nothing is worth nothing, provably, and demanding a price for it would blank
-// every holding bought mid-period -- the most common case there is.
-// The third return is the day of the price that was used, which the caller
-// reports so the owner can see how old the figure is. It is nil when nothing
-// was held and therefore no price was consulted.
+// valueAtClose is what `held` was worth at the end of `window`, at the latest
+// price recorded inside it. The second return is false when no usable price
+// exists, blanking the figure rather than showing a zero -- except when
+// nothing is held, since nothing is worth nothing, and demanding a price there
+// would blank every mid-period purchase, the most common case. The third
+// return is the price's date, so the caller can show how stale the figure is;
+// nil when nothing was held.
 func valueAtClose(held Quantity, prices []Valuation, window Period, zeroNative, zeroPrimary Money) (ReturnComponent, *time.Time, bool, error) {
 	if held.Nano() == 0 {
 		return ReturnComponent{Native: zeroNative, Primary: zeroPrimary}, nil, true, nil
@@ -210,14 +188,12 @@ func valueAtClose(held Quantity, prices []Valuation, window Period, zeroNative, 
 	return ReturnComponent{Native: native, Primary: primary}, &asOf, true, nil
 }
 
-// latestPriceIn is the newest valuation dated inside the window -- never one
-// dated after it. A price recorded after a quarter closed is information that
-// quarter did not have, and letting it serve would mean typing today's price
-// silently rewrites an answer somebody has already read.
-//
-// Two prices cannot share a day: (holding_id, as_of) is UNIQUE and a second
-// entry for a day is an update, not a second opinion. A strict comparison
-// therefore keeps the first of any pair that somehow does.
+// latestPriceIn is the newest valuation dated inside the window, never one
+// dated after it -- a price recorded after a quarter closed is information
+// that quarter didn't have, and letting it serve would mean typing today's
+// price silently rewrites an answer someone has already read. Two prices can't
+// share a day ((holding_id, as_of) is UNIQUE), so a strict comparison keeps
+// the first of any pair that somehow does.
 func latestPriceIn(prices []Valuation, window Period) (Valuation, bool) {
 	var newest Valuation
 	found := false

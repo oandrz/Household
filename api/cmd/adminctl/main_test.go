@@ -35,12 +35,10 @@ func TestRequireLocalDatabase(t *testing.T) {
 	}
 }
 
-// TestRunRefusesToSeedARemoteDatabaseBeforeConnecting proves both of seed's
-// guards run before postgres.Open ever attempts to reach the database, not
-// after: DATABASE_URL here points at a non-routable address, so if the
-// guard ran after Open (or not at all), this would hang for Open's 5-second
-// ping timeout, or longer, waiting on a connection that can never succeed.
-// Returning well under that proves run refused before ever dialing out.
+// TestRunRefusesToSeedARemoteDatabaseBeforeConnecting: DATABASE_URL points at
+// a non-routable address, so if a guard ran after postgres.Open (or not at
+// all), this would hang for Open's ~5s ping timeout instead of returning
+// immediately -- proving both guards run before Open ever dials out.
 func TestRunRefusesToSeedARemoteDatabaseBeforeConnecting(t *testing.T) {
 	t.Setenv("APP_ENV", "development")
 	t.Setenv("DATABASE_URL", "postgres://hearth:hearth@10.255.255.1:5432/hearth?sslmode=disable")
@@ -68,9 +66,9 @@ func TestRunRefusesToSeedARemoteDatabaseBeforeConnecting(t *testing.T) {
 }
 
 // TestRunRefusesToSeedOutsideDevelopmentBeforeConnecting is the same proof
-// for the environment guard: APP_ENV=production must refuse before Open is
-// ever called, even though DATABASE_URL here is otherwise a recognised local
-// host and would pass requireLocalDatabase on its own.
+// for the environment guard: DATABASE_URL is the same non-routable address,
+// so a guard running after postgres.Open would hang. The message check pins
+// that APP_ENV refused, not requireLocalDatabase.
 func TestRunRefusesToSeedOutsideDevelopmentBeforeConnecting(t *testing.T) {
 	t.Setenv("APP_ENV", "production")
 	t.Setenv("DATABASE_URL", "postgres://hearth:hearth@10.255.255.1:5432/hearth?sslmode=disable")
@@ -96,14 +94,11 @@ func TestRunRefusesToSeedOutsideDevelopmentBeforeConnecting(t *testing.T) {
 	}
 }
 
-// TestRunPruneRefusesAWindowUnderTheFloor proves the seven-day floor is
-// enforced before any repository is ever touched: signups, attempts and
-// telegramLinks are all nil here, so a Prune call reaching any of them would
-// panic on a nil pointer dereference rather than merely delete the wrong
-// rows. The floor exists because domain.LockoutPolicy.Window is 15 minutes --
-// deleting a login_attempts row still inside that window would clear a live
-// lockout, turning a cleanup command into a way to unlock a household
-// somebody is actively guessing at.
+// TestRunPruneRefusesAWindowUnderTheFloor: repositories are all nil here, so
+// if the floor check did not run first, a Prune call reaching any of them
+// would panic rather than merely delete the wrong rows -- proving the floor
+// is enforced before any repository is touched. See pruneFloor for why the
+// floor is seven days.
 func TestRunPruneRefusesAWindowUnderTheFloor(t *testing.T) {
 	err := runPrune(context.Background(), nil, nil, nil, 3*24*time.Hour)
 	if err == nil {

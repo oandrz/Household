@@ -6,10 +6,9 @@ import (
 	"testing"
 )
 
-// The wire field names here are the ones the handlers decode. If a handler
-// renames a field, this test and the handler's own request struct disagree
-// -- which is the point: the CLI must not silently post a key the server
-// ignores.
+// The wire field names here are the ones the handlers decode, so a renamed
+// field breaks this test rather than the CLI silently posting a key the
+// server ignores.
 func TestTypedInsertsBuildTheExactWireBody(t *testing.T) {
 	cases := []struct {
 		kind string

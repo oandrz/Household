@@ -15,8 +15,7 @@ import (
 	"github.com/andreasoentoro/hearth/api/internal/usecase"
 )
 
-// Pending invites: docs/superpowers/specs/2026-09-19-hearth-partner-invite-lobby-design.md,
-// milestone 1.
+// Pending invites: docs/superpowers/specs/2026-09-19-hearth-partner-invite-lobby-design.md.
 
 type pendingInviteBody struct {
 	ID           string    `json:"id"`
@@ -27,7 +26,7 @@ type pendingInviteBody struct {
 	ExpiresAt    time.Time `json:"expiresAt"`
 }
 
-// mustInviteOwner exercises the email channel, which this task hides behind
+// mustInviteOwner exercises the email channel, hidden behind
 // FlagEmailInvites -- every caller of this helper is testing the pending-
 // invite mechanics (list, withdraw, expiry), not the flag itself, so the
 // flag is turned on here rather than in each of those tests.
@@ -131,7 +130,7 @@ func TestALimitedMemberCannotWithdrawAnInvite(t *testing.T) {
 }
 
 // Reading shows no secret, so a token may list. Withdrawing changes who may
-// join, so a token may not (spec decision 12, the reason behind ADR 7 rule 2).
+// join, so a token may not (ADR 7 rule 2).
 func TestATokenCanListPendingInvitesButNotWithdrawThem(t *testing.T) {
 	env := newTestEnv(t)
 	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
@@ -211,11 +210,10 @@ func TestWithdrawingAnUnknownInviteIs404(t *testing.T) {
 
 // A personal API token is a headless credential. It must not be able to
 // change who can get into the household: minting a co-owner, demoting the
-// other owner, or removing them are all browser-session actions (spec
-// decision 12, the reason behind ADR 7 rule 2). Milestone 1 put this guard
-// on withdraw only -- see TestATokenCanListPendingInvitesButNotWithdrawThem
-// above; this is its sibling for the other three routes that manage
-// household membership.
+// other owner, or removing them are all browser-session actions (ADR 7
+// rule 2). This is the sibling of
+// TestATokenCanListPendingInvitesButNotWithdrawThem, covering the other
+// three routes that manage household membership.
 func TestATokenCannotChangeWhoIsInTheHousehold(t *testing.T) {
 	env := newTestEnv(t)
 	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
@@ -242,8 +240,7 @@ func TestATokenCannotChangeWhoIsInTheHousehold(t *testing.T) {
 		// whether that invite exists at all.
 		{"new link", http.MethodPost, "/api/v1/household/invites/00000000-0000-0000-0000-000000000000/link", nil},
 		// Admit -- Let in -- is the same rule for the same reason: a leaked
-		// API token must not be able to seat a new member either (spec
-		// decision 12).
+		// API token must not be able to seat a new member either.
 		{"admit", http.MethodPost, "/api/v1/household/invites/00000000-0000-0000-0000-000000000000/admit", nil},
 	}
 	for _, tc := range cases {
@@ -276,12 +273,12 @@ func TestATokenCannotChangeWhoIsInTheHousehold(t *testing.T) {
 	}
 }
 
-// --- Task 4: the email_invites flag, refused at the edge as well as the UI ---
+// --- The email_invites flag, refused at the edge as well as the UI ---
 
 // Email invites are hidden while mail cannot leave the box (ADR 3). The
 // flag is not only a UI affordance: hearthctl and any crafted request reach
 // the same route, and an invite nobody can deliver is worse than a refusal
-// the owner can read (spec decision 10).
+// the owner can read.
 func TestEmailInviteIsRefusedWhileTheFlagIsOff(t *testing.T) {
 	env := newTestEnv(t)
 	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
@@ -328,10 +325,10 @@ func TestInviteChannelMustBeNamedExplicitly(t *testing.T) {
 	}
 }
 
-// The kid profile is unchanged by this milestone: a limited member with no
-// sign-in, created directly, with no invite row and no link. It says
-// "profile" out loud rather than being inferred from an absent field,
-// because inference is how an invite goes somewhere nobody meant.
+// The kid profile stays a limited member with no sign-in, created directly,
+// with no invite row and no link. It says "profile" out loud rather than
+// being inferred from an absent field, because inference is how an invite
+// goes somewhere nobody meant.
 func TestAProfileOnlyMemberIsStillCreatedDirectly(t *testing.T) {
 	env := newTestEnv(t)
 	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
@@ -357,8 +354,8 @@ func TestAProfileOnlyMemberIsStillCreatedDirectly(t *testing.T) {
 	}
 }
 
-// With the flag on, the email path is exactly what it was before this
-// milestone: the flag hides a channel, it does not change one.
+// With the flag on, the email path is the ordinary one: the flag hides a
+// channel, it does not change one.
 func TestEmailInviteWorksWhenTheOperatorTurnsTheFlagOn(t *testing.T) {
 	env := newTestEnv(t)
 	if err := env.featureFlags.SetGlobal(context.Background(), string(domain.FlagEmailInvites), true, ""); err != nil {
@@ -373,11 +370,10 @@ func TestEmailInviteWorksWhenTheOperatorTurnsTheFlagOn(t *testing.T) {
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("email invite with the flag on: got %d, want 201", rec.Code)
 	}
-	// Counted, not merely present: before this assertion, the test checked
-	// only rec.Code == 201, which a switch arm that fell through to a
+	// Counted, not merely present: a switch arm that fell through to a
 	// second Create call (the shape TestEmailInviteWithNoAddressIsRefused's
-	// mutation check pins the email arm against) would also have passed
-	// while writing Jane's invite twice.
+	// mutation check pins the email arm against) would also pass a bare
+	// rec.Code == 201 check while writing Jane's invite twice.
 	pending := env.pendingInvites(t, session)
 	count := 0
 	for _, invite := range pending {
@@ -390,7 +386,7 @@ func TestEmailInviteWorksWhenTheOperatorTurnsTheFlagOn(t *testing.T) {
 	}
 }
 
-// --- Task 5: the telegram channel, and the email arm's empty-address loophole ---
+// --- The telegram channel, and the email arm's empty-address loophole ---
 
 // A caller that explicitly names the email channel but sends no address
 // must be refused, not silently handed to Create -- whose own empty-email
@@ -410,11 +406,10 @@ func TestEmailInviteWithNoAddressIsRefused(t *testing.T) {
 	}, session, csrf)
 	assertErrorResponse(t, rec, http.StatusUnprocessableEntity, "INVITE_REQUIRES_EMAIL")
 
-	// The loophole this closes wrote a profile-only member with the empty
-	// email arm's shape (Create's role != limited guard means a "limited"
-	// role is exactly the case that would otherwise have quietly
-	// succeeded) -- so the strongest proof of the fix is that nobody named
-	// Jane exists afterward.
+	// Without the refusal, this body would write a profile-only member
+	// through the empty-email arm (a "limited" role is exactly the case
+	// Create's role != limited guard lets through) -- so the strongest
+	// proof is that nobody named Jane exists afterward.
 	members := env.authedGet(t, "/api/v1/household/members", session)
 	if strings.Contains(members.Body.String(), `"Jane"`) {
 		t.Fatal("a refused email invite with no address created a member anyway")
@@ -427,10 +422,10 @@ type inviteCreatedBody struct {
 	ExpiresAt time.Time `json:"expiresAt"`
 }
 
-// The owner picks Telegram and gets back a one-time t.me deep link -- the
-// point of milestone 2's task 5. The list route shows the invite exists but
-// never repeats the link: the raw token behind it is never stored, so
-// there is nothing left to show a second time.
+// The owner picks Telegram and gets back a one-time t.me deep link. The
+// list route shows the invite exists but never repeats the link: the raw
+// token behind it is never stored, so there is nothing left to show a
+// second time.
 func TestCreatingATelegramInviteReturnsTheLinkOnce(t *testing.T) {
 	env := newTestEnv(t)
 	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
@@ -473,8 +468,8 @@ func TestCreatingATelegramInviteReturnsTheLinkOnce(t *testing.T) {
 }
 
 // Telegram invites are hidden while the telegram_sign_in flag is off, the
-// same edge-enforced rule TestEmailInviteIsRefusedWhileTheFlagIsOff pins for
-// the email channel (spec decision 10).
+// same edge-enforced rule TestEmailInviteIsRefusedWhileTheFlagIsOff pins
+// for the email channel.
 func TestTelegramInviteIsRefusedWhileTheFlagIsOff(t *testing.T) {
 	env := newTestEnv(t)
 	if err := env.featureFlags.SetGlobal(context.Background(), string(domain.FlagTelegramSignIn), false, ""); err != nil {
@@ -493,7 +488,7 @@ func TestTelegramInviteIsRefusedWhileTheFlagIsOff(t *testing.T) {
 // rule; this proves the route reports it the way a stranger's request would
 // be reported -- 404, not the 410 an expired invite gets or a 500 -- so
 // nothing about the response tells a caller holding a real Telegram token
-// that it differs from one that was never issued (spec decision 7).
+// that it differs from one that was never issued.
 func TestPublicInviteRoutesTreatATelegramTokenAsUnknown(t *testing.T) {
 	env := newTestEnv(t)
 	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
@@ -530,7 +525,7 @@ func TestPublicInviteRoutesTreatATelegramTokenAsUnknown(t *testing.T) {
 	}
 }
 
-// --- Task 9: Admit -- Let in --------------------------------------------
+// --- Admit -- Let in ------------------------------------------------------
 
 // admitBody decodes POST .../admit's response.
 type admitBody struct {
@@ -571,9 +566,9 @@ func (env *testEnv) mustCreateAndKnockTelegramInvite(t *testing.T, session, csrf
 	return created
 }
 
-// The whole point of the milestone: the owner clicks Let in on a knocked
-// invite and a real member appears in the roster, with the sign-in link
-// reported sent (noopInviteChats never fails).
+// Let in, end to end: the owner clicks Let in on a knocked invite and a
+// real member appears in the roster, with the sign-in link reported sent
+// (noopInviteChats never fails).
 func TestOwnerAdmitsAKnockedTelegramInvite(t *testing.T) {
 	env := newTestEnv(t)
 	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
@@ -631,9 +626,9 @@ func TestAdmitRefusesAnUnknockedTelegramInvite(t *testing.T) {
 }
 
 // The chat may have joined a different household between the knock and the
-// click (spec decision 15) -- the re-check InviteRepo.Admit's own
-// transaction performs, proved here through the real route rather than
-// only against the repository directly.
+// click -- the re-check InviteRepo.Admit's own transaction performs,
+// proved here through the real route rather than only against the
+// repository directly.
 func TestAdmitRefusesAChatAlreadyBoundToAnotherAccount(t *testing.T) {
 	env := newTestEnv(t)
 	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
@@ -679,11 +674,11 @@ func TestALimitedMemberCannotAdmit(t *testing.T) {
 }
 
 // The matching code is compared by eye and accepted by nothing. If this
-// ever fails, someone has turned a display into a credential, and ADR 4's
-// rejection of guessable one-time codes applies (spec decision 3). There is
-// no existing convention in this package for pinning an absent request
-// field, so this reads the handler's own source -- the crude fallback the
-// task brief itself names, not the preferred tool.
+// ever fails, someone has turned a display into a credential, violating
+// ADR 4's rejection of guessable one-time codes. There is no existing
+// convention in this package for pinning an absent request field, so this
+// reads the handler's own source -- a crude fallback, not the preferred
+// tool.
 func TestTheAdmitRequestHasNoCodeField(t *testing.T) {
 	body, err := os.ReadFile("invite_lobby_handlers.go")
 	if err != nil {

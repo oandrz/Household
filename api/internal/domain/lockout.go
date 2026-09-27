@@ -3,9 +3,9 @@ package domain
 import "time"
 
 // LockoutPolicy describes how repeated password failures suspend password
-// sign-in. Magic-link sign-in is deliberately not covered: it is the recovery
-// path, and gating it would let either member lock the household out with no
-// way back in short of a terminal.
+// sign-in. Magic-link sign-in is deliberately exempt: it is the recovery
+// path, and gating it would let either member lock the household out with
+// no way back short of a terminal.
 type LockoutPolicy struct {
 	MaxAttempts int
 	Window      time.Duration
@@ -44,15 +44,12 @@ func (p LockoutPolicy) Evaluate(failures []time.Time, now time.Time) LockState {
 		if now.Before(until) {
 			return LockState{Locked: true, Until: until, AttemptsRemaining: 0}
 		}
-		// A lock that has been served resets the allowance to full, by
-		// design: once LockFor has elapsed the household earns a fresh set
-		// of tries rather than being immediately re-evaluated against the
-		// same recent failures. This is only coherent while LockFor >=
-		// Window — with DefaultLockoutPolicy the two are equal, so a lock
-		// can never expire while its triggering failures are still inside
-		// the window. A policy with LockFor < Window would let the lock
-		// expire before the failures age out, briefly granting a full
-		// allowance with failures still counting.
+		// A served lock resets the allowance to full: once LockFor elapses,
+		// the household earns a fresh set of tries instead of being
+		// re-evaluated against the same failures. This holds only while
+		// LockFor >= Window, as DefaultLockoutPolicy keeps them -- a smaller
+		// LockFor would let the lock expire while its failures still count,
+		// granting a full allowance too early.
 		return LockState{AttemptsRemaining: p.MaxAttempts}
 	}
 

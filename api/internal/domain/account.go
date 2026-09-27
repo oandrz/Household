@@ -6,11 +6,9 @@ import (
 	"time"
 )
 
-// AccountType is what kind of thing an account is. It decides which side of
-// the net worth subtraction the account falls on, which is why the
-// asset-or-liability answer is derived here rather than stored on the row:
-// when per-household custom types arrive, IsLiability becomes a lookup and
-// no existing account row changes.
+// AccountType decides which side of the net worth subtraction an account
+// falls on. IsLiability derives the answer rather than storing it, so a
+// future per-household custom type needs no migration of existing rows.
 type AccountType string
 
 const (
@@ -21,16 +19,13 @@ const (
 	AccountCreditCard AccountType = "credit_card"
 )
 
-// ParseAccountType refuses anything it does not recognise. The default is the
-// point: a type arrives from a request body or a database column, so it is a
-// value this code did not construct, and guessing at an unknown one would put
-// an account on the wrong side of net worth.
-//
-// It does not trim or case-fold, unlike ParseCurrency, because nobody hand-
-// types this value: it comes from a fixed five-option select, or from a column
-// this API itself wrote. Leniency here would have no one to serve, and a value
-// arriving in an unexpected shape is a signal that something upstream is wrong
-// rather than something to quietly repair.
+// ParseAccountType refuses anything it does not recognise: the value
+// arrives from a request body or a database column this code did not
+// construct, and guessing wrong would put an account on the wrong side of
+// net worth. Unlike ParseCurrency it does not trim or case-fold -- this
+// value only ever comes from a fixed select or a column this API wrote, so
+// an unexpected shape means something upstream is wrong, not something to
+// repair.
 func ParseAccountType(s string) (AccountType, error) {
 	switch AccountType(s) {
 	case AccountCash:
@@ -64,17 +59,14 @@ func (t AccountType) IsLiability() bool {
 }
 
 // SignedNetWorthAmount returns the amount this account contributes to net
-// worth: the balance as given for an asset, negated for a liability. A
-// liability's stored amount is the non-negative sum owed (the database's
-// liabilities_are_not_negative constraint enforces the same rule), so the
-// minus sign is produced here and never typed by a person -- which is what
-// makes "typed 14500 for a car loan and net worth counted it as an asset"
-// unrepresentable rather than merely unlikely.
-//
-// It returns an error rather than negating blindly: negating math.MinInt64 in
-// two's complement returns math.MinInt64 itself, so a naive negation would
-// turn the largest possible debt into the largest possible asset. Money.String
-// guards the same edge for the same reason.
+// worth: as given for an asset, negated for a liability. The minus sign is
+// produced here, never typed by a person, because the stored liability amount
+// is always non-negative (the liabilities_are_not_negative constraint
+// enforces it) -- this is what makes "entered a car loan and net worth
+// counted it as an asset" unrepresentable. It errors rather than negating
+// blindly: negating math.MinInt64 overflows in two's complement, which would
+// turn the largest debt into the largest asset (Money.String guards the same
+// edge).
 func (t AccountType) SignedNetWorthAmount(m Money) (Money, error) {
 	if !t.IsLiability() {
 		return m, nil
@@ -87,16 +79,13 @@ func (t AccountType) SignedNetWorthAmount(m Money) (Money, error) {
 
 // Account is one thing a household owns or owes.
 //
-// OwnerMembershipID follows the same "" <-> SQL NULL convention documented on
-// usecase.StoredUser.PasswordHash: "" means the account is shared by the whole
-// household, and the column is NULL. There is deliberately no separate
-// is_shared flag -- one would allow a row that both names an owner and claims
-// to be shared, with nothing to resolve it.
+// OwnerMembershipID follows the "" <-> SQL NULL convention documented on
+// usecase.StoredUser.PasswordHash: "" means the whole household owns it.
+// There is no separate is_shared flag, so a row can never claim both an
+// owner and shared status.
 //
-// OpeningBalanceAsOf is load-bearing, not decoration. Once transactions exist,
-// only those dated on or after it count toward the derived balance; without
-// it, importing last month's transactions would subtract them from a balance
-// that already reflected them.
+// OpeningBalanceAsOf is load-bearing: transactions before it don't count
+// toward the derived balance, so importing the past can't double-subtract.
 type Account struct {
 	ID                      string
 	HouseholdID             string

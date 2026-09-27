@@ -1,13 +1,11 @@
 // Package openrouter is the adapter that owns Hearth's dependency on
-// OpenRouter, a hosted gateway to open-weight models. It has one job:
-// reading a chat sentence into a transaction intent (usecase.IntentParser),
-// for nothing on OpenRouter's ":free" models. It speaks the OpenAI
-// chat-completions dialect over plain net/http, so any host that speaks it
-// (Ollama, vLLM, Groq) is a base URL away; only OpenRouter is wired today.
-// A Claude adapter existed for a day (anthropic-sdk-go, `claude-opus-5`)
-// and was removed on 2026-09-08 when the owner chose to run on free
-// models; git has it if a paid model is ever wanted back. Nothing it returns is written without the
-// person confirming it first -- see adapter/telegram/commands.go.
+// OpenRouter, a hosted gateway to open-weight models. Its one job is
+// reading a chat sentence into a transaction intent (usecase.IntentParser)
+// on OpenRouter's ":free" models, at no cost. It speaks the OpenAI
+// chat-completions dialect over plain net/http, so any compatible host
+// (Ollama, vLLM, Groq) is a base URL away, though only OpenRouter is wired
+// today. Nothing this package returns is written without the person
+// confirming it first -- see adapter/telegram/commands.go.
 package openrouter
 
 import (
@@ -62,12 +60,11 @@ func WithBaseURL(u string) Option { return func(p *IntentParser) { p.baseURL = u
 
 // NewIntentParser builds a parser for one key and one or more model ids,
 // comma-separated, tried in order. Free models are rate-limited upstream
-// minute to minute, each on its own schedule, so one id alone means "could
-// not read that" for as long as that provider is busy; OpenRouter's
-// `models` fallback list moves to the next in the same request. No model
-// is defaulted here on purpose: the set of free, tool-capable models
-// changes month to month, so the choice lives in configuration where it can
-// change without a release.
+// per provider, so one id alone means "could not read that" while that
+// provider is busy; OpenRouter's `models` fallback list moves to the next
+// within the same request. No model is defaulted here on purpose: the set
+// of free, tool-capable models changes month to month, so the choice lives
+// in configuration, changeable without a release.
 func NewIntentParser(apiKey, models string, opts ...Option) (*IntentParser, error) {
 	var ids []string
 	for _, m := range strings.Split(models, ",") {
@@ -139,10 +136,10 @@ type chatResponse struct {
 }
 
 // ParseIntent asks the model to call log_transaction and reads the call.
-// tool_choice is forced to the function: with "auto", small open-weight
-// models tend to answer in prose instead, and prose reads as "none" -- every
-// sentence would come back "I could not read that". No tool call at all is
-// still "none", so a host that ignores the forcing cannot make the bot write.
+// tool_choice is forced to the function, because with "auto" small
+// open-weight models tend to answer in prose instead, which reads as "none".
+// No tool call at all is still "none", so a host that ignores the forcing
+// cannot make the bot write.
 func (p *IntentParser) ParseIntent(ctx context.Context, in usecase.ParseIntentInput) (usecase.Intent, error) {
 	var fallbacks []string
 	if len(p.models) > 1 {
@@ -179,10 +176,10 @@ func (p *IntentParser) ParseIntent(ctx context.Context, in usecase.ParseIntentIn
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := p.client.Do(req)
 	if err != nil {
-		// A transport error from net/http quotes the URL and the address;
-		// the key is in neither, but the rule is the telegram client's: a
-		// log line names the operation and the kind of failure, never the
-		// request. Timeout or not is the one fact an operator acts on.
+		// A transport error from net/http quotes the URL; the key isn't in
+		// it, but the rule matches the telegram client's: name the operation
+		// and the kind of failure, never the raw request. Timeout or not is
+		// the one fact an operator acts on.
 		return usecase.Intent{}, fmt.Errorf("openrouter chat.completions: %s", transportFailure(err))
 	}
 	defer resp.Body.Close()

@@ -14,9 +14,9 @@ func aug2026() time.Time { return time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC) }
 func jul2026() time.Time { return time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC) }
 func jun2026() time.Time { return time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC) }
 
-// A draft is not a data point. It shows on the page as its own in-progress
-// entry, and it is excluded from the finished count and the mood chart --
-// a half-typed month must not become a point on a mood trend (decision 2).
+// A draft is not a data point: it shows on the page as its own in-progress
+// entry but is excluded from the finished count and the mood chart -- a
+// half-typed month must not become a point on a mood trend.
 func TestRetroListExcludesDraftsFromTheCountAndTheChart(t *testing.T) {
 	retros := newRetroRepoDouble()
 	finished := retros.seed(jul2026(), 4, "Best month this year. And more.", true)
@@ -77,19 +77,17 @@ func TestRetroMoodSeriesIsTwelveMonthsWithGaps(t *testing.T) {
 	}
 }
 
-// The quoted line in a history row is the first sentence of the notes, and a
-// retro with no notes renders no quote at all -- not empty quotation marks.
-// The same rows also carry the action count the port's own List doc comment
-// promises ("each carrying its own action count") -- asserted here, against
-// the two retros wired to a real actions double, rather than left as an
-// unverified pass-through (code review finding, Task 3 fix round: a double
-// that hardcodes ActionCount to 0 contradicts the port it claims to satisfy).
+// The quoted line in a history row is the first sentence of the notes; no
+// notes means no quote at all, not empty quotation marks. The same rows
+// also carry ActionCount, which the port's List doc comment promises --
+// asserted here against a real actions double, not left as an unverified
+// pass-through: a double that hardcodes ActionCount to 0 would contradict
+// the port it claims to satisfy.
 //
 // July's two actions are deliberately left in DIFFERENT done states --
 // "keep the budget review" ticked, "plan the September trip" still open --
-// so ActionCount (2) and OpenActionCount (1) disagree, the same "make the
-// two numbers differ or the test can't tell which one a bug read" shape
-// the Overview card's own frontend test uses.
+// so ActionCount (2) and OpenActionCount (1) disagree, the shape needed to
+// tell which count a bug actually read.
 func TestRetroSummaryQuoteIsDerivedFromNotes(t *testing.T) {
 	retros := newRetroRepoDouble()
 	jul := retros.seed(jul2026(), 4, "Best month this year. Agreed to keep the budget review.", true)
@@ -132,12 +130,11 @@ func TestRetroSummaryQuoteIsDerivedFromNotes(t *testing.T) {
 
 // The carry-over offer reads the IMMEDIATELY previous month only, and is
 // never confused with the retro's own actions (ForRetro), which come back
-// through a separate field entirely. Both need a real RetroID on the seeded
-// rows: a Month implementation that never called ForRetro at all would
-// still pass a version of this test that never checked view.Actions (code
-// review finding, Task 3 fix round) -- seeding July's and July-minus-one's
-// actions against retro ids that are NOT August's own is what makes that
-// failure mode visible here, rather than merely by construction.
+// through a separate field. Both need a real RetroID on the seeded rows: a
+// Month implementation that never called ForRetro would still pass a
+// version of this test that never checked view.Actions -- seeding July's
+// and July-minus-one's actions against retro ids that are NOT August's own
+// is what makes that failure mode visible here.
 func TestRetroMonthOffersOnlyLastMonthsOpenActions(t *testing.T) {
 	retros := newRetroRepoDouble()
 	aug := retros.seed(aug2026(), 0, "", false)
@@ -163,10 +160,10 @@ func TestRetroMonthOffersOnlyLastMonthsOpenActions(t *testing.T) {
 
 // A repository value that is not exactly midnight-on-the-first must not
 // silently miss List's currentExists/previousExists comparisons, which
-// StartMonth is computed from -- RetroRecord.Month's own doc comment states
+// StartMonth is computed from. RetroRecord.Month's own doc comment states
 // the midnight-UTC convention, but the service normalises defensively
-// rather than trusting a stored value blindly (budget.go's startOfMonth is
-// the house fix; code review finding, Task 3 fix round).
+// rather than trusting a stored value blindly, the same house fix as
+// budget.go's startOfMonth.
 func TestRetroListNormalisesANonMidnightStoredMonth(t *testing.T) {
 	retros := newRetroRepoDouble()
 	retros.seed(jul2026(), 0, "", false)                                  // previous month, seeded clean
@@ -178,13 +175,13 @@ func TestRetroListNormalisesANonMidnightStoredMonth(t *testing.T) {
 		t.Fatalf("List: %v", err)
 	}
 
-	// Both months already have a retro -- July's clean, August's dirty --
-	// so StartMonth must be nil. July is seeded deliberately (previousExists
-	// true) so domain.StartableMonth's own `case !previousExists` branch
-	// cannot mask a wrong currentExists by returning early: with that branch
-	// already closed off, only a correctly-detected August can produce nil,
-	// and an unnormalised comparison that misses August's dirty timestamp
-	// would instead surface August itself as still startable.
+	// Both months already have a retro -- July's clean, August's dirty -- so
+	// StartMonth must be nil. July is seeded deliberately (previousExists
+	// true) so domain.StartableMonth's `case !previousExists` branch cannot
+	// mask a wrong currentExists by returning early: only a correctly
+	// detected August can then produce nil, while an unnormalised
+	// comparison that misses August's dirty timestamp would surface August
+	// as still startable.
 	if view.StartMonth != nil {
 		t.Fatalf("StartMonth = %v, want nil (August's dirty-timestamp retro should still count as existing)", *view.StartMonth)
 	}
@@ -212,7 +209,7 @@ func TestRetroMonthNormalisesANonMidnightArgument(t *testing.T) {
 // StartMonth is pinned across all four presence states, not just the one
 // the other tests happen to exercise in passing: no retros at all, the
 // previous month only, the current month only, and both -- the fourth being
-// the only nil case (decision 5).
+// the only nil case.
 func TestRetroListStartMonthAcrossAllFourStates(t *testing.T) {
 	today := time.Date(2026, 8, 20, 0, 0, 0, 0, time.UTC)
 
@@ -257,7 +254,7 @@ func TestRetroListStartMonthAcrossAllFourStates(t *testing.T) {
 }
 
 // Start files the retro against the month the button offered, not against
-// today: a couple doing July's retro on 2 August means July (decision 5).
+// today: a couple doing July's retro on 2 August means July.
 func TestRetroStartUsesTheStartableMonth(t *testing.T) {
 	retros := newRetroRepoDouble()
 	svc := usecase.NewRetroService(retros, newRetroActionRepoDouble())
@@ -275,11 +272,10 @@ func TestRetroStartUsesTheStartableMonth(t *testing.T) {
 // service says so rather than inventing a third month.
 //
 // Asserted with errors.Is against domain.ErrRetroNothingToStart rather than
-// a bare err == nil check -- the brief's own version of this test only
-// checked non-nil, which a completely unrelated error (a repository outage,
-// say) would also satisfy. The sentinel is what lets Task 8's HTTP layer
-// map this specific refusal to 409 without also mapping every other failure
-// Start could produce to the same status.
+// a bare err != nil check, which a completely unrelated error (a repository
+// outage, say) would also satisfy. The sentinel is what lets the HTTP layer
+// map this specific refusal to 409 without mapping every other failure to
+// the same status.
 func TestRetroStartRefusesWhenBothMonthsExist(t *testing.T) {
 	retros := newRetroRepoDouble()
 	retros.seed(jul2026(), 4, "", true)
@@ -295,14 +291,12 @@ func TestRetroStartRefusesWhenBothMonthsExist(t *testing.T) {
 // A mood arriving from a request body is validated, not trusted.
 //
 // Month is set here too, for the same reason given on
-// TestRetroSaveRefusesAStaleVersion above -- and it matters more here than
-// it looks: without it, the mutation check in Step 5 (deleting the
-// domain.ParseMood call) makes retros.Update fail with domain.ErrNotFound
-// for an unrelated reason (the zero-value Month never matches the seeded
-// row), which would go red for the wrong cause and hide whether the mood
-// check itself is doing any work at all. With Month set, the mutated code
-// actually reaches the repository and writes, so this test proves what it
-// claims to.
+// TestRetroSaveRefusesAStaleVersion below, and it matters more here: without
+// it, the mutation check that deletes the domain.ParseMood call would make
+// retros.Update fail with domain.ErrNotFound for an unrelated reason (the
+// zero-value Month never matches the seeded row), masking whether the mood
+// check itself does any work. With Month set, the mutated code actually
+// reaches the repository and writes, so this test proves what it claims to.
 func TestRetroSaveRefusesAnImpossibleMood(t *testing.T) {
 	retros := newRetroRepoDouble()
 	r := retros.seed(aug2026(), 0, "", false)
@@ -322,14 +316,11 @@ func TestRetroSaveRefusesAnImpossibleMood(t *testing.T) {
 
 // The version guard: the other partner saved while this one was typing.
 //
-// Month is set on both RetroUpdate literals here, unlike the brief's own
-// version of this test. retroRepoDouble.Update (Task 3) matches a row on
-// id + household + month together -- RetroUpdate.Month's own doc comment
-// explains why -- so a RetroUpdate with a zero-value Month can
-// never match the row retros.seed created at aug2026(), and even the FIRST
-// save would come back domain.ErrNotFound instead of succeeding. Filed as a
-// brief defect and fixed here rather than left broken, per the task's own
-// instruction to follow the code when the two disagree.
+// Month is set on both RetroUpdate literals: retroRepoDouble.Update matches
+// a row on id + household + month together (RetroUpdate.Month's own doc
+// comment explains why), so a zero-value Month would never match the row
+// retros.seed created at aug2026() -- don't leave it unset, or even the
+// FIRST save comes back domain.ErrNotFound instead of succeeding.
 func TestRetroSaveRefusesAStaleVersion(t *testing.T) {
 	retros := newRetroRepoDouble()
 	r := retros.seed(aug2026(), 0, "", false)
@@ -350,14 +341,12 @@ func TestRetroSaveRefusesAStaleVersion(t *testing.T) {
 
 // A caller-supplied Month that is not exactly midnight-on-the-first must
 // still match the retro a repository stores at its own normalised value --
-// the write-side twin of TestRetroMonthNormalisesANonMidnightArgument
-// (Task 3, read side). Without Save normalising u.Month, this would come
-// back domain.ErrNotFound: the version-match check in
-// retroRepoDouble.Update never even runs, because the row lookup itself
-// (id + household + month) fails first on the dirty timestamp -- the exact
-// failure shape the coordinator's fix-round note describes as "closest to
-// the worst available": a legitimate save reads back as "the retro is
-// gone" rather than as any kind of conflict.
+// the write-side twin of TestRetroMonthNormalisesANonMidnightArgument's
+// read-side check. Without Save normalising u.Month, this comes back
+// domain.ErrNotFound: the version-match check in retroRepoDouble.Update
+// never runs, because the row lookup (id + household + month) fails first
+// on the dirty timestamp -- a legitimate save reading back as "the retro is
+// gone" rather than any kind of conflict, the worst failure shape available.
 func TestRetroSaveNormalisesANonMidnightMonth(t *testing.T) {
 	retros := newRetroRepoDouble()
 	r := retros.seed(aug2026(), 0, "", false) // stored clean, per the port's own convention
@@ -407,7 +396,7 @@ func TestTickingAnActionLeavesTheRetroVersionAlone(t *testing.T) {
 // indistinguishable from a rendering bug.
 //
 // Asserted with errors.Is against domain.ErrRetroActionBodyRequired rather
-// than a bare err == nil check, the same strengthening as
+// than a bare err != nil check, the same strengthening as
 // TestRetroStartRefusesWhenBothMonthsExist above and for the same reason.
 func TestAddActionRefusesAnEmptyBody(t *testing.T) {
 	retros := newRetroRepoDouble()

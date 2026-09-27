@@ -20,20 +20,19 @@ type HoldingRecord struct {
 }
 
 // HoldingRepository stores what a household owns inside its investment
-// accounts. It is deliberately separate from AccountRepository and touches no
-// balance: a holding is invisible to ListAccounts, to net worth and to the
-// twelve-month trend, which is milestone 1's whole boundary. Making an
-// account's balance read from holdings is a later, separate decision about
-// whether an investment account also carries uninvested cash.
+// accounts. It is deliberately separate from AccountRepository and touches
+// no balance: a holding is invisible to ListAccounts, to net worth, and to
+// the twelve-month trend. Making an account's balance read from holdings is
+// a later, separate decision about whether an investment account also
+// carries uninvested cash.
 type HoldingRepository interface {
-	// List returns one household's holdings ordered by name, each joined to
-	// its account's nickname and whether that account is archived -- an
-	// archived account's holdings are still real money and still listed, with
-	// the account labelled. includeArchived is a UNION, not a filter swap:
-	// false returns the live holdings, true returns live AND archived
-	// together, each carrying its own ArchivedAt. The AccountRepository.List
-	// and GoalRepository.List contract; do not implement it as "archived
-	// instead".
+	// List returns one household's holdings ordered by name, each joined to its
+	// account's nickname and whether that account is archived -- an archived
+	// account's holdings are still real money and stay listed, with the account
+	// labelled. includeArchived is a UNION, not a filter swap: false returns
+	// the live holdings, true returns live AND archived together, each carrying
+	// its own ArchivedAt -- the AccountRepository.List / GoalRepository.List
+	// contract. Don't implement it as "archived instead".
 	List(ctx context.Context, householdID string, includeArchived bool) ([]HoldingRecord, error)
 	// Get reports domain.ErrNotFound when no holding with this id exists in
 	// this household -- including when it exists in another one, so nothing
@@ -59,11 +58,10 @@ type HoldingRepository interface {
 
 // HoldingCounter is what services OUTSIDE this feature need to know about
 // holdings, and nothing more: whether an account still holds anything, and
-// whether the household holds anything at all. A narrow port rather than the
-// whole HoldingRepository, by the same interface-segregation rule that gives
-// the usecase ports nine small repositories instead of one object with forty
-// methods -- and so that the accounts and household services cannot grow a
-// dependency on holdings they were never meant to have.
+// whether the household holds anything at all. Narrow on purpose, the same
+// interface-segregation rule behind nine small repositories instead of one
+// object with forty methods -- so the accounts and household services
+// cannot grow a dependency on holdings they were never meant to have.
 type HoldingCounter interface {
 	CountLiveForAccount(ctx context.Context, householdID, accountID string) (int64, error)
 	// CountForHousehold counts ARCHIVED holdings too. An archived holding
@@ -77,17 +75,16 @@ type HoldingCounter interface {
 // neither what is held nor what it cost, so folding it here would corrupt the
 // average cost.
 type HoldingEventRepository interface {
-	// ListByHolding returns one holding's events ordered by
-	// (OccurredOn, CreatedAt, ID). THAT ORDER IS A CONTRACT, NOT A
-	// PREFERENCE, and an implementation may not relax it.
+	// ListByHolding returns one holding's events ordered by (OccurredOn,
+	// CreatedAt, ID). That order is a contract, not a preference -- an
+	// implementation may not relax it.
 	//
-	// OccurredOn is a date, so two events can share one -- buying and selling
-	// the same morning is ordinary -- and domain.Holding.Position sorts
-	// STABLY, which means it keeps whatever order it is handed for a tie. The
-	// tie is therefore broken here, by the order the events were actually
-	// recorded in. Return them in any other order and a household's realised
-	// gain changes silently: on identical same-day events, buy-then-sell
-	// realises 750 where sell-then-buy realises 1000.
+	// OccurredOn is a date, so two events can share one (buying and selling
+	// the same morning is ordinary), and domain.Holding.Position sorts
+	// stably, keeping whatever order it's handed for a tie. The tie is
+	// therefore broken here, by recording order. Any other order silently
+	// changes a household's realised gain: on identical same-day events,
+	// buy-then-sell realises 750 where sell-then-buy realises 1000.
 	ListByHolding(ctx context.Context, householdID, holdingID string) ([]domain.HoldingEvent, error)
 	// ListByHousehold is the same contract across every holding, grouped by
 	// holding, so a portfolio page folds every position without one query
@@ -95,17 +92,17 @@ type HoldingEventRepository interface {
 	ListByHousehold(ctx context.Context, householdID string) ([]domain.HoldingEvent, error)
 	Insert(ctx context.Context, e domain.HoldingEvent) (domain.HoldingEvent, error)
 	// InsertWithFold is Insert with the holding's invariant held ACROSS the
-	// write, and it is what a service must use for anything the fold can
-	// refuse. The implementation locks the holding, lists its events in the
-	// same transaction, calls fold with them, and inserts only if fold returns
-	// nil -- so a second writer blocks and then folds the first one's result
-	// rather than a stale copy.
+	// write; a service must use it for anything the fold can refuse. The
+	// implementation locks the holding, lists its events in the same
+	// transaction, calls fold with them, and inserts only if fold returns
+	// nil -- so a second writer blocks and then folds the first one's
+	// result, not a stale copy.
 	//
-	// Reading, folding and writing as three separate calls is NOT equivalent:
-	// two sales of 30 from a holding of 50 would each pass and both commit,
-	// leaving events that cannot be folded at all. fold is the caller's own
-	// rule (domain.Holding.Position); this port owns the transaction and the
-	// lock, never the rule.
+	// Reading, folding and writing as three separate calls is NOT
+	// equivalent: two sales of 30 from a holding of 50 would each pass and
+	// both commit, leaving events that can't be folded at all. fold is the
+	// caller's own rule (domain.Holding.Position); this port owns the
+	// transaction and the lock, never the rule.
 	InsertWithFold(ctx context.Context, e domain.HoldingEvent, fold func([]domain.HoldingEvent) error) (domain.HoldingEvent, error)
 	// DeleteWithFold is the same guarantee in the other direction: removing a
 	// purchase a later sale was costed against must not be able to race a
@@ -113,10 +110,10 @@ type HoldingEventRepository interface {
 	DeleteWithFold(ctx context.Context, householdID, holdingID, eventID string, fold func([]domain.HoldingEvent) error) error
 	// Delete reports domain.ErrNotFound when the event is not this
 	// household's AND this holding's, rather than silently succeeding. Both
-	// halves of that scope are load-bearing: the household keeps two families
-	// apart, and the holding keeps the URL honest -- a caller naming holding A
-	// must not be able to remove a row of holding B, whose fold would then
-	// never have been checked.
+	// halves matter: the household keeps two families apart, and the
+	// holding keeps the URL honest -- a caller naming holding A must not
+	// remove a row of holding B, whose fold would then never have been
+	// checked.
 	Delete(ctx context.Context, householdID, holdingID, eventID string) error
 }
 
@@ -130,14 +127,10 @@ type HoldingValuationRepository interface {
 	// zero one -- the caller reads an absent holding as "no price recorded",
 	// which is what a screen must say instead of showing a figure of zero.
 	ListLatest(ctx context.Context, householdID string) ([]domain.Valuation, error)
-	// Upsert writes one price per holding per day: a second write for the
-	// same AsOf replaces the first. Re-entering a day's price is a
-	// correction, not a second opinion, and two rows for one day would leave
-	// the report with no way to choose between them.
-	// ListForHousehold returns EVERY valuation the household has, not one per
-	// holding. The period report needs the whole history: a quarter opens at
-	// a price recorded in the quarter before it, and ListLatest has already
-	// discarded that one.
+	// ListForHousehold returns every valuation the household has, not one
+	// per holding. The period report needs the whole history: a quarter
+	// opens at a price recorded in the quarter before it, and ListLatest
+	// has already discarded that one.
 	ListForHousehold(ctx context.Context, householdID string) ([]domain.Valuation, error)
 	// Upsert writes one price per holding per day: a second write for the
 	// same AsOf replaces the first. Re-entering a day's price is a
@@ -147,13 +140,13 @@ type HoldingValuationRepository interface {
 	Delete(ctx context.Context, householdID, valuationID string) error
 }
 
-// HoldingIncomeRepository stores the dividends a holding paid and the charges
-// made against it.
+// HoldingIncomeRepository stores the dividends a holding paid and the
+// charges made against it.
 //
-// Unlike HoldingEventRepository there is no ordering contract here and no
+// Unlike HoldingEventRepository, there is no ordering contract here and no
 // fold-inside-the-write: income never enters the average-cost pool, so no
-// invariant spans two rows, no order changes the answer, and nothing needs a
-// lock. Any order is correct because summing a period is commutative.
+// invariant spans two rows and nothing needs a lock. Any order is correct
+// because summing a period is commutative.
 type HoldingIncomeRepository interface {
 	Insert(ctx context.Context, i domain.HoldingIncome) (domain.HoldingIncome, error)
 	ListByHolding(ctx context.Context, householdID, holdingID string) ([]domain.HoldingIncome, error)

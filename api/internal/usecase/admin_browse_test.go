@@ -9,9 +9,8 @@ import (
 	"github.com/andreasoentoro/hearth/api/internal/usecase"
 )
 
-// browserStub records the limit and offset it was called with, so the tests
-// below can assert on what the service asked the port for rather than on what
-// it returned.
+// browserStub records the limit and offset it was called with, so tests can
+// assert on the request the service made rather than on its response.
 type browserStub struct {
 	tables     []usecase.TableInfo
 	page       usecase.RowPage

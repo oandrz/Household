@@ -9,11 +9,11 @@ import (
 // PairCodes draws the four digits an owner and their partner compare by eye
 // before the owner admits them (ADR 11).
 //
-// crypto/rand rather than math/rand even though the code grants nothing and
-// is never accepted by any endpoint: a predictable code would let someone
-// watching the owner's screen over their shoulder -- or a future change
-// that did start accepting it -- turn a display into a credential. The
-// boring, obvious source costs nothing here.
+// Uses crypto/rand, not math/rand, even though the code is never accepted by
+// any endpoint today: a predictable code would let someone watching the
+// owner's screen over their shoulder, or a future change that started
+// accepting it, treat the display as a credential. The boring, obvious
+// source costs nothing here.
 type PairCodes struct{}
 
 // NewCode returns exactly four decimal digits, leading zeros kept: "0007"

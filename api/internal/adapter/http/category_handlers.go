@@ -8,10 +8,10 @@ import (
 	"github.com/andreasoentoro/hearth/api/internal/domain"
 )
 
-// categoryDTO's Archived field is what Budget's "Edit categories" screen
-// reads to grey a row out and offer Restore instead of Archive; the
-// transaction modal's dropdown reads the same shape but only ever sees rows
-// where it is false, since that request never sends includeArchived=true.
+// categoryDTO's Archived field greys a row out and offers Restore instead
+// of Archive on Budget's Edit-categories screen. The transaction modal's
+// dropdown shares this shape but only sees archived=false rows, since it
+// never sends includeArchived=true.
 type categoryDTO struct {
 	ID       string `json:"id"`
 	Name     string `json:"name"`
@@ -33,19 +33,18 @@ type categoryResponse struct {
 	Category categoryDTO `json:"category"`
 }
 
-// categoryNameRequest is the wire shape for both Create and Rename -- the
-// two routes take exactly one field, and CategoryService validates it with
-// the same trim-then-refuse-empty rule for both (category.go's
-// validateCategoryName), so one request struct is honest rather than two
-// identical ones.
+// categoryNameRequest is the wire shape for both Create and Rename: both
+// take exactly one field, validated by the same trim-then-refuse-empty rule
+// (category.go's validateCategoryName), so one struct is honest rather than
+// two identical ones.
 type categoryNameRequest struct {
 	Name string `json:"name"`
 }
 
-// handleListCategories is the modal's dropdown by default, and Budget's
-// "Edit categories" screen with ?includeArchived=true. It is also what seeds
-// a household's starter set the first time anything asks -- see
-// CategoryService.List for why a read is the moment that does it.
+// handleListCategories backs the modal's dropdown by default, and Budget's
+// "Edit categories" screen with ?includeArchived=true. It's also what
+// seeds a household's starter set on first read -- see CategoryService.List
+// for why.
 func handleListCategories(deps Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		scope, _ := RequestScope(r)
@@ -82,10 +81,10 @@ func handleCreateCategory(deps Deps) http.HandlerFunc {
 	}
 }
 
-// handleRenameCategory changes a category's name only. A name colliding with
-// another row surfaces as 409 CATEGORY_NAME_TAKEN; an id outside this
-// household surfaces as 404 NOT_FOUND -- both untranslated from
-// CategoryService.Rename, through MapDomainError.
+// handleRenameCategory changes a category's name only. A name collision
+// surfaces as 409 CATEGORY_NAME_TAKEN and an id outside this household as
+// 404 NOT_FOUND, both untranslated from CategoryService.Rename via
+// MapDomainError.
 func handleRenameCategory(deps Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		scope, _ := RequestScope(r)
@@ -106,11 +105,10 @@ func handleRenameCategory(deps Deps) http.HandlerFunc {
 func handleArchiveCategory(deps Deps) http.HandlerFunc { return setCategoryArchived(deps, true) }
 func handleRestoreCategory(deps Deps) http.HandlerFunc { return setCategoryArchived(deps, false) }
 
-// setCategoryArchived backs both the archive and the restore route, the same
-// "one function, not two near-identical ones" shape account_handlers.go's
-// setArchived uses -- the pair differ by a single boolean, and a rule
-// written twice is a rule fixed once. Neither route decodes a body: there is
-// nothing to send beyond the id already in the path.
+// setCategoryArchived backs both the archive and restore routes, the same
+// "one function, not two" shape as account_handlers.go's setArchived: a
+// rule written twice is a rule fixed once. Neither route decodes a body --
+// there's nothing to send beyond the id already in the path.
 func setCategoryArchived(deps Deps, archived bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		scope, _ := RequestScope(r)

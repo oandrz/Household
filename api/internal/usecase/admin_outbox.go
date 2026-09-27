@@ -8,13 +8,9 @@ import (
 )
 
 // AdminOutboxService is the operator's read of the mail this install has
-// sent. It is its own service rather than three more methods on AdminService
-// for the same reason AdminDirectoryService is: that service is "who is a
-// platform admin, feature flags, the audit log", and this one reads a store
-// outside the database entirely.
-//
-// It takes no actor parameter. The /admin guards in the HTTP layer are the
-// only gate, as everywhere else in this product.
+// sent -- its own service, like AdminDirectoryService, because AdminService
+// covers admin/flags/audit, not a store outside the database. No actor
+// parameter: the /admin guards in the HTTP layer are the only gate.
 type AdminOutboxService struct{ outbox MailOutbox }
 
 const (
@@ -40,13 +36,11 @@ type OutboxListing struct {
 	Truncated bool
 }
 
-// OutboxMessageView is one message as the operator sees it: the links pulled
-// out of whichever body part had them, and the plain text for context.
-//
-// There is deliberately no HTML field. Nothing above this service has a use
-// for the HTML part, and the surface that would render it is the one this
-// design rejected -- see the spec's decision 1. Adding the field back is the
-// first step of building that surface by accident.
+// OutboxMessageView is one message as the operator sees it: links pulled
+// from whichever body part had them, plus the plain text for context.
+// Deliberately no HTML field: the surface that would use it -- a template
+// previewer rendering an email as the recipient sees it -- is the one this
+// design rejects, and the field would be the first step toward it.
 type OutboxMessageView struct {
 	ID      string
 	To      string

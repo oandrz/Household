@@ -55,19 +55,14 @@ func (r *UserRepo) Create(ctx context.Context, email, passwordHash, displayName 
 }
 
 // CreateWithMembership creates the user and their membership in one
-// transaction, mirroring the pattern InviteRepo.Accept already establishes:
-// begin a transaction from the pool, bind sqlcgen.Queries to it with WithTx,
-// run both statements, commit -- with a deferred rollback that is a no-op
-// once Commit has succeeded.
+// transaction, mirroring InviteRepo.Accept: begin from the pool, bind
+// sqlcgen.Queries with WithTx, run both statements, commit, with a deferred
+// rollback that no-ops once Commit succeeds.
 //
-// Either both writes happen or neither does. Create's child branch (a
-// limited member with no email of their own) used to call Create and then
-// Members.Create as two independent statements: if the second failed, the
-// first had already committed, leaving an orphaned user with a NULL email
-// and no membership. Because that email is NULL, it is not
-// unique-constrained the way a real email would be, so a retry would not
-// fail loudly -- it would silently create another orphan, and another, each
-// time the caller retried.
+// Don't split this into two calls (Create, then Members.Create): a NULL
+// email is not unique-constrained the way a real one is, so a failure
+// between them would silently leave an orphaned, membership-less user that
+// a retry would multiply rather than fail loudly against.
 func (r *UserRepo) CreateWithMembership(ctx context.Context, email, passwordHash, displayName string,
 	m domain.Membership) (domain.User, domain.Membership, error) {
 	tx, err := r.pool.Begin(ctx)
@@ -127,24 +122,19 @@ func (r *UserRepo) SetPasswordHash(ctx context.Context, userID, hash string) err
 
 // initialOf derives the avatar initial from a display name.
 //
-// It takes the first *rune*, not the first byte: the old name[:1] byte slice
-// took one byte of what may be a multi-byte UTF-8 sequence, so every non-ASCII
-// name got an invalid fragment that rendered as the replacement character --
-// permanently, since there is no profile-edit endpoint to correct it.
+// It takes the first *rune*, not the first byte: a byte slice would split a
+// multi-byte UTF-8 sequence, permanently corrupting every non-ASCII name's
+// initial since there is no profile-edit endpoint to fix it afterwards.
 //
-// It uses cases.Upper(language.Und) rather than strings.ToUpper, because the
-// standard library applies simple case mapping only: 'ß' does not uppercase
-// at all. Full case mapping is what a user-supplied name from an unknown script
-// deserves. language.Und (undefined/root) is used because the locale is
-// genuinely unknown at initial creation time. The result can be more than one
-// character: cases.Upper(language.Und).String("ß") is "SS". users.avatar_initial
-// is text (migration 00003) rather than char(1) for exactly this case.
+// It uses cases.Upper(language.Und), not strings.ToUpper: simple case
+// mapping never uppercases 'ß', and the locale is genuinely unknown at
+// creation time. The result can be more than one character ("ß" -> "SS"),
+// which is why avatar_initial is text, not char(1).
 //
-// A rune is not always a whole grapheme cluster -- an emoji built from a
-// zero-width joiner sequence yields only its first component here. Proper
-// handling would need golang.org/x/text/grapheme, adding a second dependency,
-// but a single rune is the correct fix for the actual defect and a name
-// beginning with a ZWJ sequence still produces valid, renderable UTF-8.
+// A rune is not a whole grapheme cluster -- a ZWJ emoji yields only its
+// first component. golang.org/x/text/grapheme would fix that properly, but
+// adds a second dependency; a single rune fixes the actual defect and
+// still produces valid UTF-8.
 func initialOf(displayName string) string {
 	name := strings.TrimSpace(displayName)
 	if name == "" {

@@ -98,9 +98,8 @@ func (r *TransactionRepo) Delete(ctx context.Context, householdID, transactionID
 }
 
 // receivedMinor and receivedCurrency implement the nil <-> NULL half of the
-// received amount. They are two functions rather than one returning both
-// because sqlc's generated params take them as separate fields, and a single
-// helper returning a pair would be unpacked at both call sites anyway.
+// received amount. They are two functions, not one, because sqlc's generated
+// params take them as separate fields.
 func receivedMinor(m *domain.Money) *int64 {
 	if m == nil {
 		return nil
@@ -120,9 +119,8 @@ func receivedCurrency(m *domain.Money) *string {
 // toTransaction maps a transactions row into the domain type. Every
 // transaction query either returns sqlcgen.Transaction itself or carries one
 // through sqlc.embed(t), so this mapping exists once. kind goes through
-// domain.ParseTransactionKind for the reason toCategory gives:
-// TransactionService's account-shape switch must never see a kind no writer
-// here could have stored.
+// domain.ParseTransactionKind so TransactionService's account-shape switch
+// never sees a kind no writer here could have stored.
 func toTransaction(t sqlcgen.Transaction) (domain.Transaction, error) {
 	kind, err := domain.ParseTransactionKind(t.Kind)
 	if err != nil {
@@ -180,18 +178,14 @@ func buildTransactionView(
 }
 
 // toTransactionView is the one converter for GetTransaction, ListTransactions
-// and MonthTotalsQuery. sqlc generates a distinct row type for each, but all
-// three select sqlc.embed(t) plus the same joined names and flags.
+// and MonthTotalsQuery: all three select sqlc.embed(t) plus the same joined
+// names and flags.
 //
-// beforeFrom and beforeTo are *bool, not because the LEFT JOIN makes them NULL
-// when there is no account on that side -- "fa.id IS NOT NULL AND ..."
-// evaluates to false, not NULL, in that case, so the raw SQL value is never
-// actually NULL here. sqlc still types the column as nullable because it
-// cannot prove a computed boolean expression is non-nullable, which is why the
-// field is *bool at all. buildTransactionView's own nil-ing (see its comment)
-// is what turns "false" into "no answer" for an absent side -- it is
-// load-bearing, not a belt-and-braces double-check of something the query
-// already guaranteed.
+// beforeFrom and beforeTo are *bool only because sqlc cannot prove a
+// computed boolean non-nullable: with no account on a side,
+// "fa.id IS NOT NULL AND ..." is false, not NULL. buildTransactionView's
+// nil-ing is what turns that false into "no answer"; it is load-bearing,
+// not a redundant check.
 func toTransactionView(
 	row sqlcgen.Transaction,
 	categoryName, paidByName, fromName, toName *string,
@@ -224,17 +218,13 @@ func (r *TransactionRepo) List(ctx context.Context, householdID string, f usecas
 		kind := f.Kind
 		params.Kind = &kind
 	}
-	// uuid() reports a malformed id with Valid: false, which the query's own
+	// uuid() reports a malformed id as Valid: false, which the query's own
 	// "IS NULL OR column = ..." form cannot tell apart from an absent filter --
-	// both arrive as SQL NULL, and NULL means "no filter" there. Left
-	// unchecked, a malformed id would silently return the whole household's
-	// ledger instead of the empty result a caller filtering on a nonsense id
-	// actually asked for -- fail-open, not fail-closed, on a value we did not
-	// construct. Checking Valid here and refusing early is what keeps this
-	// filter matching nothing. Kind gets this for free (it is a non-nullable
-	// Go type, so a nonsense value simply matches no row); the cursor id does
-	// not, and carries its own Valid check further down for the reason
-	// spelled out there.
+	// both arrive as SQL NULL, meaning "no filter". Left unchecked this fails
+	// open: a malformed id would return the whole household's ledger instead
+	// of the empty result it should. Checking Valid here and refusing early
+	// keeps it matching nothing. Kind needs no such check (a nonsense value
+	// simply matches no row); the cursor id has its own, further down.
 	if f.AccountID != "" {
 		id := uuid(f.AccountID)
 		if !id.Valid {
@@ -263,21 +253,17 @@ func (r *TransactionRepo) List(ctx context.Context, householdID string, f usecas
 	// transactions that share a day.
 	if !f.CursorDate.IsZero() && f.CursorID != "" {
 		// A malformed id reaches SQL as NULL, and a NULL on the right of a
-		// row-value comparison does NOT return nothing -- checked against the
-		// Postgres 17 this runs on. `(t.occurred_on, t.id) < (date, NULL)`
-		// stops at the first unequal pair: every row dated strictly before
-		// the cursor date compares true without the id being examined at all,
-		// and only rows dated ON the cursor date fall through to the NULL and
-		// drop out. So an unguarded bad cursor re-serves almost the whole
-		// page rather than returning nothing -- fail-open, the same direction
-		// as the three filters above, just less obviously.
+		// row-value comparison does NOT make it match nothing (verified
+		// against the Postgres 17 this runs on): rows strictly before the
+		// cursor date compare true without the id being examined, and only
+		// same-day rows hit the NULL and drop out. An unguarded bad cursor
+		// therefore re-serves almost the whole page -- fail-open, like the
+		// filters above, just less obvious.
 		//
-		// decodeCursor (transaction_handlers.go) refuses a malformed id with
-		// a 422 before this line can be reached, so no test in this suite can
-		// tell this guard from its absence. It is here regardless: this port
-		// must not depend on one particular caller having validated first,
-		// and "the id filters fail closed, the cursor does not" is exactly
-		// the kind of exception nobody remembers.
+		// decodeCursor (transaction_handlers.go) already guards this with a
+		// 422, so no test here can tell this check from its absence. It
+		// stays anyway: this port must not depend on one caller having
+		// validated first.
 		id := uuid(f.CursorID)
 		if !id.Valid {
 			return []usecase.TransactionView{}, nil
@@ -326,17 +312,19 @@ func (r *TransactionRepo) MonthTotals(ctx context.Context, householdID string, m
 }
 
 const (
-	// defaultTransactionLimit matches the ledger's own page size. maxTransactionLimit
-	// is what stops a caller asking for the whole ledger in one request --
-	// nothing in the UI sends a limit at all, so this only ever bounds a
-	// hand-written request.
+	// defaultTransactionLimit matches the ledger's own page size.
+	// maxTransactionLimit stops a caller asking for the whole ledger at once
+	// -- nothing in the UI sends a limit, so this only bounds a hand-written
+	// request.
 	defaultTransactionLimit = 50
 	maxTransactionLimit     = 200
 )
 
-// startOfMonth normalises any instant to the first day of its month, in UTC.
-// occurred_on is a date column and this product stores no timezone per
-// household, so a month is a calendar month and not a range of instants.
+// startOfMonth returns midnight UTC on the first of t's month, reading the
+// year and month in t's own location, exactly like the usecase package's
+// startOfMonth. occurred_on is a date column and this product stores no
+// timezone per household, so a month is a calendar month and not a range of
+// instants.
 func startOfMonth(t time.Time) time.Time {
 	return time.Date(t.Year(), t.Month(), 1, 0, 0, 0, 0, time.UTC)
 }

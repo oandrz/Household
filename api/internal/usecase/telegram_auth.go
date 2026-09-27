@@ -22,14 +22,11 @@ const (
 	telegramLinksPerHourLimit = 3
 )
 
-// telegramDeadLinkMessage is the answer for an unknown nonce, an expired one,
-// an already-consumed one, a chat over its hourly limit, and a /start that
-// lands while the global daily sign-up ceiling is breached (see sendSignUp).
-// One message for all five, deliberately: any difference between them would
-// let a caller tell the cases apart by probing, and none of "rate-limited",
-// "the platform is over its daily ceiling" or "this link is dead" is
-// something a caller should be able to confirm over "start again from the
-// app".
+// telegramDeadLinkMessage answers an unknown, expired or already-consumed
+// nonce, a chat over its hourly limit, and a /start during a breached global
+// sign-up ceiling (see sendSignUp) -- one message for all five, so a caller
+// can't tell "rate-limited" from "ceiling breached" from "dead link" by
+// probing.
 const telegramDeadLinkMessage = "That sign-in link has expired. Start again from the app."
 
 // telegramLinkRefusedMessage is the answer for every link that cannot be
@@ -70,19 +67,17 @@ type TelegramStartLink struct {
 }
 
 // StartLink mints a nonce and returns the deep link that carries it into
-// Telegram. It takes no identifier -- no email, no username, nothing -- which
-// is why this endpoint has no enumeration oracle to defend: there is nothing
-// to probe for.
+// Telegram. It takes no identifier -- no email, no username -- so there's
+// nothing to probe for.
 func (s *TelegramAuthService) StartLink(ctx context.Context) (TelegramStartLink, error) {
 	raw, hash, err := s.d.Tokens.NewToken()
 	if err != nil {
 		return TelegramStartLink{}, fmt.Errorf("generate telegram nonce: %w", err)
 	}
 	expiresAt := s.d.Clock.Now().Add(telegramNonceTTL)
-	// The id Create now returns is unused here: a sign-in nonce is never
-	// polled by row id -- HandleStart delivers the resulting magic link
-	// straight into the chat, and the browser waiting on it never learns
-	// this row exists.
+	// The id Create returns is unused here: a sign-in nonce is never polled
+	// by row id. HandleStart delivers the resulting magic link straight into
+	// the chat, and the waiting browser never learns this row exists.
 	if _, err := s.d.Links.Create(ctx, "", hash, expiresAt); err != nil {
 		return TelegramStartLink{}, fmt.Errorf("store telegram nonce: %w", err)
 	}
@@ -93,19 +88,17 @@ func (s *TelegramAuthService) StartLink(ctx context.Context) (TelegramStartLink,
 }
 
 // HandleStart is called by the poller for every /start. It returns an error
-// only for failures worth retrying or alerting on; every ordinary refusal is
-// answered in the chat and returns nil, because the person on the other end
-// needs an answer, not a stack trace. This split matters beyond style: the
-// poller advances its offset before dispatching (see poller.go), so an update
-// whose handler returns an error is dropped permanently and nobody is ever
-// told anything -- an ordinary refusal MUST be answered here, in the chat, or
-// it is answered nowhere.
+// only for failures worth retrying or alerting on; an ordinary refusal is
+// answered in the chat and returns nil. This split matters beyond style: the
+// poller advances its offset before dispatching (poller.go), so a handler
+// that returns an error drops the update permanently -- an ordinary refusal
+// MUST be answered here or nowhere.
 func (s *TelegramAuthService) HandleStart(ctx context.Context, chatID int64, payload, username string) error {
-	// An invite payload is routed here before the nonce table is touched at
-	// all: migration 00018's comment reserved the inv_ prefix so an invite
-	// never has to occupy a telegram_link_requests row, which lives ten
-	// minutes while an invite lives a day. Consuming first would spend a
-	// nonce that was never minted and answer a real invite as a dead link.
+	// An invite payload is routed here before the nonce table is touched: the
+	// inv_ prefix (migration 00018) means an invite never occupies a
+	// telegram_link_requests row, which lives ten minutes while an invite
+	// lives a day. Consuming first would spend a nonce that was never minted
+	// and answer a real invite as a dead link.
 	if rawToken, ok := strings.CutPrefix(payload, telegramInvitePayloadPrefix); ok {
 		return s.handleInviteStart(ctx, chatID, rawToken, username)
 	}
@@ -123,12 +116,11 @@ func (s *TelegramAuthService) HandleStart(ctx context.Context, chatID int64, pay
 	}
 
 	// A link nonce is answered here and goes no further: it mints no token,
-	// so the per-chat limit below -- which exists to bound magic-link and
-	// signup rows -- has nothing to bound on this path. Ordering matters
-	// beyond tidiness: a rate-limited link nonce is already consumed and
-	// already carrying a user id, which the browser derives as "pending", so
+	// so the per-chat limit below has nothing to bound on this path.
+	// Ordering matters beyond tidiness: a rate-limited link nonce is already
+	// consumed and carries a user id the browser reads as "pending" --
 	// refusing it here would tell the chat the link was dead while the
-	// browser offered a Confirm button that worked. Decision 4 of the spec.
+	// browser's Confirm button still worked.
 	if redemption.UserID != "" {
 		return s.handleLinkStart(ctx, chatID, redemption)
 	}
@@ -156,14 +148,14 @@ func (s *TelegramAuthService) HandleStart(ctx context.Context, chatID int64, pay
 }
 
 // handleLinkStart answers a /start that redeemed a link nonce. It writes no
-// binding: the browser session that minted the nonce confirms, and that is
-// the whole of the protection against a leaked deep link (ADR 10).
+// binding: the browser session that minted the nonce confirms, and that's
+// the whole protection against a leaked deep link (ADR 10).
 //
-// Every refusal here is bland and identical, for the reason
-// telegramDeadLinkMessage gives: a chat holding a nonce it may have stolen
-// must not learn whether the account exists, already has a chat, or belongs
-// to someone else. The session that minted it is told the real reason,
-// because it has already proved who it is.
+// Every refusal here is bland and identical (telegramDeadLinkMessage's own
+// reason): a chat holding a possibly-stolen nonce must not learn whether
+// the account exists, has a chat, or belongs to someone else. The session
+// that minted it gets the real reason, since it has already proved who it
+// is.
 func (s *TelegramAuthService) handleLinkStart(ctx context.Context, chatID int64, r TelegramLinkRedemption) error {
 	boundTo, err := s.d.Accounts.ByChatID(ctx, chatID)
 	switch {
@@ -179,12 +171,10 @@ func (s *TelegramAuthService) handleLinkStart(ctx context.Context, chatID int64,
 }
 
 // handleLinkStartForUnboundChat answers a link nonce redeemed from a chat
-// that has no binding of its own -- decision 2's fourth row applies here:
-// if the nonce's user already has a *different* chat bound, this chat is
-// refused with the same bland line the other refusals use, not told to go
-// confirm. Without this check the person would be sent back to Hearth
-// believing the link worked, only for Confirm to refuse them there --
-// exactly the round trip the row exists to save.
+// with no binding of its own. If the nonce's user already has a *different*
+// chat bound, this chat is refused with the same bland line, not told to go
+// confirm -- without this check, the person would be sent back to Hearth
+// believing the link worked, only for Confirm to refuse them there.
 func (s *TelegramAuthService) handleLinkStartForUnboundChat(ctx context.Context, chatID int64, userID string) error {
 	_, err := s.d.Accounts.ByUserID(ctx, userID)
 	switch {
@@ -198,15 +188,14 @@ func (s *TelegramAuthService) handleLinkStartForUnboundChat(ctx context.Context,
 }
 
 // handleInviteStart answers a tap on a household invite link. It writes no
-// membership: the owner's signed-in browser admits, and that is the whole
-// of the protection against a leaked link (ADR 11, following ADR 10).
+// membership: the owner's signed-in browser admits, the whole protection
+// against a leaked link (ADR 11, following ADR 10).
 //
-// Every refusal is telegramDeadLinkMessage, the same sentence an unknown
-// sign-in nonce gets, for the reason that constant's own comment gives.
-// A chat that already belongs to a Hearth account is refused with a
-// different, self-describing line: it tells the tapper only about their own
-// chat, which they already know, and saves them tapping a dead link
-// forever (spec decision 15).
+// Every refusal is telegramDeadLinkMessage, the same line an unknown
+// sign-in nonce gets, for the same reason. A chat that already belongs to a
+// Hearth account gets a different, self-describing line instead: it tells
+// the tapper only about their own chat, which they already know, and saves
+// them tapping a dead link forever.
 func (s *TelegramAuthService) handleInviteStart(ctx context.Context, chatID int64, rawToken, username string) error {
 	code, err := s.d.Invites.Knock(ctx, rawToken, chatID, username)
 	switch {
@@ -239,35 +228,30 @@ func (s *TelegramAuthService) sendSignIn(ctx context.Context, chatID int64, user
 // sendSignUp mints a Telegram-channel sign-up token, the same way
 // SignupService.Request mints one for a fresh email address.
 //
-// CONTROLLER RULING R5: before minting, this checks the same global daily
-// ceiling SignupService.Request checks (SignupGlobalDailyLimit, counted from
-// startOfDay -- see Request's own doc comment for why a calendar day and not
-// a rolling 24 hours). Signups.CountSince has no channel filter: it counts
-// every row in the signups table regardless of whether Create,
-// CreateConsumed or CreateForTelegram wrote it. Without this check, a flood
-// of /start commands could run that shared counter up and silently stop
-// email sign-up too, while Telegram sign-up itself had no ceiling of its own
-// at all -- the worst of both directions at once.
+// Before minting, this checks the same global daily ceiling
+// SignupService.Request checks (SignupGlobalDailyLimit, counted from
+// startOfDay -- see startOfDay for which zone's midnight). Signups.CountSince
+// has no channel filter: it counts every row regardless of which writer
+// created it. Without this check, a flood of /start commands could run that
+// shared counter up and silently stop email sign-up too, while Telegram
+// sign-up itself had no ceiling of its own -- the worst of both directions
+// at once.
 //
-// This is deliberately NOT the same "every read runs unconditionally, on
-// every branch" symmetry SignupService.Request enforces between its two
-// branches, and that is safe for a reason specific to the branch key, not to
-// the nonce. Request needs that symmetry because its branch key -- the email
-// address -- is supplied by the caller: whoever is guessing addresses picks
-// which branch of Request they land on, so the two branches must look and
-// cost the same from outside, or the caller learns which addresses are
-// registered. HandleStart's branch key is chat_id, and chat_id is never
-// caller-supplied: it arrives inside an Update Telegram itself delivers over
-// the authenticated long-poll connection (see adapter/telegram/poller.go and
-// Client.GetUpdates), so whoever is on the other end of this call can only
-// ever land on their own chat's branch -- there is no address to guess, only
-// the one chat that is already theirs. (StartLink taking no identifier is a
-// separate, true fact -- it means there is no enumeration surface on that
-// endpoint either -- but it is not what makes this asymmetry safe; chat_id's
-// authenticity is.) If chat_id ever became caller-suppliable -- an unsigned
-// webhook, a debug endpoint, a replayed update accepted without verifying
-// its source -- this asymmetry would need revisiting before that change
-// shipped, not after.
+// This deliberately does NOT have the same "every read runs unconditionally
+// on every branch" symmetry SignupService.Request enforces, and that's safe
+// because it concerns the branch key, not the nonce. Request needs that
+// symmetry because its branch key -- the email address -- is caller-supplied:
+// whoever guesses addresses picks which branch they land on, so the
+// branches must look and cost the same from outside. HandleStart's branch
+// key is chat_id, and chat_id is never caller-supplied: it arrives inside an
+// Update Telegram delivers over its authenticated long-poll connection
+// (adapter/telegram/poller.go, Client.GetUpdates), so a caller can only ever
+// land on their own chat's branch -- there's no address to guess. (StartLink
+// taking no identifier is a separate fact, not what makes this safe;
+// chat_id's authenticity is.) If chat_id ever became caller-suppliable -- an
+// unsigned webhook, a debug endpoint, a replayed update accepted without
+// verifying its source -- this asymmetry would need revisiting before that
+// change shipped.
 func (s *TelegramAuthService) sendSignUp(ctx context.Context, chatID int64, now time.Time) error {
 	globalCount, err := s.d.Signups.CountSince(ctx, startOfDay(now))
 	if err != nil {
@@ -275,10 +259,9 @@ func (s *TelegramAuthService) sendSignUp(ctx context.Context, chatID int64, now 
 	}
 	if globalCount >= SignupGlobalDailyLimit {
 		// Named "sign-up ceiling", not "mail ceiling": this path sends no
-		// mail at all. signup.go's own log line says "mail ceiling" because
-		// that path really does relay through SMTP; an operator grepping
-		// this line for a mail outage would otherwise chase SMTP for a
-		// Telegram request that never touched it.
+		// mail. signup.go's line says "mail ceiling" because that path
+		// really does relay SMTP -- an operator grepping for a mail outage
+		// shouldn't chase SMTP for a Telegram request that never touched it.
 		slog.Error("telegram sign-up declined by the global daily sign-up ceiling",
 			"global_count", globalCount,
 			"global_daily_limit", SignupGlobalDailyLimit,
@@ -298,11 +281,10 @@ func (s *TelegramAuthService) sendSignUp(ctx context.Context, chatID int64, now 
 		s.d.BaseURL, raw))
 }
 
-// SendSignIn and SendLinkCancelled implement InviteChats. They live here
-// rather than in InviteService because TelegramAuthService owns every word
-// the bot says and owns the one path that mints a magic link -- a second
-// one would mean two expiry rules and two rate limits drifting apart, which
-// is the same reasoning this type's own doc comment gives.
+// SendSignIn and SendLinkCancelled implement InviteChats. They live here,
+// not InviteService, because TelegramAuthService owns every word the bot
+// says and the one path that mints a magic link -- a second path would mean
+// two expiry rules and two rate limits drifting apart.
 func (s *TelegramAuthService) SendSignIn(ctx context.Context, chatID int64, userID string) error {
 	return s.sendSignIn(ctx, chatID, userID)
 }
@@ -314,11 +296,10 @@ func (s *TelegramAuthService) SendLinkCancelled(ctx context.Context, chatID int6
 var _ InviteChats = (*TelegramAuthService)(nil)
 
 // say sends text to chatID and wraps any failure with the calling method's
-// context, never with text itself: text carries a live magic-link or sign-up
-// URL on the sign-in and sign-up paths, and this error can reach
-// poller.go's slog.Error("telegram start handler failed", "error", err) --
-// wrapping the message body would write a live credential into the logs the
-// instant the send itself failed.
+// context, never with text itself: text carries a live magic-link or
+// sign-up URL, and this error can reach poller.go's
+// slog.Error("telegram start handler failed", ...) -- wrapping the body
+// would write a live credential into the logs the instant the send failed.
 func (s *TelegramAuthService) say(ctx context.Context, chatID int64, text string) error {
 	if err := s.d.Sender.SendMessage(ctx, chatID, text); err != nil {
 		return fmt.Errorf("send telegram message: %w", err)

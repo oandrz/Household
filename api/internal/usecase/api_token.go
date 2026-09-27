@@ -14,9 +14,9 @@ type APITokenDeps struct {
 }
 
 // APITokenService creates, lists and revokes a member's own tokens. It has
-// no say in what a token may do: a token authenticates exactly as the
-// member's session would, and the HTTP layer's guards decide the rest
-// (docs/superpowers/specs/2026-09-08-hearth-api-tokens-design.md).
+// no say in what a token may do -- it authenticates exactly as the
+// member's session would, and the HTTP layer's guards decide the rest.
+// docs/superpowers/specs/2026-09-08-hearth-api-tokens-design.md.
 type APITokenService struct{ d APITokenDeps }
 
 func NewAPITokenService(d APITokenDeps) *APITokenService { return &APITokenService{d: d} }

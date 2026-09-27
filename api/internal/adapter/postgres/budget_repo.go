@@ -15,10 +15,9 @@ import (
 	"github.com/andreasoentoro/hearth/api/internal/usecase"
 )
 
-// BudgetRepo keeps the pool alongside the pool-backed *sqlcgen.Queries, like
-// InviteRepo and SignupRepo, because Upsert needs to begin its own
-// transaction -- something a *sqlcgen.Queries built once at construction time
-// cannot do on its own.
+// BudgetRepo keeps the pool alongside *sqlcgen.Queries, like InviteRepo and
+// SignupRepo, because Upsert needs to begin its own transaction that a
+// Queries built once at construction time cannot start on its own.
 type BudgetRepo struct {
 	q    *sqlcgen.Queries
 	pool *pgxpool.Pool
@@ -83,14 +82,12 @@ func (r *BudgetRepo) Upsert(ctx context.Context, b domain.Budget) (domain.Budget
 		for _, line := range b.Lines {
 			// translate, not a plain fmt.Errorf wrap: a caller-submitted
 			// duplicate category id passes validateLineCategories (which
-			// dedupes before counting) and only fails here, against
-			// budget_lines' own UNIQUE (budget_id, category_id) -- by which
-			// point DeleteBudgetLines has already run inside this same
-			// transaction. Every statement in this transaction must return
-			// through translate for the same reason UpsertBudget does: no
-			// *pgconn.PgError may cross the adapter boundary, and this is
-			// the one call site that can otherwise carry one all the way to
-			// the usecase layer as a raw driver type.
+			// dedupes first) but fails here against budget_lines' UNIQUE
+			// (budget_id, category_id), after DeleteBudgetLines has already
+			// run in this transaction. Every statement here must go through
+			// translate so no *pgconn.PgError crosses the adapter boundary --
+			// this is the one call site that could otherwise leak one to the
+			// usecase layer.
 			if err := q.InsertBudgetLine(ctx, sqlcgen.InsertBudgetLineParams{
 				BudgetID:   budgetRow.ID,
 				CategoryID: uuid(line.CategoryID),
@@ -110,10 +107,9 @@ func (r *BudgetRepo) Upsert(ctx context.Context, b domain.Budget) (domain.Budget
 
 		// RolloverAmountMinor is deliberately nil here, not read off a second
 		// query: UpsertBudget's RETURNING has no join to goal_contributions
-		// (see budgetRolloverStamp's own comment), and the domain.Budget PUT
-		// hands back is never read for it -- putBudgetResponse's budgetDTO
-		// carries no rollover fields at all, unlike the GET response's
-		// top-level ones.
+		// (see budgetRolloverStamp's own comment), and putBudgetResponse's
+		// budgetDTO carries no rollover fields for the caller to read it
+		// from anyway.
 		result = toBudget(budgetRow.ID, budgetRow.HouseholdID, budgetRow.Month, budgetRow.ExpectedIncomeMinor,
 			currency, reCurrency(b.Lines, currency),
 			budgetRolloverStamp{budgetRow.RolledOverAt, budgetRow.RolloverGoalID, nil})
@@ -125,12 +121,11 @@ func (r *BudgetRepo) Upsert(ctx context.Context, b domain.Budget) (domain.Budget
 	return result, nil
 }
 
-// History returns the household's budgets for the closed months walked back
-// `months` from the viewed month, plus the viewed month itself if budgeted --
-// newest first, absent months simply missing. ListBudgetsInRange's own
-// comment explains why an inclusive [from, month] range over existing rows
-// gives exactly that shape without any per-month presence check in Go: a
-// month with no row never appears in the result at all.
+// History returns the household's budgets for the closed months walked
+// back `months` from the viewed month, plus the viewed month itself if
+// budgeted -- newest first, with absent months simply missing. See
+// ListBudgetsInRange's comment for why the inclusive range needs no
+// per-month presence check in Go.
 func (r *BudgetRepo) History(ctx context.Context, householdID string, month time.Time, months int) ([]domain.Budget, error) {
 	viewed := startOfMonth(month)
 	from := viewed.AddDate(0, -months, 0)
@@ -166,10 +161,9 @@ func (r *BudgetRepo) History(ctx context.Context, householdID string, month time
 
 	out := make([]domain.Budget, 0, len(rows))
 	for _, row := range rows {
-		// RolloverAmountMinor is nil here for the same reason Upsert's own
-		// call site is: ListBudgetsInRange has no join to goal_contributions,
-		// and budgetHistoryMonthDTO carries no rollover fields at all for
-		// History's caller to read it from.
+		// RolloverAmountMinor is nil here for the same reason as Upsert's call
+		// site: ListBudgetsInRange has no join to goal_contributions, and
+		// budgetHistoryMonthDTO carries no rollover fields to read it from.
 		out = append(out, toBudget(row.ID, row.HouseholdID, row.Month, row.ExpectedIncomeMinor, row.PrimaryCurrency,
 			linesByBudget[row.ID], budgetRolloverStamp{row.RolledOverAt, row.RolloverGoalID, nil}))
 	}
@@ -177,30 +171,23 @@ func (r *BudgetRepo) History(ctx context.Context, householdID string, month time
 }
 
 // RollOverToGoal writes a budget month's unspent money into a goal as one
-// contribution and stamps the month, in ONE transaction -- both statements or
+// contribution and stamps the month, in ONE transaction: both statements or
 // neither (usecase.BudgetRepository's own doc comment).
 //
-// in.Month is normalised with startOfMonth/dateOnly, the same pair Get and
-// Upsert already use for budgets.month, before it is used anywhere in this
-// method -- including as the value written into source_budget_month. That
-// normalisation is load-bearing beyond this method: GoalRepo.DeleteContribution's
-// ClearBudgetRollover matches budgets on the exact source_budget_month value
-// read back off the deleted contribution row, so writing anything other than
-// the first-of-month here would make that later clear match zero rows and
-// silently strand the stamp.
+// in.Month is normalised with startOfMonth/dateOnly before use anywhere
+// here, including source_budget_month: GoalRepo.DeleteContribution's
+// ClearBudgetRollover later matches budgets on that exact value, so
+// anything but the first-of-month would silently strand the stamp.
 //
-// The stamp itself is a conditional UPDATE (StampBudgetRollover, WHERE
-// rolled_over_at IS NULL). Zero rows updated is ambiguous by itself -- the
-// month may never have been budgeted, or it may already be stamped -- so
-// diagnoseUnstampedRollover below issues one follow-up SELECT inside this
-// same transaction to tell the two apart, rather than guessing.
+// The stamp is a conditional UPDATE (StampBudgetRollover, WHERE
+// rolled_over_at IS NULL). Zero rows updated is ambiguous -- never
+// budgeted, or already stamped -- so diagnoseUnstampedRollover issues one
+// follow-up SELECT in the same transaction to tell the two apart.
 //
-// A 23505 on goal_contributions' partial unique index
-// (goal_contributions_one_rollover_per_month) also maps to
-// domain.ErrRolloverAlreadyDone via translate's constraint-name check -- the
-// belt-and-braces the index's own migration comment describes, so a
-// concurrent pair that somehow both reach the INSERT cannot surface as an
-// unmapped 500.
+// A 23505 on the partial unique index
+// goal_contributions_one_rollover_per_month maps to
+// domain.ErrRolloverAlreadyDone via translate, so a concurrent pair racing
+// the INSERT cannot surface as an unmapped 500.
 func (r *BudgetRepo) RollOverToGoal(ctx context.Context, in usecase.RollOverToGoalInput) (domain.GoalContribution, error) {
 	month := dateOnly(startOfMonth(in.Month))
 	var result domain.GoalContribution
@@ -251,12 +238,10 @@ func (r *BudgetRepo) RollOverToGoal(ctx context.Context, in usecase.RollOverToGo
 }
 
 // diagnoseUnstampedRollover runs when StampBudgetRollover's conditional
-// UPDATE matches zero rows, which is ambiguous by itself: the month may never
-// have been budgeted at all, or it may already be stamped by an earlier
-// rollover. It reads the row back inside the SAME transaction to tell the two
-// apart, per usecase.BudgetRepository.RollOverToGoal's own doc comment --
-// a second, separate transaction here could race a concurrent Upsert or
-// rollover and read a different answer than the UPDATE above just saw.
+// UPDATE matches zero rows -- ambiguous by itself, since the month may
+// never have been budgeted or may already be stamped. It reads the row
+// back in the SAME transaction: a separate one could race a concurrent
+// Upsert or rollover and read a different answer than the UPDATE just saw.
 func diagnoseUnstampedRollover(ctx context.Context, q *sqlcgen.Queries, householdID string, month pgtype.Date) error {
 	stamp, err := q.GetBudgetRolloverStamp(ctx, sqlcgen.GetBudgetRolloverStampParams{
 		HouseholdID: uuid(householdID),
@@ -269,22 +254,21 @@ func diagnoseUnstampedRollover(ctx context.Context, q *sqlcgen.Queries, househol
 		return translate(err, "get budget rollover stamp")
 	}
 	if !stamp.Valid {
-		// StampBudgetRollover's own WHERE clause requires rolled_over_at IS
-		// NULL for it to have updated a row, so matching zero rows against an
-		// existing budget row should mean rolled_over_at is NOT NULL. Reading
-		// NULL back here anyway is a state this code did not construct --
-		// fail loud rather than carry an ambiguous result upward as either
-		// sentinel.
+		// StampBudgetRollover's WHERE clause requires rolled_over_at IS NULL
+		// to match a row, so zero rows matched against an existing budget
+		// should mean rolled_over_at is NOT NULL. Reading NULL back anyway is
+		// a state this code did not construct, so it fails loud instead of
+		// guessing.
 		return fmt.Errorf("postgres: budget for household %s matched no rows on stamp but rolled_over_at reads NULL", householdID)
 	}
 	return domain.ErrRolloverAlreadyDone
 }
 
-// currencyOf is ListBudgetLinesForBudgets' rows losing their household's
-// primary currency, which only ListBudgetsInRange's rows carry -- every
-// budget in one History call is the same household, so every row's currency
-// agrees, but the line rows have to look it up by budget id regardless
-// because that is the only field they share with the budget rows.
+// currencyOf looks up a budget's primary currency for
+// ListBudgetLinesForBudgets' rows, which don't carry it -- only
+// ListBudgetsInRange's rows do. Every budget in one History call shares the
+// same household and currency, but budget id is the only field the two row
+// types share, so the lookup still goes through it.
 func currencyOf(budgets []sqlcgen.ListBudgetsInRangeRow, budgetID pgtype.UUID) string {
 	for _, b := range budgets {
 		if b.ID == budgetID {
@@ -295,13 +279,12 @@ func currencyOf(budgets []sqlcgen.ListBudgetsInRangeRow, budgetID pgtype.UUID) s
 }
 
 // validateLineCategories refuses an Upsert whose lines include a category
-// that is not this household's -- including a category that belongs to
-// another household outright, the case a foreign-key check alone cannot
-// catch, because the FK only proves the row exists somewhere. Deduplicating
-// before counting means a caller-supplied duplicate category id (itself
-// invalid: budget_lines' own UNIQUE (budget_id, category_id) would refuse it
-// at insert time) can never make a legitimate household look short a
-// category it does own.
+// that is not this household's -- unknown, or another household's
+// outright, the case a foreign-key check alone can't catch, since the FK
+// only proves the row exists somewhere. Deduplicating before counting
+// stops a caller-supplied duplicate id (itself invalid: budget_lines'
+// UNIQUE (budget_id, category_id) would refuse it at insert) from making a
+// legitimate household look short a category it does own.
 func validateLineCategories(ctx context.Context, q *sqlcgen.Queries, householdID string, lines []domain.BudgetLine) error {
 	if len(lines) == 0 {
 		return nil
@@ -325,20 +308,18 @@ func validateLineCategories(ctx context.Context, q *sqlcgen.Queries, householdID
 	}
 	if int(count) != len(ids) {
 		// Wrapped, not translate()'d: this is an application-level check
-		// against a plain SELECT count, not a Postgres error code, so there
-		// is nothing for translate's pgconn.PgError switch to match. The
-		// wrap is what lets the HTTP layer's MapDomainError recognise this
-		// with errors.Is instead of falling through to an unmapped 500 --
-		// see domain.ErrBudgetCategoryUnknown's own doc comment.
+		// against a plain SELECT count, not a Postgres error code, so
+		// there's nothing for translate's pgconn.PgError switch to match.
+		// The wrap lets the HTTP layer's MapDomainError recognise it via
+		// errors.Is instead of falling through to an unmapped 500.
 		return fmt.Errorf("postgres: household %s: %w", householdID, domain.ErrBudgetCategoryUnknown)
 	}
 	return nil
 }
 
 // expectedIncomeMinor implements the nil <-> SQL NULL convention for
-// ExpectedIncome: nil means "chose not to say" and must reach the database as
-// NULL, never as a stored zero -- zero is a claim the household never made
-// (migrations/00006_budgets.sql's own comment).
+// ExpectedIncome: nil means "chose not to say" and must reach the database
+// as NULL, never a stored zero -- zero is a claim the household never made.
 func expectedIncomeMinor(m *domain.Money) *int64 {
 	if m == nil {
 		return nil
@@ -347,11 +328,11 @@ func expectedIncomeMinor(m *domain.Money) *int64 {
 	return &amount
 }
 
-// reCurrency rebuilds a Budget's lines with the currency actually read from
-// the household inside the same transaction, rather than trusting whatever
-// currency the caller's domain.Money happened to carry -- caps have no
-// currency column of their own (see UpsertBudget's comment), so the value
-// this method returns must always be the household's, not the caller's.
+// reCurrency rebuilds a Budget's lines with the currency read from the
+// household inside the same transaction, rather than trusting whatever
+// currency the caller's domain.Money happened to carry: caps have no
+// currency column of their own, so the returned value must always be the
+// household's.
 func reCurrency(lines []domain.BudgetLine, currency string) []domain.BudgetLine {
 	out := make([]domain.BudgetLine, len(lines))
 	for i, line := range lines {
@@ -378,18 +359,15 @@ func toBudgetLines(rows []sqlcgen.ListBudgetLinesRow, currency string) []domain.
 }
 
 // budgetRolloverStamp bundles rolled_over_at and rollover_goal_id, the two
-// columns 00007_goals.sql added to budgets and its rollover_stamp_is_whole
-// CHECK constraint keeps in lockstep at the schema level -- both NULL or
-// both set, never one without the other. Passing them into toBudget as one
-// value, rather than as two more positional params, is what keeps a caller
-// from ever being able to wire one half to a different row's other half.
+// columns 00007_goals.sql added to budgets and kept in lockstep by its
+// rollover_stamp_is_whole CHECK constraint -- both NULL or both set.
+// Passing them into toBudget as one value keeps a caller from wiring one
+// half to a different row's other half.
 //
-// RolloverAmountMinor rides along in the same struct for convenience, but it
-// is NOT the same guarantee: it comes from goal_contributions, a different
-// table, reached only by GetBudget's own LEFT JOIN -- there is no CHECK
-// constraint tying it to the two columns above, and Upsert/History's own
-// call sites below pass it as nil on purpose (see their comments). Only
-// Get's call site ever has a real value to pass.
+// RolloverAmountMinor rides along for convenience but is not the same
+// guarantee: it comes from goal_contributions via GetBudget's LEFT JOIN,
+// with no CHECK tying it to the other two. Upsert and History pass it as
+// nil on purpose; only Get has a real value.
 type budgetRolloverStamp struct {
 	RolledOverAt        pgtype.Timestamptz
 	RolloverGoalID      pgtype.UUID

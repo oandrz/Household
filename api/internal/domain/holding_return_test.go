@@ -8,13 +8,10 @@ import (
 )
 
 // What a holding earned over one period, split the three ways the PRD pins:
-// the change in market value of what is still held, the gain on what was sold,
-// and the cash it paid out along the way.
-//
-// The arithmetic is cost-carried -- each end of the period is measured as
+// the change in market value of what's still held, the gain on what was sold,
+// and the cash it paid out. The arithmetic is cost-carried -- each end is
 // (market value - cost of what is held) -- which is what makes "buying more
-// must never read as profit" true by construction rather than by a correcting
-// term. Most of the tests below are about the two ends.
+// must never read as profit" true by construction, not by a correcting term.
 
 // d is a day in 2026. The report's tests span months, so `on` (March only) is
 // no use here.
@@ -206,9 +203,9 @@ func TestAMissingOpeningPriceBlanksUnrealisedWithItsOwnReason(t *testing.T) {
 	}
 }
 
-// Rule one of the boundary decision: a price recorded after the period closed
-// is information the period did not have. Letting it serve would mean typing
-// today's price silently rewrites a quarter that has already been read.
+// A price recorded after the period closed is information the period did not
+// have -- letting it serve would mean typing today's price silently rewrites a
+// quarter someone has already read.
 func TestAPriceRecordedAfterThePeriodDoesNotCloseIt(t *testing.T) {
 	r := mustReturn(t, sgdHolding(), quarter(t, 2),
 		[]domain.HoldingEvent{buyOn(t, d(time.January, 5), 10, 100000)},
@@ -227,10 +224,9 @@ func TestAPriceRecordedAfterThePeriodDoesNotCloseIt(t *testing.T) {
 	}
 }
 
-// Rule two: a period's opening value is the preceding period's closing value,
-// so the opening price has to have been recorded in that preceding period. A
-// March price is not what June was worth, and computing from it would be the
-// stale-data failure the PRD names as its top product risk.
+// A period opens at the preceding period's closing value, so the opening price
+// must come from that preceding period -- a March price isn't what June was
+// worth, and using it would be the PRD's top-risk stale-data failure.
 func TestAPriceFromTwoPeriodsBackIsTooStaleToOpenAPeriod(t *testing.T) {
 	r := mustReturn(t, sgdHolding(), quarter(t, 3),
 		[]domain.HoldingEvent{buyOn(t, d(time.January, 5), 10, 100000)},
@@ -360,10 +356,10 @@ func TestTheReturnCarriesThePeriodItIsFor(t *testing.T) {
 
 // --- the boundaries themselves ----------------------------------------------
 //
-// The four tests below exist because a mutation survived without them: the
-// first and last days of a period, two prices inside one window, and a period
-// whose previous one is in another year. Every one of those is a place an
-// off-by-one lives, and this repository has recorded six of them.
+// These four tests exist because a mutation survived without them -- a
+// period's first and last days, two prices in one window, and a period whose
+// previous one is in another year, each a place an off-by-one lives; this
+// repository has recorded six of them.
 
 // An event on the period's FIRST day belongs to the period, not to the one
 // before it. Folded the other way, this holding would look like it was already
@@ -456,11 +452,10 @@ func TestTheFirstQuarterOfAYearOpensWhereTheLastOneClosed(t *testing.T) {
 
 // --- which price was used, and how old it is --------------------------------
 
-// The report has to say which price each end was measured at: the PRD's top
-// product risk is valuations quietly going stale, and a figure whose age is
-// invisible is exactly how that goes unnoticed. The dates come from here
-// rather than being re-derived by a caller, because re-deriving them means a
-// second copy of the window rule.
+// The report says which price closed and opened each end: valuations quietly
+// going stale is the PRD's top risk, and an invisible age is how that's
+// missed. Dates come from here, not a caller re-deriving them and duplicating
+// the window rule.
 func TestTheReturnSaysWhichPriceClosedAndOpenedThePeriod(t *testing.T) {
 	r := mustReturn(t, sgdHolding(), quarter(t, 2),
 		[]domain.HoldingEvent{buyOn(t, d(time.January, 5), 10, 100000)},

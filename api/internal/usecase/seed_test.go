@@ -33,9 +33,8 @@ func newSeedFixture() *seedFixture {
 	households := newHouseholdDouble()
 	spaces := newSpaceDouble()
 	notifications := newNotificationDouble()
-	// Seed never calls Admit, but newInviteDouble now always takes the
-	// telegram_accounts double it would write into, the same as every
-	// other fixture's invite double.
+	// Seed never calls Admit, but newInviteDouble takes the telegram_accounts
+	// double it would write into, like every other fixture's invite double.
 	inviteRepo := newInviteDouble(clock, users, members, newTelegramAccountRepoDouble())
 	mailer := newMailerDouble()
 	hasher := &fakeHasher{}
@@ -269,11 +268,12 @@ func TestSeedCreatesNotificationPreferencesWithEveryFlagOn(t *testing.T) {
 	}
 }
 
-// TestSeedRunTwiceDoesNotDuplicateAnything is the property that makes Task
-// 21 reachable: `make seed` runs exactly once by design, but nothing stops
-// an operator (or a flaky script) from running it again, and a second run
-// must not double up the household's members, spaces or invites -- and must
-// still hand back a usable invite URL.
+// TestSeedRunTwiceDoesNotDuplicateAnything is the property that makes the
+// browser walkthrough (`make up && make seed`) safe to rerun: `make seed`
+// runs exactly once by design, but nothing stops an operator (or a flaky
+// script) from running it again, and a second run must not double up the
+// household's members, spaces or invites -- and must still hand back a
+// usable invite URL.
 func TestSeedRunTwiceDoesNotDuplicateAnything(t *testing.T) {
 	f := newSeedFixture()
 	ctx := context.Background()
@@ -325,10 +325,10 @@ func TestSeedRunTwiceDoesNotDuplicateAnything(t *testing.T) {
 // TestSeedReissuesChristinesInviteOnceTheFixedOneHasExpired guards the gap a
 // pure "does an invite already exist" check would leave open: devInviteToken
 // is fixed so its URL is reproducible, but a fixed token also means its
-// invite row's hash can never be recreated once that row is dead. If Seed
-// re-ran after the 7-day inviteTTL had passed and just kept reporting the
-// same, now-expired URL, that would be exactly the silent dead end the
-// per-step idempotency design elsewhere in Seed exists to avoid.
+// invite row's hash can never be recreated once that row is dead. Reporting
+// the same, now-expired URL after the 7-day inviteTTL passed would be
+// exactly the silent dead end Seed's per-step idempotency design exists to
+// avoid.
 func TestSeedReissuesChristinesInviteOnceTheFixedOneHasExpired(t *testing.T) {
 	f := newSeedFixture()
 	ctx := context.Background()
@@ -369,14 +369,13 @@ func TestSeedReissuesChristinesInviteOnceTheFixedOneHasExpired(t *testing.T) {
 	}
 }
 
-// TestSeedAcrossTwoExpiryBoundariesKeepsExactlyOneLiveInvite is fix round
-// 1's finding 1, made concrete: checking devInviteToken's own hash and
-// nothing else meant a second expiry abandoned the first reissue live and
-// pending forever, sending a fresh real email every run after the first
-// expiry. Four runs across two expiry boundaries must instead hold exactly
-// one live invite at every point, reissuing only on a genuine expiry (twice
-// here, not three times) and reusing the still-live one on the run that
-// follows with nothing expired.
+// TestSeedAcrossTwoExpiryBoundariesKeepsExactlyOneLiveInvite guards against
+// checking devInviteToken's own hash and nothing else: that would let a
+// second expiry abandon the first reissue live and pending forever,
+// sending a fresh real email every run after. Four runs across two expiry
+// boundaries must hold exactly one live invite throughout, reissuing only
+// on a genuine expiry (twice here, not three) and reusing the still-live
+// one on the run where nothing has expired.
 func TestSeedAcrossTwoExpiryBoundariesKeepsExactlyOneLiveInvite(t *testing.T) {
 	f := newSeedFixture()
 	ctx := context.Background()
@@ -419,11 +418,11 @@ func TestSeedAcrossTwoExpiryBoundariesKeepsExactlyOneLiveInvite(t *testing.T) {
 	}
 }
 
-// TestSeedTreatsAConcurrentInviteCreateRaceAsAlreadyDone is fix round 1's
-// finding 2: issueChristineInviteAtNextRung tolerates domain.ErrAlreadyExists
-// from Create to close the window between its own ByTokenHash check and the
-// write, but that branch was unreachable through the double before
-// inviteDouble.Create could ever return it. This exercises it directly.
+// TestSeedTreatsAConcurrentInviteCreateRaceAsAlreadyDone:
+// issueChristineInviteAtNextRung tolerates domain.ErrAlreadyExists from
+// Create to close the window between its own ByTokenHash check and the
+// write; f.inviteRepo.failNextCreateWithAlreadyExists makes that branch
+// reachable; this exercises it directly.
 func TestSeedTreatsAConcurrentInviteCreateRaceAsAlreadyDone(t *testing.T) {
 	f := newSeedFixture()
 	ctx := context.Background()
@@ -451,10 +450,10 @@ func TestSeedTreatsAConcurrentInviteCreateRaceAsAlreadyDone(t *testing.T) {
 	}
 }
 
-// TestSeedReportsChristineAsAlreadyMemberOnceSheAccepts is fix round 1's
-// finding 1, part two: Seed must check membership before ever touching an
-// invite, so that accepting stops the seed from re-inviting (or even just
-// re-reporting a URL for) someone who is already a genuine owner.
+// TestSeedReportsChristineAsAlreadyMemberOnceSheAccepts: Seed must check
+// membership before ever touching an invite, so that accepting stops it
+// from re-inviting (or even just re-reporting a URL for) someone who is
+// already a genuine owner.
 func TestSeedReportsChristineAsAlreadyMemberOnceSheAccepts(t *testing.T) {
 	f := newSeedFixture()
 	ctx := context.Background()
@@ -501,17 +500,14 @@ func TestSeedReportsChristineAsAlreadyMemberOnceSheAccepts(t *testing.T) {
 }
 
 // TestSeedNamesTheOrphanedUserWhenChristinesMembershipWasRemovedAfterAccepting
-// pins the fix for the seed-time counterpart of the invite-500 finding:
-// InviteService.Create now refuses (ErrInviteeAlreadyRegistered) an invite to
-// an address that already has a users row, and Christine's row survives
-// MemberService.Remove deleting her membership (removing a member deletes
-// only the memberships row, not the user underneath it). Seed's own
-// christineIsMember check sees no membership and proceeds to re-invite her,
-// which now hits that same refusal -- correctly, since InviteRepo.Accept
-// would otherwise collide on her already-claimed users.email exactly as the
-// original finding described. Failing is right; the message must say what
-// to do about it, naming the row and the remedy the way ensureChild's
-// identical orphan case does.
+// pins the seed-time counterpart of a bug where InviteRepo.Accept collided
+// on an already-claimed users.email: InviteService.Create refuses
+// (ErrInviteeAlreadyRegistered) an invite to an address that already has a
+// users row, and Christine's row survives MemberService.Remove deleting her
+// membership (only the memberships row is deleted, not the user). Seed's
+// christineIsMember check sees no membership and re-invites her, correctly
+// hitting that refusal. Failing is right; the message must name the row and
+// the remedy, the way ensureChild's identical orphan case does.
 func TestSeedNamesTheOrphanedUserWhenChristinesMembershipWasRemovedAfterAccepting(t *testing.T) {
 	f := newSeedFixture()
 	ctx := context.Background()
@@ -554,10 +550,10 @@ func TestSeedNamesTheOrphanedUserWhenChristinesMembershipWasRemovedAfterAcceptin
 	}
 }
 
-// TestSeedRefusesToDuplicateAnOrphanedChild is fix round 1's finding 3: a
-// membership removed without deleting the underlying credential-less user
-// leaves an orphan no unique constraint protects, and Seed must refuse
-// rather than silently create a second Kayla.
+// TestSeedRefusesToDuplicateAnOrphanedChild: a membership removed without
+// deleting the underlying credential-less user leaves an orphan no unique
+// constraint protects, and Seed must refuse rather than silently create a
+// second Kayla.
 func TestSeedRefusesToDuplicateAnOrphanedChild(t *testing.T) {
 	f := newSeedFixture()
 	ctx := context.Background()

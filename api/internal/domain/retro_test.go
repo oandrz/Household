@@ -26,7 +26,7 @@ func TestParseMoodRefusesAnythingOutsideOneToFive(t *testing.T) {
 
 // The button starts the EARLIER of {previous month, current month} that has no
 // retro row, so a couple doing July's retro on 2 August files it as July and
-// August is still available afterwards (spec decision 5).
+// August is still available afterwards.
 func TestStartableMonth(t *testing.T) {
 	today := time.Date(2026, 8, 2, 21, 0, 0, 0, time.UTC)
 	july := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
@@ -88,11 +88,10 @@ func TestFirstSentenceTruncatesToSixtyRunes(t *testing.T) {
 	}
 }
 
-// Every fixture above is pure ASCII, where slicing bytes and slicing runes agree --
-// a regression to byte-slicing (trimmed[:firstSentenceMax-1]) would split a
-// multi-byte character in half and still pass every one of them. CJK characters are
-// three bytes each in UTF-8, so this is the smallest input that actually exercises
-// the boundary FirstSentence's own comment claims to protect.
+// Every fixture above is pure ASCII, where byte- and rune-slicing agree, so a
+// regression to byte-slicing would still pass all of them. CJK characters are
+// three bytes each in UTF-8 -- the smallest input that actually exercises the
+// boundary FirstSentence claims to protect.
 func TestFirstSentenceCutsOnARuneBoundary(t *testing.T) {
 	// 110 runes, no '.', '!' or '?' -- long enough that truncation fires.
 	note := strings.Repeat("春の話し合いは長かった", 10)

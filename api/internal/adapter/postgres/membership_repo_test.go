@@ -12,16 +12,14 @@ import (
 )
 
 // TestMembershipRepoRoundTrip exercises List, ByUser, UpdateWithCheck and
-// DeleteWithCheck, none of which repos_test.go's
-// TestMembershipRepoRejectsAnInvalidCapabilitySet reaches (that test only
-// exercises Create's error path). The checks here accept anything: the
-// household rules are the caller's, and the tests further down cover the
-// check itself. List in particular
-// joins users onto memberships and is the one conversion in this package
-// that draws from two row sources at once (row.UserID feeds both
+// DeleteWithCheck -- TestMembershipRepoRejectsAnInvalidCapabilitySet in
+// repos_test.go only covers Create's error path. The checks here accept
+// anything: the household rules are the caller's, and the tests further
+// down cover the check itself. List's join is the one conversion in this
+// package that draws from two row sources at once (row.UserID feeds both
 // Membership.UserID and User.ID; Email/DisplayName/AvatarInitial come from
-// the joined user) -- a mixed-up field assignment there would still compile
-// and would only be caught by an assertion like this one.
+// the joined user) -- a mixed-up assignment there would still compile, and
+// only an assertion like this one would catch it.
 func TestMembershipRepoRoundTrip(t *testing.T) {
 	db := openTestDB(t)
 	ctx := context.Background()
@@ -145,11 +143,11 @@ func twoOwnerHousehold(t *testing.T, db *postgres.DB) (householdID, firstID, sec
 	return h.ID, ids[0], ids[1]
 }
 
-// Two owners, and each is about to take the OTHER's ownership away -- one by
-// demoting, one by removing. Each change is legal on its own (the household
-// keeps one owner) and illegal together (it keeps none). Without a lock, both
-// checks read "two owners", both pass, both commit, and the household has
-// nobody left who can manage it.
+// Two owners, each about to take the OTHER's ownership away -- one by
+// demoting, one by removing. Each change is legal alone (the household
+// keeps one owner) and illegal together (it keeps none). Without a lock,
+// both checks read "two owners", both pass, and the household ends up
+// with nobody who can manage it.
 //
 // UpdateWithCheck and DeleteWithCheck close that by locking the household,
 // listing its memberships inside the same transaction, and running the

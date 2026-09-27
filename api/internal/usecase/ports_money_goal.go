@@ -25,13 +25,13 @@ type GoalMonthTotal struct {
 	AmountMinor int64
 }
 
-// GoalLookup is what a service OUTSIDE the goals feature needs to know about a
-// goal, and nothing more: fetch one by id. BudgetService.RollOver is the
-// caller -- it reads the target goal before rolling a month's unspent money
-// into it. A narrow port rather than the whole GoalRepository, for the same
-// interface-segregation reason HoldingCounter exists: the budget service must
-// not be able to grow a dependency on goal writes it was never meant to make.
-// Every GoalRepository satisfies it, so wiring passes the same repository.
+// GoalLookup is what a service OUTSIDE the goals feature needs to know
+// about a goal, and nothing more: fetch one by id. BudgetService.RollOver
+// is the only caller, reading the target goal before rolling a month's
+// unspent money into it. Narrow on purpose, the same interface-segregation
+// reason HoldingCounter exists: the budget service must not grow a
+// dependency on goal writes it was never meant to make. Every
+// GoalRepository satisfies it, so wiring passes the same repository.
 type GoalLookup interface {
 	// Get has GoalRepository.Get's contract exactly: domain.ErrNotFound for
 	// an unknown id and for another household's goal alike.
@@ -39,28 +39,24 @@ type GoalLookup interface {
 }
 
 // GoalRepository's implementation must not trust a contribution's household
-// scoping to be self-evident: 00007_goals.sql's goal_contributions table has
-// no database-level constraint tying goal_contributions.household_id to its
-// own goal_id's household_id, so a row could in principle carry a
-// household_id that disagrees with the goal it names. Every method below
-// that reads or writes a contribution -- AddContribution, DeleteContribution,
-// ListContributions, MonthContributionTotals -- must therefore filter its SQL
-// by household_id AND goal_id together, never by contribution id or goal id
-// alone, or a contribution could leak across households. Later tasks
-// implement this port; this is the contract they must honour.
+// scoping to be self-evident: goal_contributions (00007_goals.sql) has no
+// database-level constraint tying its household_id to its own goal_id's
+// household_id, so a row could carry a household_id that disagrees with the
+// goal it names. Every method that reads or writes a contribution --
+// AddContribution, DeleteContribution, ListContributions and
+// MonthContributionTotals -- must therefore filter by household_id AND
+// goal_id together, never by contribution id or goal id alone, or a
+// contribution could leak across households.
 type GoalRepository interface {
 	// List returns one household's goals with their contributed totals,
-	// ordered: dated goals first, newest TargetMonth first, ties by name;
-	// dateless goals (TargetMonth == nil) last, by name among themselves.
-	// A dateless goal never sorts ahead of a dated one, and never carries a
-	// "newest" of its own to compare by -- pinned here so an implementation's
-	// ORDER BY (e.g. target_month DESC NULLS LAST, name) cannot silently pick
-	// the opposite NULL placement. includeArchived is a UNION, not a filter
-	// swap: false returns the live goals, true returns the live ones AND the
-	// archived ones together, each carrying its own ArchivedAt. That is the
-	// AccountRepository.List / CategoryRepository.List contract, and the
-	// accounts screen's own "(archived)" row is what it renders as. Do not
-	// implement it as "archived instead".
+	// ordered: dated goals first (newest TargetMonth first, ties by name), then
+	// dateless goals (TargetMonth == nil) by name -- a dateless goal never
+	// sorts ahead of a dated one, pinned here so an ORDER BY (e.g. target_month
+	// DESC NULLS LAST, name) can't silently pick the opposite NULL placement.
+	// includeArchived is a UNION, not a filter swap: false returns the live
+	// goals, true returns live AND archived together, each carrying its own
+	// ArchivedAt -- the AccountRepository.List / CategoryRepository.List
+	// contract. Don't implement it as "archived instead".
 	List(ctx context.Context, householdID string, includeArchived bool) ([]GoalRecord, error)
 	// Get reports domain.ErrNotFound when no goal with this id exists in this
 	// household — including when one exists in a different household, which
@@ -77,15 +73,12 @@ type GoalRepository interface {
 	// GoalService.Update's own comment. Same collision contract as Create.
 	Update(ctx context.Context, g domain.Goal) (domain.Goal, error)
 	// SetArchived stamps archived_at with at, or clears it when archived is
-	// false -- the same signature AccountRepository.SetArchived uses, at
-	// supplied by the caller rather than read with time.Now() inside the
-	// port implementation, so today is always a parameter, never a clock
-	// reached for down here. Archiving is idempotent: a second archive call
-	// keeps the FIRST stamp rather than moving it forward to at
-	// (COALESCE(archived_at, $at) — the rule CategoryRepository.SetArchived's
-	// own SQL already applies, here with a caller-supplied timestamp in place
-	// of that query's now()), and keeps every contribution and rollover
-	// reference intact; there is no delete, the accounts precedent.
+	// false -- same signature as AccountRepository.SetArchived, at supplied by
+	// the caller rather than time.Now() inside the port. Archiving is
+	// idempotent: a second call keeps the FIRST stamp (COALESCE(archived_at,
+	// $at), the same rule CategoryRepository.SetArchived applies), and keeps
+	// every contribution and rollover reference intact -- there is no delete,
+	// the accounts precedent.
 	SetArchived(ctx context.Context, householdID, goalID string, archived bool, at time.Time) (domain.Goal, error)
 	// AddContribution writes one row. c.ID is ignored; the database assigns
 	// it. c.Amount's currency must equal the goal's — the service checks, and

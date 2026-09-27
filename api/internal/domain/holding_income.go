@@ -5,20 +5,16 @@ import (
 	"time"
 )
 
-// IncomeKind is which direction a cash movement that is not a trade went.
-//
-// A dividend, a coupon and a distribution are all IncomeReceived: they add to
-// what the holding earned without changing what is held or what it cost. A
-// custody, platform or storage charge is IncomeFee, and reduces it.
-//
-// Both are stored as POSITIVE amounts and the report subtracts fees when it
-// sums a period. Storing a fee as negative money would be the only negative
-// amount in this package, and one exception is how a rule stops being a rule.
-//
-// Brokerage on a trade is NOT a fee row: an acquisition records the whole
-// amount that left the bank and a disposal the whole amount that arrived, so
-// commission is already inside the cost basis and the proceeds. Only a charge
-// that buys nothing needs a row of its own.
+// IncomeKind is which direction a non-trade cash movement went. A dividend,
+// coupon or distribution is IncomeReceived, adding to what the holding earned
+// without touching what's held or what it cost; a custody, platform or storage
+// charge is IncomeFee, and reduces it. Both are stored POSITIVE and the report
+// subtracts fees when it sums a period: a negative fee would be the only
+// negative amount in this package, and one exception is how a rule stops
+// being a rule. Brokerage is NOT a fee row: an acquisition records the whole
+// amount that left the bank, a disposal the whole amount that arrived, so
+// commission is already inside the cost basis and proceeds; only a charge
+// that buys nothing gets its own row.
 type IncomeKind string
 
 const (
@@ -40,22 +36,15 @@ func ParseIncomeKind(s string) (IncomeKind, error) {
 	}
 }
 
-// HoldingIncome is one payment received from a holding, or one charge made
-// against it, on a day.
-//
-// It is deliberately NOT a HoldingEventKind. Income changes neither the
-// quantity held nor what that quantity cost, so folding it through the
+// HoldingIncome is one payment received from a holding, or one charge against
+// it, on a day. It's deliberately NOT a HoldingEventKind: income changes
+// neither the quantity held nor its cost, so folding it through the
 // average-cost pool would make every disposal after a dividend realise the
-// wrong number. It arrives with the period report instead, on its own footing
-// -- which is exactly what holding.go's HoldingEventKind comment promised.
-//
-// PrimaryAmount carries the household's own currency when the holding is not
-// already in it, under the same contract HoldingEvent.PrimaryAmount does: what
-// the owner knows is the amount that reached their bank, not the rate behind
-// it.
-//
-// ReceivedOn is the day the money moved, not the day it was typed. The report
-// buckets by it.
+// wrong number -- it arrives with the period report instead. PrimaryAmount
+// carries the household's currency under the same contract as
+// HoldingEvent.PrimaryAmount: the owner knows the amount that reached their
+// bank, not the rate. ReceivedOn is the day the money moved, not typed; the
+// report buckets by it.
 type HoldingIncome struct {
 	ID            string
 	HoldingID     string
@@ -77,23 +66,20 @@ func (i HoldingIncome) Validate(holdingCurrency, primaryCurrency string) error {
 	if i.Amount.Currency != holdingCurrency {
 		return fmt.Errorf("%w: income is %s, holding is %s", ErrCurrencyMismatch, i.Amount.Currency, holdingCurrency)
 	}
-	// One rule, one error, for zero and negative alike. Zero is refused for
-	// the reason a zero-quantity event is: nothing changed hands, so there is
-	// nothing to record. Negative is refused because a fee is entered as a
-	// positive amount and subtracted when the period is summed -- which is
-	// exactly what this error's message tells the person, so it serves a
-	// negative better than a generic "cannot be negative" would.
+	// Zero and negative share one error. Zero means nothing changed hands, the
+	// reason a zero-quantity event is refused too; negative means a fee was
+	// entered wrong -- fees are positive and subtracted at summary time, which
+	// this error's message says, better than a generic "cannot be negative".
 	if i.Amount.Amount <= 0 {
 		return fmt.Errorf("%w: got %d", ErrHoldingIncomeAmountNotPositive, i.Amount.Amount)
 	}
 	return validatePrimaryAmount(i.PrimaryAmount, holdingCurrency, primaryCurrency)
 }
 
-// InPrimary is the amount in the household's own currency: the separately
-// recorded one when the holding is in some other currency, the native amount
-// when it is already in the household's. Same contract as
-// HoldingEvent.inPrimary, exported because the report sums these outside the
-// fold.
+// InPrimary is the amount in the household's currency: the separately
+// recorded one when the holding is in another currency, the native amount
+// otherwise. Same contract as HoldingEvent.inPrimary, exported for the report
+// to sum outside the fold.
 func (i HoldingIncome) InPrimary() Money {
 	if i.PrimaryAmount != nil {
 		return *i.PrimaryAmount

@@ -25,10 +25,9 @@ func ParseMood(n int) (Mood, error) {
 // StartableMonth answers which month the "Start retro" button begins: the
 // EARLIER of {previous month, current month} that has no retro row yet.
 //
-// A couple doing July's retro on 2 August means July, not August -- the
-// design's own example retro is dated Jun 28, near the edge of its month --
-// and August stays available afterwards. When both months already have a
-// retro there is nothing to start, and the page opens what exists instead.
+// A couple doing July's retro on 2 August means July, not August, and August
+// stays available afterwards. With both months already covered there is
+// nothing to start, and the page opens what exists instead.
 //
 // today is a parameter, never time.Now() reached for in here: every other
 // date rule in this codebase takes its clock from the caller, which is what
@@ -48,15 +47,16 @@ func StartableMonth(today time.Time, currentExists, previousExists bool) (time.T
 }
 
 // firstSentenceMax is the fallback budget for notes that never terminate a
-// sentence, counted with the trailing ellipsis included: 60 characters is
-// what fits the design's history row beside the mood and the action count
-// without wrapping (docs/superpowers/specs/2026-08-16-hearth-retros-design.md:278).
+// sentence, counted with the trailing ellipsis included: 60 characters fits
+// the design's history row beside the mood and the action count without
+// wrapping (docs/superpowers/specs/2026-08-16-hearth-retros-design.md, the
+// "First sentence" row).
 const firstSentenceMax = 60
 
 // FirstSentence is the quoted line in a history row: the design renders
 // `June 2026 · Mood 4/5 · 3 actions · "best month this year"`, and June's
 // notes open with exactly that sentence. Derived rather than a second field
-// nobody would fill twice (spec decision 7).
+// nobody would fill twice.
 func FirstSentence(notes string) string {
 	trimmed := strings.TrimSpace(notes)
 	if trimmed == "" {
@@ -68,11 +68,10 @@ func FirstSentence(notes string) string {
 	if utf8.RuneCountInString(trimmed) <= firstSentenceMax {
 		return trimmed
 	}
-	// Cut on a rune boundary: a note can hold any language, and slicing by
-	// byte position would split a multi-byte character in half. This is the
-	// same class of mistake initialOf (internal/adapter/postgres) already
-	// exists to avoid, for the same reason: ToUpper(name[:1]) sliced bytes,
-	// not runes, and produced mojibake for any non-ASCII display name.
+	// Cut on a rune boundary, not a byte position: a note can hold any
+	// language, and slicing bytes would split a multi-byte character in
+	// half -- the same mistake initialOf (adapter/postgres) exists to avoid,
+	// where ToUpper(name[:1]) produced mojibake for a non-ASCII name.
 	runes := []rune(trimmed)
 	return string(runes[:firstSentenceMax-1]) + "…"
 }

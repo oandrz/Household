@@ -101,10 +101,10 @@ func TestConverterDoesNotRememberAFailedLookup(t *testing.T) {
 	}
 }
 
-// "No rate" is an answer about the currency, not a failed lookup, so the
-// Converter remembers it for the request like a rate. Otherwise a live
-// provider could say "no rate" for EUR to one figure and give a rate to the
-// next, and a page would add EUR into a total while naming it as excluded.
+// "No rate" is an answer about the currency, not a failed lookup, so it's
+// remembered for the request like a rate -- otherwise a live provider could
+// answer "no rate" for one EUR figure and a rate for the next, and a page
+// would add EUR to a total while still naming it excluded.
 func TestConverterRemembersNoRateForTheRequest(t *testing.T) {
 	fx := newFXDouble()
 	c := usecase.NewConverter(fx, "SGD")

@@ -17,8 +17,8 @@ import (
 // agreementFixture is the two-owner household every write test starts from:
 // Alex and Casey (insertTestMembership creates owners), one "Money" section,
 // and the repository under test. A test needing a third owner adds one the
-// same way -- the signing set is every CURRENT owner (decision 4), so a third
-// owner is a third signature.
+// same way -- the signing set is every CURRENT owner, so a third owner is a
+// third signature.
 type agreementFixture struct {
 	repo    *postgres.AgreementRepo
 	db      *postgres.DB
@@ -41,8 +41,8 @@ func newAgreementFixture(t *testing.T) agreementFixture {
 	}
 }
 
-// propose files one add from Alex, which also records Alex's own signature in
-// the same transaction (decision 5).
+// propose files one add from Alex, which also records Alex's own signature
+// in the same transaction.
 func (f agreementFixture) propose(t *testing.T, body string) usecase.AgreementProposalRecord {
 	t.Helper()
 	p, err := f.repo.CreateProposal(context.Background(), usecase.AgreementProposalWrite{
@@ -101,14 +101,14 @@ func execSQL(t *testing.T, db *postgres.DB, sql string, args ...any) {
 	}
 }
 
-// heldConns is bill_repo_test.go:525-536's inline loop lifted into a function,
+// heldConns is bill_repo_test.go's inline loop lifted into a function,
 // because this file makes the same assertion three times. Polled rather than
 // sampled once: pgxpool runs a background health check on a 500ms timer that
 // briefly acquires an idle connection, so a single sample can catch an
 // unrelated blip, while a LEAKED connection never comes back -- requiring the
 // count to reach zero within a second tells the two apart without weakening
 // the claim. bill_repo_test.go keeps its own copy: rewiring a passing test in
-// an unrelated file is not this task's work.
+// an unrelated file is out of scope here.
 func heldConns(db *postgres.DB) int32 {
 	deadline := time.Now().Add(time.Second)
 	for {
@@ -154,10 +154,10 @@ func TestCreateProposalWritesNothingWhenTheProposerIsNotAnOwnerHere(t *testing.T
 	}
 }
 
-// The propose-time half of decision 13. CreateProposal makes the same
-// comparison Sign's step 2 makes, in its own transaction against its own row:
-// without it a stale proposer files an edit nobody can ever sign, and their
-// partner is told THEY are the one out of date.
+// CreateProposal makes the same previous_body comparison Sign's step 2
+// makes, in its own transaction against its own row: without it a stale
+// proposer files an edit nobody can ever sign, and their partner is told
+// THEY are the one out of date.
 func TestCreateProposalRefusesAStaleTarget(t *testing.T) {
 	ctx := context.Background()
 	f := newAgreementFixture(t)
@@ -211,11 +211,12 @@ func TestCreateProposalRefusesMalformedIDsPerKind(t *testing.T) {
 
 // Sign's fault is also on a late write: the apply INSERT is scoped through
 // agreement_sections, so a proposal repointed at another household's section
-// fails there, after the signature has already been written. Nine of the ten
-// pool connections (pool.go:23) are held for the duration, which is what
-// proves EVERY statement of Sign runs on the transaction's own connection --
-// a pool-backed call inside pgx.BeginFunc would block on a connection nothing
-// can release. The VisionRepo.Save hang, asserted rather than hoped for.
+// fails there, after the signature has already been written. Nine of the
+// pool's ten MaxConns connections are held for the duration, proving EVERY
+// statement of Sign runs on the transaction's own connection -- a
+// pool-backed call inside pgx.BeginFunc would block on a connection nothing
+// can release, the way VisionRepo.Save once hung; this test asserts that
+// rather than hoping it holds.
 func TestSignIsOneTransactionOnItsOwnConnection(t *testing.T) {
 	ctx := context.Background()
 	f := newAgreementFixture(t)
@@ -265,8 +266,8 @@ func TestSignIsOneTransactionOnItsOwnConnection(t *testing.T) {
 // One subtest per predicate of Sign's step 2 SELECT ... FOR UPDATE, so a
 // mutation cannot go red on the wrong one. All three answer
 // ErrAgreementChanged: "it vanished" and "someone changed it" are the same
-// thing to the caller (decision 13), and ErrNotFound would be false -- the
-// proposal WAS found, only its target moved.
+// thing to the caller, and ErrNotFound would be false -- the proposal WAS
+// found, only its target moved.
 func TestSignRefusesAChangedTarget(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -325,8 +326,8 @@ func TestSignRefusesAChangedTarget(t *testing.T) {
 	}
 }
 
-// Three owners (decision 4, counted live and in-transaction): the second
-// signature commits with the status unchanged, a repeat of it keeps the FIRST
+// Three owners, counted live and in-transaction: the second signature
+// commits with the status unchanged, a repeat of it keeps the FIRST
 // signed_at -- asserted by value, not by a row count -- and only the third
 // completes the change, writing exactly one agreements row. The last signer
 // pressing Agree twice is refused and writes no second row.
@@ -347,9 +348,9 @@ func TestSignCompletesOnlyWhenEveryCurrentOwnerHasSigned(t *testing.T) {
 			second.Status, second.ResolvedAt)
 	}
 
-	// A repeat Agree is idempotent and keeps the first signed_at (decision
-	// 16). Read out of the column, because a row count stays 1 whether the
-	// upsert left signed_at alone or overwrote it.
+	// A repeat Agree is idempotent and keeps the first signed_at. Read out of
+	// the column, because a row count stays 1 whether the upsert left
+	// signed_at alone or overwrote it.
 	if _, err := f.repo.Sign(ctx, usecase.AgreementSignatureWrite{
 		HouseholdID: f.h, ProposalID: p.ID, MembershipID: f.casey, At: at(5),
 	}); err != nil {
@@ -470,10 +471,10 @@ func TestParkThenWithdrawReadBackFieldByField(t *testing.T) {
 	}
 }
 
-// Decision 15 in both directions -- a comparison with its sides swapped
-// passes a one-legged test. Then decision 20: deleting the signer's
-// membership ROW directly, not the household whose cascade removes both sides
-// and proves nothing, must leave the proposal, its signatures and the
+// Tests Withdraw's proposer rule in both directions -- a comparison with its
+// sides swapped passes a one-legged test -- and that deleting the signer's
+// membership ROW directly (not the household, whose cascade would remove
+// both sides and prove nothing) leaves the proposal, its signatures and the
 // agreement in place.
 func TestWithdrawIsTheProposersUntilTheProposerLeavesAndTheRowsOutliveThem(t *testing.T) {
 	ctx := context.Background()
@@ -512,15 +513,14 @@ func TestWithdrawIsTheProposersUntilTheProposerLeavesAndTheRowsOutliveThem(t *te
 	}
 }
 
-// Park and Withdraw are both a guarded UPDATE with household_id in the
+// Park and Withdraw are both a guarded UPDATE scoped by household_id in the
 // WHERE clause, diagnosed on a zero-row match by ONE re-read through
-// Proposal -- which is the same household_id-scoped SELECT
-// TestProposalHidesAnotherHouseholdsProposal (agreement_repo_test.go) already
-// pins for the read half. This is that guarantee proven for the write half
-// too, called out explicitly rather than left to inference: a real id,
-// looked up under the WRONG household, must come back exactly as ErrNotFound
-// comes back for an id that does not exist at all, and it must not touch the
-// row it found under the correct household.
+// Proposal -- the same household_id-scoped SELECT
+// TestProposalHidesAnotherHouseholdsProposal already pins for reads. This
+// proves the same guarantee for the write half: a real id looked up under
+// the WRONG household must come back as ErrNotFound, exactly like an id
+// that does not exist at all, and must not touch the row under the correct
+// household.
 func TestParkAndWithdrawRefuseAnotherHouseholdsProposal(t *testing.T) {
 	ctx := context.Background()
 	f := newAgreementFixture(t)
@@ -545,20 +545,16 @@ func TestParkAndWithdrawRefuseAnotherHouseholdsProposal(t *testing.T) {
 	}
 }
 
-// TestSignIsOneTransactionOnItsOwnConnection's own starvation only exercises
-// an ADD proposal, so step 2's LockAgreementTarget is skipped entirely --
-// that call is never proven to run on the transaction's own connection.
-// Moved to r.q, it would run its FOR UPDATE in its own autocommit
-// transaction, releasing the target lock the instant it is taken, which
-// destroys decision 12's whole property while every existing test stays
-// green. This is a second starvation leg for an EDIT proposal, which reaches
-// LockAgreementTarget, and a THIRD owner so Casey's Agree is deliberately
-// NON-completing -- unlike the other starvation test, this call must
-// SUCCEED under nine held connections. That success is what exercises the
-// final GetAgreementProposal read-back too: both statements were mutation-
-// checked against this exact test (moved to r.q one at a time), and both
-// turned the call into a context-deadline failure -- recorded in the task 6
-// fix-round report, not repeated here as a third live mutation.
+// TestSignIsOneTransactionOnItsOwnConnection only exercises an ADD, so
+// LockAgreementTarget (step 2) is never proven to run on the transaction's
+// own connection. Moved to r.q, its FOR UPDATE would run in its own
+// autocommit transaction and release the target lock immediately, breaking
+// "signing locks the target row" while every existing test stays green.
+// This is that missing leg: an EDIT with a THIRD owner, so Casey's Agree
+// is deliberately NON-completing and must SUCCEED under nine held
+// connections, also exercising the final GetAgreementProposal read-back.
+// Both statements were mutation-checked (moved to r.q, one at a time) and
+// both turned the call into a deadline failure.
 func TestSignOnAnEditReachesTheTargetLockOnItsOwnConnection(t *testing.T) {
 	ctx := context.Background()
 	f := newAgreementFixture(t)
@@ -611,15 +607,14 @@ func TestSignOnAnEditReachesTheTargetLockOnItsOwnConnection(t *testing.T) {
 	}
 }
 
-// Finding 2's gap: nothing in the brief's own test list ever lets an edit or
-// a remove actually COMPLETE. Every "edit" and "remove" kind elsewhere in
-// this file hits a refusal path before applyAgreementChange ever runs, so
-// RemoveAgreement is never executed, the edit's remove-then-add ordering is
-// never exercised, and InsertAgreementProposal never runs kind = 'remove'
-// against the agreement_proposals_shape CHECK. This is decision 9's "removal
-// is a stamp, not a delete" and decision 12's target lock, both exercised
-// end to end: the old row is stamped removed (never deleted) and exactly one
-// new live row takes its place.
+// Nothing else in this file lets an edit or a remove actually COMPLETE.
+// Every "edit" and "remove" kind elsewhere in this file hits a refusal path
+// before applyAgreementChange ever runs, so RemoveAgreement is never
+// executed, the edit's remove-then-add ordering is never exercised, and
+// InsertAgreementProposal never runs kind = 'remove' against the
+// agreement_proposals_shape CHECK. This exercises "removal is a stamp, not
+// a delete" and the target lock end to end: the old row is stamped removed
+// (never deleted) and exactly one new live row takes its place.
 func TestSignCompletesAnEditRemovingTheOldRowAndAddingTheNew(t *testing.T) {
 	ctx := context.Background()
 	f := newAgreementFixture(t)
@@ -656,7 +651,7 @@ func TestSignCompletesAnEditRemovingTheOldRowAndAddingTheNew(t *testing.T) {
 			doc.Agreements, "we save 25%", edit.ID)
 	}
 	// Stamped removed, never deleted: the row still exists, and points at the
-	// edit that removed it -- decision 9's "it stays in Version history".
+	// edit that removed it -- "it stays in Version history".
 	if n := countRow(t, f.db,
 		`SELECT count(*) FROM agreements WHERE id = $1 AND removed_at IS NOT NULL AND removed_by_proposal_id = $2`,
 		target.ID, edit.ID); n != 1 {

@@ -12,9 +12,9 @@ import (
 
 // GoalProgress is the only thing Vision needs to know about a goal: what to
 // call it and how far along it is. Percent is already
-// domain.GoalProgressPercent's own capped 0-100 figure -- Vision does not
-// recompute it, because a second percent formula in this codebase is exactly
-// the kind of drift the Money specs spent five features avoiding.
+// domain.GoalProgressPercent's capped 0-100 figure; Vision does not
+// recompute it, because a second percent formula is exactly the kind of
+// drift the Money specs spent five features avoiding.
 type GoalProgress struct {
 	GoalID  string
 	Name    string
@@ -33,14 +33,13 @@ type GoalProgressReader interface {
 	// failure. Scoped by householdID in SQL, so a goal in another household
 	// is indistinguishable from one that does not exist.
 	//
-	// An archived goal counts as found and keeps its figure: archiving is
-	// not deletion anywhere else in this product either (spec decision 8),
-	// and only a real DELETE unlinks a measure by firing goals.id's
-	// ON DELETE SET NULL into vision_measures.goal_id. The implementing SQL
-	// must NOT filter on archived_at -- unlike GoalRepository.List, which
-	// takes an explicit includeArchived switch because its callers sometimes
-	// want live goals only, this method has no such caller: Vision always
-	// wants the figure a linked measure is pointing at, archived or not.
+	// An archived goal counts as found and keeps its figure -- archiving is
+	// not deletion anywhere else in this product either, and only a real
+	// DELETE unlinks a measure, via goals.id's ON DELETE SET NULL into
+	// vision_measures.goal_id. The implementing SQL must NOT filter on
+	// archived_at: unlike GoalRepository.List's explicit includeArchived
+	// switch, this method has no caller that wants live goals only -- Vision
+	// always wants the figure a linked measure points at, archived or not.
 	ProgressByIDs(ctx context.Context, householdID string, goalIDs []string) (map[string]GoalProgress, error)
 }
 
@@ -54,36 +53,33 @@ type VisionRepository interface {
 	Get(ctx context.Context, householdID string, year int) (domain.Vision, error)
 	// Save replaces the whole document in ONE transaction: upsert the parent,
 	// delete every child, insert the submitted ones. Partial success must be
-	// impossible -- the same transactional shape BudgetRepo.Upsert uses, and
-	// ONLY that shape: Budget carries no version and no concurrency guard at
-	// all, so its unconditional ON CONFLICT DO UPDATE is the right move
-	// there and the wrong one here. Reaching for that same clause on Vision's
-	// create path would silently destroy the guard the next paragraph
-	// describes.
+	// impossible -- the same transactional shape BudgetRepo.Upsert uses, but
+	// not its unconditional ON CONFLICT DO UPDATE, which is safe only because
+	// Budget carries no version or concurrency guard; reusing it here would
+	// destroy the guard below.
 	//
-	// Concurrency, in two cases that must not be collapsed:
-	//   v.Version == 0  -- a create. Succeeds only while that household-year
-	//                      has no row; reports domain.ErrVisionChanged if one
-	//                      appeared since the caller read the empty vision.
-	//                      The created row lands at version 1.
-	//   v.Version  > 0  -- an update, WHERE version = v.Version. Zero rows
-	//                      affected means either the vision was deleted or
-	//                      the other partner saved first, and those are
-	//                      different answers: re-read to tell them apart and
-	//                      report domain.ErrNotFound or
-	//                      domain.ErrVisionChanged accordingly.
-	//                      RetroRepo.Update's own comment explains why the
-	//                      cheap second read is worth it.
+	// Concurrency, in two cases that must not be collapsed. v.Version == 0 is a
+	// create: it succeeds only while the household-year has no row, reports
+	// domain.ErrVisionChanged if one appeared since the caller read the empty
+	// vision, and the new row lands at version 1. v.Version > 0 is an update,
+	// WHERE version = v.Version: zero rows affected means the vision was
+	// deleted or the other partner saved first, so re-read to tell them apart
+	// and report domain.ErrNotFound or domain.ErrVisionChanged accordingly
+	// (RetroRepo.Update explains why the second read is worth it).
 	//
-	// Either way, the domain.Vision returned on success carries the version
-	// AS STORED after the write -- 1 for a create, the stored value plus one
-	// for an update -- the same contract RetroRepository.Update documents:
-	// the caller never has to guess what to send on the next save.
+	// Either way, the returned domain.Vision carries the version AS STORED
+	// after the write -- 1 for a create, the stored value plus one for an
+	// update -- the same contract RetroRepository.Update documents: the caller
+	// never has to guess what to send next.
 	//
 	// A measure naming a goal outside this household must be refused with
-	// domain.ErrVisionGoalUnknown, checked INSIDE the transaction: the
-	// vision_measures FK only proves a goal exists somewhere, never that it
-	// is this household's -- the same hole validateLineCategories closes for
-	// budget lines.
+	// domain.ErrVisionGoalUnknown, checked INSIDE the transaction: the FK only
+	// proves a goal exists somewhere, never that it's this household's -- the
+	// same hole validateLineCategories closes for budget lines.
+	//
+	// The postgres implementation also reports domain.ErrVisionMeasureAmbiguous
+	// for a measure whose Kind is neither MeasureTyped nor MeasureLinked, and
+	// domain.ErrVisionYearOutOfRange when the vision's year or a milestone's
+	// year falls outside domain.MinVisionYear/MaxVisionYear.
 	Save(ctx context.Context, v domain.Vision) (domain.Vision, error)
 }

@@ -17,10 +17,9 @@ type telegramStartResponse struct {
 }
 
 // telegramBindingResponse is what GET, POST .../confirm and DELETE
-// /auth/telegram all answer with -- the account's Telegram binding, or the
-// lack of one. DELETE answers this with Connected: false rather than 204:
-// the panel re-renders from the body, and apiFetch throws on an ok response
-// it cannot parse.
+// /auth/telegram all answer with -- the binding, or its absence. DELETE
+// answers Connected: false rather than 204: the panel re-renders from the
+// body, and apiFetch throws on an ok response it cannot parse.
 type telegramBindingResponse struct {
 	Connected    bool       `json:"connected"`
 	ChatUsername string     `json:"chatUsername,omitempty"`
@@ -34,13 +33,11 @@ type telegramLinkStartResponse struct {
 }
 
 // telegramLinkStatusResponse is what the panel polls GET
-// /auth/telegram/link/{id} for. Reason is the sentence the panel shows for a
-// refused link, turned from the usecase's stable code by
-// telegramLinkReasonMessage -- the service may not hold user-facing copy
-// (internal/usecase may depend only on the standard library and
-// internal/domain), so this is the one place that sentence is written, and
-// it is the same sentence errors.go's 409 mapping gives the identical
-// refusal reached through confirm. Empty for every other status.
+// /auth/telegram/link/{id} for. Reason is the refusal sentence, built by
+// telegramLinkReasonMessage from the usecase's stable code -- the usecase
+// layer holds no user-facing copy, so this is the one place it's written,
+// matching errors.go's 409 mapping for the same refusal reached through
+// confirm. Empty for every other status.
 type telegramLinkStatusResponse struct {
 	Status       string `json:"status"`
 	ChatUsername string `json:"chatUsername,omitempty"`
@@ -48,12 +45,10 @@ type telegramLinkStatusResponse struct {
 }
 
 // telegramLinkReasonMessage turns Status's stable refusal code into the
-// sentence the panel shows. The two known codes share their wording with
-// errors.go's 409 mapping for the same refusal reached through confirm, so
-// the message exists once. An unrecognised code -- one this handler was not
-// written to expect -- answers "" rather than guessing: Reason is
-// `omitempty` on the wire, so the panel's own `reason ?? "..."` fallback
-// renders instead of a code leaking to the screen.
+// sentence the panel shows, matching errors.go's 409 mapping for the same
+// refusal via confirm. An unrecognised code fails closed and answers "":
+// with Reason `omitempty` on the wire, the panel's own fallback renders
+// instead of a raw code leaking to the screen.
 func telegramLinkReasonMessage(code string) string {
 	switch code {
 	case usecase.TelegramLinkReasonChatTaken:
@@ -66,12 +61,11 @@ func telegramLinkReasonMessage(code string) string {
 }
 
 // handleTelegramStart mints the deep link that carries a sign-in request into
-// Telegram. It reads no body and takes no identifier: the person is not
-// claiming to be anyone yet, which is why this route needs no oracle defence.
-//
-// A nil Deps.Telegram means no bot is configured, and the route answers 404 --
-// the same answer any unrouted path gets, so an install without Telegram gives
-// away nothing about whether the feature exists.
+// Telegram. It reads no body and takes no identifier, so it needs no oracle
+// defence -- nobody is claiming an identity yet. A nil Deps.Telegram means no
+// bot is configured; the route answers 404, same as any unrouted path, so an
+// install without Telegram gives away nothing about whether the feature
+// exists.
 func handleTelegramStart(deps Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if deps.Telegram == nil {
@@ -88,14 +82,11 @@ func handleTelegramStart(deps Deps) http.HandlerFunc {
 }
 
 // handleTelegramBinding answers this user's Telegram binding: connected
-// (chat, linkedAt) or not. domain.ErrNotFound from Binding means "this
-// member has no chat bound" -- the ordinary case for most members reaching
-// Settings, not an error -- so it is answered as connected: false, not
-// mapped through MapDomainError's 404.
-//
-// A nil Deps.TelegramLink means no bot is configured, and the route answers
-// 404 -- the same answer any unrouted path gets, so an install without
-// Telegram gives away nothing about whether the feature exists.
+// (chat, linkedAt) or not. domain.ErrNotFound from Binding means "no chat
+// bound", the ordinary case for most members reaching Settings, not an
+// error, so it answers connected: false rather than MapDomainError's 404. A
+// nil Deps.TelegramLink means no bot is configured: writeNotFound keeps that
+// indistinguishable from a route that doesn't exist.
 func handleTelegramBinding(deps Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if deps.TelegramLink == nil {
@@ -139,9 +130,9 @@ func handleTelegramLinkStart(deps Deps) http.HandlerFunc {
 // handleTelegramLinkStatus answers where a link request has got to: waiting,
 // pending (naming the redeeming chat), connected, refused (with a reason) or
 // expired. {id} is the telegram_link_requests row id, not the nonce -- safe
-// to hand to the browser because a row belonging to someone else answers
-// domain.ErrNotFound (404), not 403, the same rule every other route in this
-// API follows so a row id cannot be tested for existence.
+// to expose because a row owned by someone else answers 404
+// (domain.ErrNotFound), never 403, so a row id can't be probed for
+// existence -- the rule every route in this API follows.
 func handleTelegramLinkStatus(deps Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if deps.TelegramLink == nil {
@@ -162,9 +153,9 @@ func handleTelegramLinkStatus(deps Deps) http.HandlerFunc {
 }
 
 // handleTelegramLinkConfirm writes the binding for a pending link this
-// session's member minted, the moment spec decision 1 calls the security of
-// this feature: the deciding click happens inside a session that is already
-// authenticated, where a stolen deep link cannot reach.
+// session's member minted. The deciding click happens inside a session
+// that is already authenticated, where a stolen deep link cannot reach --
+// the security this feature rests on (ADR 10).
 func handleTelegramLinkConfirm(deps Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if deps.TelegramLink == nil {

@@ -36,16 +36,16 @@ func (m lockHoldingMembers) UpdateWithCheck(ctx context.Context, householdID, me
 		})
 }
 
-// A PATCH that leaves a field out means "keep what is there". The question
-// is WHEN "what is there" is read. If it is read before the household lock,
-// a capabilities-only PATCH can carry a stale role into the write and
+// A PATCH that omits a field means "keep what is there" -- the question is
+// WHEN "what is there" is read. Read before the household lock, a
+// capabilities-only PATCH can carry a stale role into the write and
 // silently undo a role change that committed in between.
 //
 // Here the owner promotes the limited member to owner and, while that
 // promotion holds the lock, sends a capabilities-only PATCH for the same
-// member. The capabilities-only request must see the promotion. It must
-// not write the old "limited" role back. The last-owner rule does not catch
-// this, because the caller is still an owner.
+// member. That request must see the promotion, not write the old "limited"
+// role back -- the last-owner rule doesn't catch this, since the caller is
+// still an owner.
 func TestACapabilitiesOnlyPatchCannotUndoARoleChangeItRacedWith(t *testing.T) {
 	env := newTestEnv(t)
 	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)

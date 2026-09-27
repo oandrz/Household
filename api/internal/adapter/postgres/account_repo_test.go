@@ -13,9 +13,8 @@ import (
 
 // fixtureOwnerName is the display name newAccountFixture's membership is
 // created with. TestAccountWithARealOwnerCarriesTheirDisplayName asserts
-// against this constant rather than newAccountFixture handing back a fourth
-// value, since every other fixture caller in this file only wants the
-// household and membership ids.
+// against it directly rather than a fourth return value, since no other
+// fixture caller in this file needs an owner name.
 const fixtureOwnerName = "Christine"
 
 // TestSharedAccountRoundTripsAsAnEmptyOwner is the "" <-> SQL NULL convention
@@ -51,14 +50,12 @@ func TestSharedAccountRoundTripsAsAnEmptyOwner(t *testing.T) {
 }
 
 // TestAccountWithARealOwnerCarriesTheirDisplayName is the other half of
-// TestSharedAccountRoundTripsAsAnEmptyOwner. AccountView.OwnerName was
-// introduced with the port and had never had a value or a test -- the
-// in-memory double just leaves it empty -- so the LEFT JOIN in GetAccount and
-// ListAccounts is the first place it can go wrong: a join that silently
-// selected the wrong column, or joined through the wrong table, would still
-// compile and still return some string. Only an assertion on the actual
-// value catches that, which is why this checks both Get and List rather than
-// just one of the three query converters.
+// TestSharedAccountRoundTripsAsAnEmptyOwner. The in-memory double leaves
+// OwnerName empty, so this is the only test that sees a real value.
+// OwnerName comes from a LEFT JOIN in GetAccount and ListAccounts that could
+// silently select the wrong column or table and still compile and return
+// some string, so only an assertion on the actual value catches that --
+// checked in both Get and List, not just one of the three query converters.
 func TestAccountWithARealOwnerCarriesTheirDisplayName(t *testing.T) {
 	db, householdID, membershipID := newAccountFixture(t)
 	repo := postgres.NewAccountRepo(db)
@@ -234,10 +231,9 @@ func TestMembershipBelongsToHousehold(t *testing.T) {
 }
 
 // TestOpeningBalanceAsOfKeepsItsCalendarDayRegardlessOfZone guards dateOnly's
-// promise (see its doc comment in convert.go): "the balance was true on the
-// 26th" must not depend on the zone the request arrived from. A caller who
-// means the 26th in their own zone but is already past midnight UTC must
-// still see the 26th come back -- not the 25th.
+// promise (see its doc comment in convert.go): a caller who means the 26th
+// in their own zone, but is already past midnight UTC, must still see the
+// 26th come back, not the 25th.
 func TestOpeningBalanceAsOfKeepsItsCalendarDayRegardlessOfZone(t *testing.T) {
 	db, householdID, _ := newAccountFixture(t)
 	repo := postgres.NewAccountRepo(db)
@@ -268,12 +264,11 @@ func TestOpeningBalanceAsOfKeepsItsCalendarDayRegardlessOfZone(t *testing.T) {
 }
 
 // newAccountFixture builds the household and membership every account test
-// needs: a valid household_id to satisfy the accounts table's foreign key,
-// and a real membership (owned by fixtureOwnerName) to assign as an
-// account's owner. It goes through the household/user/membership repos
-// rather than raw SQL, mirroring membership_repo_test.go's fixture, because
-// an account's owner must be a real membership row -- the same row
-// MembershipBelongsToHousehold and the owner_membership_id foreign key check.
+// needs: household_id for the accounts table's foreign key, and a real
+// membership (owned by fixtureOwnerName) to use as an account's owner --
+// through the repos, not raw SQL, since the owner must be a real membership
+// row, the same one MembershipBelongsToHousehold and the foreign-key check
+// use.
 func newAccountFixture(t *testing.T) (db *postgres.DB, householdID, membershipID string) {
 	t.Helper()
 	db = openTestDB(t)
@@ -305,18 +300,17 @@ func newAccountFixture(t *testing.T) (db *postgres.DB, householdID, membershipID
 }
 
 // insertSecondHousehold inserts a household distinct from newAccountFixture's,
-// for the tests that prove a household cannot reach another's accounts or
-// memberships. insertTestHousehold (schema_test.go) already inserts the
-// minimum valid household row; this just names that call's intent here
-// rather than writing a third household-inserting helper.
+// for the tests proving a household cannot reach another's accounts or
+// memberships. It wraps insertTestHousehold (schema_test.go) rather than
+// duplicating a household-inserting helper.
 func insertSecondHousehold(t *testing.T, db *postgres.DB) string {
 	t.Helper()
 	return insertTestHousehold(t, db)
 }
 
-// The doc comment on AccountView.Balance has promised this since the
-// same-day rule shipped: Balance is the opening balance plus every
-// transaction dated on or after opening_balance_as_of.
+// TestAccountBalanceSumsItsTransactions pins AccountView.Balance's contract:
+// the opening balance plus every transaction dated on or after
+// opening_balance_as_of.
 func TestAccountBalanceSumsItsTransactions(t *testing.T) {
 	db := openTestDB(t)
 	ctx := context.Background()
@@ -348,7 +342,7 @@ func TestAccountBalanceSumsItsTransactions(t *testing.T) {
 	mustCreate(domain.TransactionExpense, 12, 5000, accountID, "")
 	mustCreate(domain.TransactionIncome, 14, 20000, "", accountID)
 	// Dated ON the opening date: the opening balance is the figure at the
-	// START of that day (spec 2026-07-30, decision 1), so this counts.
+	// START of that day, so this counts.
 	mustCreate(domain.TransactionExpense, 10, 7777, accountID, "")
 	// Dated before it: already inside the opening figure, still excluded.
 	mustCreate(domain.TransactionExpense, 3, 9999, accountID, "")
@@ -377,8 +371,7 @@ func TestAccountBalanceSumsItsTransactions(t *testing.T) {
 
 	// ListAccountsIncludingArchived carries its own copy of the same
 	// expression -- three queries computing one figure, not two -- so it gets
-	// its own assertion rather than trusting that copy-pasting the SQL also
-	// copy-pasted correctly.
+	// its own assertion instead of trusting the copy-paste.
 	all, err := accounts.List(ctx, householdID, true)
 	if err != nil {
 		t.Fatalf("list accounts including archived: %v", err)
@@ -390,9 +383,8 @@ func TestAccountBalanceSumsItsTransactions(t *testing.T) {
 }
 
 // insertTestAccountAsOf is insertTestAccount with the two columns the
-// balance sum actually reads: the opening figure and the day it was true.
-// The transfer tests below need those to differ per account, which is the
-// whole point of the second one.
+// balance sum actually reads: the opening figure and the day it was true --
+// the transfer tests below need those to differ per account.
 func insertTestAccountAsOf(
 	t *testing.T, db *postgres.DB, householdID, nickname, currency string,
 	openingMinor int64, asOf time.Time,
@@ -424,14 +416,13 @@ func balancesByNickname(t *testing.T, views []usecase.AccountView) map[string]in
 
 // A same-currency transfer must leave the two accounts' total exactly where
 // it was: the money did not leave the household, it changed hands inside it.
-// This is the invariant transactions decision 2 (one row carrying both sides,
-// rather than two rows that can disagree) exists to protect, and the spec
-// asks for it asserted rather than assumed.
+// That is what one row carrying both sides of a transfer, rather than two
+// rows that could disagree, protects.
 //
-// It is asserted here, against Postgres, rather than against
+// It is asserted here against Postgres, not against
 // domain.Transaction.BalanceEffect, because the arithmetic that ships is the
-// SQL in queries/account.sql -- see BalanceEffect's own doc comment. A domain
-// test would pass unchanged while the balance every screen shows went wrong.
+// SQL in queries/account.sql (see BalanceEffect's own doc comment) -- a
+// domain-only test could pass while the balance every screen shows went wrong.
 func TestASameCurrencyTransferLeavesTheTwoAccountsTotalUnchanged(t *testing.T) {
 	db := openTestDB(t)
 	ctx := context.Background()
@@ -472,18 +463,16 @@ func TestASameCurrencyTransferLeavesTheTwoAccountsTotalUnchanged(t *testing.T) {
 // A transfer dated before one account's opening date and after the other's
 // moves exactly one of the two balances.
 //
-// The "flag" the spec names is not a field anywhere: it is the
-// `t.occurred_on >= a.opening_balance_as_of` comparison inside
-// queries/account.sql, which is evaluated once per *account*, not once per
-// transaction. A single transaction-level boolean -- "is this transfer before
-// the opening date" -- has no answer here, because the honest answer is
-// "before one of them and after the other". This test is what makes that
-// distinction falsifiable: hoist the comparison to the transaction and one of
-// these two figures goes wrong.
+// The comparison lives in queries/account.sql as
+// `t.occurred_on >= a.opening_balance_as_of`, evaluated once per *account*,
+// so "before the opening date" can be true for one side and false for the
+// other -- no single transaction-level flag could say so. Hoist the
+// comparison to the transaction and one of the two balances below goes
+// wrong, which is what this test catches.
 //
-// The pair's total does change here, and that is correct: OCBC's opening
-// figure is an assertion about 31 July that already accounts for money that
-// arrived on the 20th, so counting the transfer again would double it.
+// The pair's total does change here: OCBC's opening figure (an assertion
+// about 31 July) already accounts for the transfer, so counting it again
+// would double it.
 func TestATransferStraddlingOneOpeningDateMovesOnlyThatSideOfIt(t *testing.T) {
 	db := openTestDB(t)
 	ctx := context.Background()
@@ -506,9 +495,8 @@ func TestATransferStraddlingOneOpeningDateMovesOnlyThatSideOfIt(t *testing.T) {
 	}
 
 	// The ledger's own note about this row must say the same thing the two
-	// balances do, and say it separately per side. One flag for both sides
-	// would have to be either true or false here, and each answer libels one
-	// of the two accounts.
+	// balances do, separately per side -- one flag for both sides would have
+	// to be true or false, libelling one of the two accounts either way.
 	view, err := transactions.Get(ctx, householdID, created.ID)
 	if err != nil {
 		t.Fatalf("get transfer: %v", err)
@@ -578,11 +566,10 @@ func TestACrossCurrencyTransferCreditsTheDestinationInItsOwnCurrency(t *testing.
 }
 
 // TestMonthlyMovementsSplitsTheBalanceExpressionByMonth is the trend's whole
-// correctness argument in one test. The chart walks backwards from
-// AccountView.Balance by subtracting these deltas, so this query and the
-// balance_minor expression in ListAccounts must apply the same filter to the
-// same rows. Change the >= to a > here and the oldest bars drift away from
-// the headline figure -- silently, and by a plausible amount.
+// correctness argument: the chart walks backwards from AccountView.Balance
+// by subtracting these deltas, so this query and ListAccounts's
+// balance_minor expression must filter the same rows the same way -- change
+// >= to > here and the oldest bars drift from the headline figure silently.
 func TestMonthlyMovementsSplitsTheBalanceExpressionByMonth(t *testing.T) {
 	db := openTestDB(t)
 	ctx := context.Background()
@@ -659,16 +646,14 @@ func TestMonthlyMovementsSplitsTheBalanceExpressionByMonth(t *testing.T) {
 	}
 }
 
-// TestMonthlyMovementsCreditsTheReceivingSideInItsOwnCurrency covers the half
-// a single-account test cannot: a cross-currency transfer credits the
-// destination with received_amount_minor, which is what actually landed. Use
-// amount_minor there and an IDR account would be credited a figure of SGD.
+// TestMonthlyMovementsCreditsTheReceivingSideInItsOwnCurrency covers what a
+// single-account test cannot: a cross-currency transfer credits the
+// destination with received_amount_minor, what actually landed -- using
+// amount_minor there would credit an IDR account a figure of SGD.
 //
-// BCA opens on the same day the transfer lands, deliberately -- it is the
-// only way this test can tell the incoming side's own >= from a > mutation.
-// Put the transfer any day after BCA's opening and both comparisons admit
-// the row identically, and the boundary this query shares with ListAccounts
-// goes unchecked on its incoming side.
+// BCA opens on the day the transfer lands, deliberately: only then can this
+// test tell the incoming side's >= from a > mutation, since a later opening
+// date would let both comparisons admit the row identically.
 func TestMonthlyMovementsCreditsTheReceivingSideInItsOwnCurrency(t *testing.T) {
 	db := openTestDB(t)
 	ctx := context.Background()

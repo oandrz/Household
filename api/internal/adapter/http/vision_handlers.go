@@ -14,16 +14,16 @@ import (
 // PUT /marriage/vision/{year}: the body is a whole document -- a theme, a
 // description of up to 2000 characters, up to twelve pillars each with their
 // own description and eight measures, and twenty-four milestones. 32 KiB
-// clears that comfortably while still refusing anything absurd, the same
-// reasoning maxRetroRequestBodyBytes gives for its own override.
+// clears that comfortably while still refusing anything absurd (the same
+// reasoning maxRetroRequestBodyBytes gives for its own override).
 const maxVisionRequestBodyBytes = 32 * 1024
 
 // measureDTO is one line under a pillar. Kind is "typed", "linked" or
-// "broken", and hasFigure is what the screen actually branches on: a broken
-// link renders its label with no number at all, so current, target and
-// percent are all 0 and must not be read. They are plain ints rather than
-// pointers because hasFigure already carries the "there is no figure" state,
-// and two ways to say the same thing is one too many.
+// "broken"; hasFigure is what the screen branches on -- a broken link
+// renders no number, so current, target and percent are all 0 and must not
+// be read. They are plain ints, not pointers, because hasFigure already
+// carries the "no figure" state; two ways to say the same thing is one too
+// many.
 type measureDTO struct {
 	Label     string `json:"label"`
 	Kind      string `json:"kind"`
@@ -52,9 +52,8 @@ type milestoneDTO struct {
 }
 
 // visionDTO is one household-year. Pillars and Milestones are always arrays,
-// never null, even when empty -- the "no null collections" convention every
-// DTO in this package follows, so the frontend never distinguishes an absent
-// key from an empty one. Version 0 means the year has no vision yet.
+// never null even when empty -- the "no null collections" convention every
+// DTO in this package follows. Version 0 means the year has no vision yet.
 type visionDTO struct {
 	Year        int            `json:"year"`
 	Theme       string         `json:"theme"`
@@ -94,14 +93,12 @@ type saveVisionRequest struct {
 }
 
 // parseVisionYear parses raw as a year and range-checks it against
-// domain.MinVisionYear/MaxVisionYear before any caller (service or
-// repository) ever sees it. This exists because VisionRepository stores the
-// year as a Postgres smallint (int16): a bare strconv.Atoi would let a value
-// like 65538 wrap silently to 2 once it reached that cast, so a caller
-// asking for a year far out of range would get back year 2's row -- or, on
-// GET, an empty document that looks like a legitimate answer -- instead of
-// the refusal the spec's own error table requires. Checked here, once, so
-// neither handler below can skip it.
+// domain.MinVisionYear/MaxVisionYear before any caller sees it.
+// VisionRepository stores the year as a Postgres smallint (int16), and a
+// bare strconv.Atoi would let a value like 65538 wrap silently to 2 --
+// returning year 2's row, or a misleadingly empty GET, instead of the
+// refusal the spec requires. Checked once here so neither handler below can
+// skip it.
 func parseVisionYear(raw string) (int, bool) {
 	year, err := strconv.Atoi(raw)
 	if err != nil {
@@ -146,10 +143,10 @@ func handleGetVision(deps Deps) http.HandlerFunc {
 
 // handleSaveVision replaces the whole document under the version guard
 // domain.ErrVisionChanged exists for. The year is range-checked here, ahead
-// of the service, for the same reason handleGetVision checks it: the
-// service does validate the year it is handed (domain.Vision.Validate), but
-// this handler must not depend on that downstream layer to catch a
-// malformed URL segment -- see parseVisionYear's own doc comment.
+// of the service, for the same reason handleGetVision does: the service
+// validates the year too (domain.Vision.Validate), but this handler must not
+// depend on that downstream layer to catch a malformed URL segment (see
+// parseVisionYear's own doc comment).
 func handleSaveVision(deps Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		scope, _ := RequestScope(r)
@@ -200,11 +197,10 @@ func toDomainVision(req saveVisionRequest) domain.Vision {
 }
 
 // toVisionDTO turns the composed usecase view into the wire shape. Every
-// slice is built with make(..., 0, ...) rather than left as a nil range
-// variable, so an empty pillar's Measures, and a vision with no pillars or
-// milestones at all, still serialise as "[]" and never "null" -- the
-// property TestGetVisionForANeverSetYearCarriesLiteralEmptyArrays pins on
-// the raw wire bytes, not just the decoded length.
+// slice is built with make(..., 0, ...), never left as a nil range
+// variable, so an empty pillar's Measures -- and a vision with no pillars or
+// milestones at all -- still serialise as "[]", never "null"
+// (TestGetVisionForANeverSetYearCarriesLiteralEmptyArrays pins this).
 func toVisionDTO(view usecase.VisionView) visionDTO {
 	pillars := make([]pillarDTO, 0, len(view.Pillars))
 	for _, p := range view.Pillars {

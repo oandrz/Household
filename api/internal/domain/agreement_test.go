@@ -26,8 +26,10 @@ func proposal(kind string, mutate ...func(*domain.AgreementProposal)) domain.Agr
 	return p
 }
 
-// Both parsers refuse the empty value, a capitalised one, a kind that sounds plausible, one with a trailing
-// space, and the two statuses decision 6 deliberately lacks -- the refusing default is the whole point of them.
+// Both parsers refuse the empty value, a capitalised one, a kind that
+// sounds plausible, one with a trailing space, and the two statuses this
+// feature deliberately lacks (no decline, no expiry) -- the refusing
+// default is the whole point of them.
 func TestAgreementParsersRefuseWhatNoMigrationAllows(t *testing.T) {
 	for _, s := range []string{"", "Add", "delete", "remove ", "declined", "expired"} {
 		if _, err := domain.ParseAgreementProposalKind(s); !errors.Is(err, domain.ErrUnknownAgreementProposalKind) {
@@ -111,17 +113,18 @@ func TestValidateAgreementSectionName(t *testing.T) {
 	}
 }
 
-// MaxAgreementParkNoteLen is DELIBERATELY not asserted here. Nothing in this package reads it -- the park
-// note is capped by AgreementService.Park (Task 4) -- and no domain-level assertion can tell a separate
-// constant from `MaxAgreementParkNoteLen = MaxAgreementNoteLen`, because an alias is also 500. The one
-// assertion that separates them is Task 4's: Park with a 501-rune note returns ErrAgreementParkNoteTooLong
-// and NOT ErrAgreementNoteTooLong. If you are here to add a `!= 500` check, it would pass under the alias
-// and prove nothing.
+// MaxAgreementParkNoteLen is DELIBERATELY not asserted here: nothing in this
+// package reads it (AgreementService.Park caps the park note), and no
+// domain-level assertion can tell it apart from an alias --
+// MaxAgreementParkNoteLen = MaxAgreementNoteLen is also 500. The assertion
+// that does separate them is AgreementService.Park's own test: a 501-rune
+// note returns ErrAgreementParkNoteTooLong, not ErrAgreementNoteTooLong. A
+// `!= 500` check here would pass under the alias and prove nothing.
 
-// The fixtures carry a limited member on purpose: without one, these three functions are tested minus the
-// filter that is all they do. This is also the ONLY place AwaitingSignature's ordering claim is pinned --
-// the service tests cannot pin it, because membershipDouble.List ranges a Go map
-// (api/internal/usecase/testdouble_test.go:304) and hands back owners in a different order each run.
+// The fixtures carry a limited member on purpose: without one, these three
+// functions would be tested minus the filter that is all they do. This is
+// also the only place AwaitingSignature's ordering is pinned, since the
+// service tests can't: membershipDouble.List ranges a Go map.
 func TestOwnerHelpersIgnoreLimitedMembers(t *testing.T) {
 	owner := func(id string) domain.Membership { return domain.Membership{ID: id, Role: domain.RoleOwner} }
 	limited := domain.Membership{ID: "m9", Role: domain.RoleLimited}
@@ -130,13 +133,15 @@ func TestOwnerHelpersIgnoreLimitedMembers(t *testing.T) {
 	if got := domain.RequiredSigners(two); !slices.Equal(got, []string{"m1", "m2"}) {
 		t.Fatalf("RequiredSigners = %v, want [m1 m2]", got)
 	}
-	// Three owners, the middle one signed: the survivors come back in RequiredSigners' order, not the
-	// order the signatures arrived in. "needs Christine and Ibu" is built from this slice.
+	// Three owners, the middle one signed: the survivors come back in
+	// RequiredSigners' order, not the order the signatures arrived in.
+	// "needs Christine and Ibu" is built from this slice.
 	three := []domain.Membership{owner("m1"), limited, owner("m2"), owner("m3")}
 	if got := domain.AwaitingSignature(three, []string{"m2"}); !slices.Equal(got, []string{"m1", "m3"}) {
 		t.Fatalf("AwaitingSignature = %v, want [m1 m3]", got)
 	}
-	// A signature held by someone who is no longer an owner is ignored, never deleted (decision 4).
+	// A signature held by someone who is no longer an owner is ignored,
+	// never deleted.
 	if got := domain.AwaitingSignature(two, []string{"m1", "m9"}); !slices.Equal(got, []string{"m2"}) {
 		t.Fatalf("AwaitingSignature ignoring a non-owner's signature = %v, want [m2]", got)
 	}
@@ -151,8 +156,8 @@ func TestOwnerHelpersIgnoreLimitedMembers(t *testing.T) {
 	}
 }
 
-// Numbering runs continuously across sections -- the first ends at 02 and the third starts at 03 -- and an
-// empty section takes no number at all.
+// Numbering runs continuously across sections -- the first ends at 02 and
+// the third starts at 03 -- and an empty section takes no number at all.
 func TestAgreementDisplayNumbersRunAcrossSections(t *testing.T) {
 	got := fmt.Sprint(domain.AgreementDisplayNumbers([]int{2, 0, 3}))
 	if got != "[[1 2] [] [3 4 5]]" {

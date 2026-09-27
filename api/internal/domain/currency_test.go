@@ -15,9 +15,9 @@ func TestParseCurrencyNormalisesCase(t *testing.T) {
 	}
 }
 
-// ZZZ is three uppercase letters, which is all NewMoney used to check. It is
-// not an ISO 4217 code, and sign-up is the first place a stranger picks this
-// value, so it must be refused.
+// Don't accept a code just for looking like a currency: ZZZ is three
+// uppercase letters but not an ISO 4217 code, and sign-up is the first place
+// a stranger picks this value, so it must be refused.
 func TestParseCurrencyRejectsAWellFormedNonCurrency(t *testing.T) {
 	if _, err := ParseCurrency("ZZZ"); !errors.Is(err, ErrInvalidMoney) {
 		t.Fatalf("ParseCurrency(ZZZ) error = %v, want ErrInvalidMoney", err)

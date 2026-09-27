@@ -14,14 +14,14 @@ import (
 )
 
 // SMTPMailer talks to an SMTP relay: TLS policy and (optional) authentication
-// are both taken from configuration rather than hardcoded, so this same
+// both come from configuration rather than being hardcoded, so the same
 // mailer talks plain, unauthenticated SMTP to Mailpit in development
 // (SMTP_ADDR=mailpit:1025, SMTPTLSMode "none") and mandatory-TLS,
-// authenticated SMTP to whatever relay a real deployment trusts (SMTPTLSMode
-// "mandatory" by default outside development -- see config.Config.SMTPTLSMode's
-// doc comment for why no hosted relay accepts anything less). Message bodies
-// are plain text by design — there is no HTML template system to keep in
-// sync with the design's copy.
+// authenticated SMTP to whatever relay production trusts otherwise
+// (SMTPTLSMode "mandatory", the default outside development -- see
+// config.Config.SMTPTLSMode's doc comment for why no hosted relay accepts
+// less). Message bodies are plain text by design -- there is no HTML
+// template system to keep in sync with the design's copy.
 type SMTPMailer struct {
 	host     string
 	port     int
@@ -33,14 +33,13 @@ type SMTPMailer struct {
 }
 
 // NewSMTPMailer builds a mailer from config values. It never reads the
-// environment itself — config.Config already did that — so every argument
+// environment itself -- config.Config already did that -- so each argument
 // is exactly the like-named config.Config field: addr is SMTPAddr, from is
-// SMTPFrom, baseURL is AppBaseURL, username and password are SMTPUsername
-// and SMTPPassword (both "" means no SMTP AUTH is attempted at all), and
-// tlsMode is SMTPTLSMode ("none", "opportunistic" or "mandatory" -- anything
-// else falls back to TLSMandatory, but config.Load already rejects any other
-// value, so that fallback is unreachable outside a test that constructs this
-// mailer directly with a bad string).
+// SMTPFrom, baseURL is AppBaseURL, username/password are
+// SMTPUsername/SMTPPassword (both "" means no SMTP AUTH), and tlsMode is
+// SMTPTLSMode ("none", "opportunistic" or "mandatory" -- config.Load already
+// rejects anything else, so the TLSMandatory fallback below is unreachable
+// outside a test).
 func NewSMTPMailer(addr, from, baseURL, username, password, tlsMode string) *SMTPMailer {
 	host, port := splitAddr(addr)
 	return &SMTPMailer{
@@ -68,9 +67,8 @@ func tlsPolicyFromMode(mode string) gomail.TLSPolicy {
 }
 
 // splitAddr defaults to port 25 if addr carries no port or an unparsable
-// one, rather than failing construction — NewSMTPMailer cannot return an
-// error, and a malformed SMTP_ADDR is caught by config.Load's own
-// validation, not here.
+// one, rather than failing construction: NewSMTPMailer cannot return an
+// error, and config.Load only checks that SMTP_ADDR is set, not its shape.
 func splitAddr(addr string) (host string, port int) {
 	h, p, err := net.SplitHostPort(addr)
 	if err != nil {
@@ -147,11 +145,10 @@ func (m *SMTPMailer) send(ctx context.Context, to, subject, body string) error {
 	opts := []gomail.Option{gomail.WithPort(m.port), gomail.WithTLSPolicy(m.tls)}
 	if m.username != "" {
 		// SMTPAuthAutoDiscover negotiates the strongest mechanism the relay
-		// actually offers rather than this mailer guessing one -- see its
-		// own doc comment in the go-mail package. m.username != "" is the
-		// only gate: config.Load already rejects a lone username or a lone
-		// password (see its SMTP_USERNAME/SMTP_PASSWORD pairing check), so
-		// a non-empty username here always means a non-empty password too.
+		// offers, rather than this mailer guessing one (see its own doc
+		// comment in go-mail). m.username != "" is the only gate: config.Load
+		// already rejects a lone username or password, so a non-empty
+		// username here always means a non-empty password too.
 		opts = append(opts, gomail.WithSMTPAuth(gomail.SMTPAuthAutoDiscover),
 			gomail.WithUsername(m.username), gomail.WithPassword(m.password))
 	}

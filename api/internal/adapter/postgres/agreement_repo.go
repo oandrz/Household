@@ -16,8 +16,7 @@ import (
 // AgreementRepo keeps the pool alongside the pool-backed *sqlcgen.Queries,
 // like VisionRepo, BudgetRepo and GoalRepo: CreateSections here, and
 // CreateProposal and Sign in agreement_write_repo.go, each begin their own
-// transaction, which a *sqlcgen.Queries built once at construction time
-// cannot do.
+// transaction, which a Queries built once at construction time cannot do.
 type AgreementRepo struct {
 	q    *sqlcgen.Queries
 	pool *pgxpool.Pool
@@ -28,11 +27,10 @@ func NewAgreementRepo(db *DB) *AgreementRepo {
 }
 
 // Document is the whole screen in one read: sections, live agreements, open
-// proposals and accepted ones. Four queries rather than one join, because the
-// four slices are in three different orders and a join would fan every
-// signature out across the product. Withdrawn proposals appear in neither
-// proposal slice because neither query selects them -- excluded in SQL, so no
-// Go-side filter can drift away from the contract.
+// and accepted proposals. Four queries rather than one join, since the four
+// slices sort differently and a join would fan every signature out across
+// the product. Withdrawn proposals are excluded in SQL, not by a Go-side
+// filter, so nothing can drift from that contract.
 func (r *AgreementRepo) Document(ctx context.Context, householdID string) (usecase.AgreementDocument, error) {
 	h := uuid(householdID)
 
@@ -95,10 +93,9 @@ func (r *AgreementRepo) Document(ctx context.Context, householdID string) (useca
 	return doc, nil
 }
 
-// Proposal answers for one proposal whatever its status, withdrawn included.
-// That is the whole reason it exists beside Document: a resolved proposal is
-// exactly the row Document's two slices leave out, and the withdraw handler
-// needs it before it can know whose the proposal is.
+// Proposal answers for one proposal whatever its status, withdrawn
+// included -- exactly the row Document's two slices leave out, which the
+// withdraw handler needs before it can know whose proposal it is.
 func (r *AgreementRepo) Proposal(ctx context.Context, householdID, proposalID string) (usecase.AgreementProposalRecord, error) {
 	row, err := r.q.GetAgreementProposal(ctx, sqlcgen.GetAgreementProposalParams{
 		HouseholdID: uuid(householdID),
@@ -110,11 +107,10 @@ func (r *AgreementRepo) Proposal(ctx context.Context, householdID, proposalID st
 	return toAgreementProposal(row)
 }
 
-// CreateSection is immediate and unsigned: a heading is not a promise
-// (decision 8). A name collision arrives as ErrAgreementSectionNameTaken
-// because translate maps agreement_sections_household_id_name_key by name --
-// the unique index decides it, never a "does this name exist" pre-read, which
-// is a check-then-write two owners can both pass.
+// CreateSection is immediate and unsigned: a heading is not a promise. A
+// name collision arrives as ErrAgreementSectionNameTaken because translate
+// maps agreement_sections_household_id_name_key by name -- the unique index
+// decides it, never a check-then-write pre-read two owners could both pass.
 func (r *AgreementRepo) CreateSection(ctx context.Context, householdID, name string, createdAt time.Time) (usecase.AgreementSectionRecord, error) {
 	row, err := r.q.CreateAgreementSection(ctx, sqlcgen.CreateAgreementSectionParams{
 		HouseholdID: uuid(householdID),
@@ -129,19 +125,19 @@ func (r *AgreementRepo) CreateSection(ctx context.Context, householdID, name str
 	}, nil
 }
 
-// CreateSections seeds decision 17's starter set: every name in ONE
-// transaction, ON CONFLICT DO NOTHING so a second click is a no-op rather
-// than a 409, then read back inside it -- two of four landing would leave a
-// household half-seeded with no button left to ask for the rest.
+// CreateSections seeds the household's starter set of sections: every name
+// in ONE transaction, ON CONFLICT DO NOTHING so a second click is a no-op
+// rather than a 409, then read back inside it -- two of four landing would
+// leave a household half-seeded with no button left to ask for the rest.
 func (r *AgreementRepo) CreateSections(ctx context.Context, householdID string, names []string, createdAt time.Time) ([]usecase.AgreementSectionRecord, error) {
 	out := make([]usecase.AgreementSectionRecord, 0, len(names))
 	err := pgx.BeginFunc(ctx, r.pool, func(tx pgx.Tx) error {
 		q := r.q.WithTx(tx)
 		for i, name := range names {
-			// Stamped strictly apart, never one shared instant: created_at,
-			// id is the document's only order, so four rows sharing a
-			// timestamp would render in random uuid order (00014_agreements
-			// .sql's comment on the deliberately missing DEFAULT now()).
+			// Stamped strictly apart, never with one shared instant: (created_at,
+			// id) is the document's only sort order, so four rows sharing a
+			// timestamp would render in random uuid order (00014_agreements.sql
+			// explains the deliberately missing DEFAULT now()).
 			if err := q.CreateAgreementSectionIfAbsent(ctx, sqlcgen.CreateAgreementSectionIfAbsentParams{
 				HouseholdID: uuid(householdID),
 				Name:        name,
@@ -171,11 +167,10 @@ func (r *AgreementRepo) CreateSections(ctx context.Context, householdID string, 
 }
 
 // toAgreementProposal re-parses kind and status rather than casting them: a
-// value no migration allowed is a corrupt row, and the parsers refuse it here
-// instead of letting it reach a switch upstairs. The conversion at its call
-// sites is legal because ListOpen…, ListAccepted… and GetAgreementProposal
-// all select p.* plus the same signed_by, so sqlc generates three structs
-// with identical fields in identical order.
+// value no migration allowed is a corrupt row, refused here instead of
+// reaching a switch upstairs. The cast at its call sites is legal because
+// ListOpen…, ListAccepted… and GetAgreementProposal all select p.* plus the
+// same signed_by, so sqlc generates three structs with identical fields.
 func toAgreementProposal(row sqlcgen.GetAgreementProposalRow) (usecase.AgreementProposalRecord, error) {
 	kind, err := domain.ParseAgreementProposalKind(row.Kind)
 	if err != nil {
@@ -202,9 +197,9 @@ func toAgreementProposal(row sqlcgen.GetAgreementProposalRow) (usecase.Agreement
 	}, nil
 }
 
-// membershipIDs is assigneeIDs (retro_action_repo.go:220) with the one
-// difference this port needs: an unsigned proposal gets [], never nil.
-// AwaitingSignature ranges over this list, and a nil slice would be one more
+// membershipIDs is assigneeIDs (retro_action_repo.go) with the one
+// difference this port needs: an unsigned proposal gets [], never nil, since
+// AwaitingSignature ranges over this list and a nil slice would be one more
 // shape for the service to think about for no benefit.
 func membershipIDs(ids []pgtype.UUID) []string {
 	out := make([]string, 0, len(ids))

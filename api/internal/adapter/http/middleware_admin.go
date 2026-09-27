@@ -11,51 +11,41 @@ import (
 	"github.com/andreasoentoro/hearth/api/internal/usecase"
 )
 
-// adminGrantTTL is how long one re-authentication opens the admin surface for.
-// It is deliberately not extended by activity, unlike the session itself (see
-// sessionExtendThreshold in middleware_session.go): a long admin session is
+// adminGrantTTL is how long one re-authentication opens the admin surface
+// for. It does not extend with activity, unlike the session itself
+// (sessionExtendThreshold in middleware_session.go): a long admin session is
 // re-authenticated, not renewed silently.
 const adminGrantTTL = 30 * time.Minute
 
-// requirePlatformAdmin answers 404 -- not 403 -- to a caller with no
-// platform_admins row. A 403 would confirm both that /admin exists and that
-// this path is the right one; to everyone else the whole surface must look
-// like a typo.
+// requirePlatformAdmin answers 404, not 403, to a caller with no
+// platform_admins row -- a 403 would confirm /admin exists, so a non-admin
+// must see it as a routing miss.
 //
-// A lookup *failure* is a 500, not a 404. "The database is down" must not read
-// as a clean "you are not an admin", or an outage would silently lock the
-// operator out with a message saying the page does not exist. That is why the
-// error branch below calls logAndWriteInternal directly rather than
-// MapDomainError: AdminService.IsPlatformAdmin has already consumed
-// domain.ErrNotFound into a plain false (see its own doc comment), so every
-// non-nil error it can return is a lookup failure -- but MapDomainError's
-// table contains a domain.ErrNotFound case answering 404, and routing through
-// it would leave a future wrapped-sentinel path free to turn an outage into
-// exactly the clean "no" this comment forbids. There is no error from this
-// call a caller should ever learn anything from.
+// A lookup *failure* answers 500, not 404, via logAndWriteInternal:
+// IsPlatformAdmin already turns domain.ErrNotFound into a plain false,
+// so any error here is a real failure. Don't route it through
+// MapDomainError -- its ErrNotFound row answers 404, so a future wrapped
+// sentinel could turn an outage into a clean "not an admin" and silently
+// lock the operator out. No error from this call should teach a caller
+// anything.
 //
-// The limit of the 404, stated so nobody rediscovers it as a bug: it hides
-// the surface from AUTHENTICATED non-admins only. An unauthenticated caller
-// gets 401, not 404, because requireSession necessarily runs first --
-// TestEveryProtectedRouteRejectsAnUnauthenticatedCaller requires exactly
-// that of every route here -- so a stranger with no credentials can already
-// tell /admin/flags from an unrouted path. That is accepted, not overlooked:
-// the existence of an admin surface is not the secret. WHO holds it is, and
-// a later task puts isPlatformAdmin into GET /auth/me for every caller
-// anyway. What this guard buys is that a signed-in household member poking
-// at the API learns nothing, and that nobody can enumerate the subtree's
-// shape by watching which paths answer differently.
+// The 404 hides the surface only from authenticated non-admins.
+// requireSession runs first, so an unauthenticated caller gets 401 instead
+// (TestEveryProtectedRouteRejectsAnUnauthenticatedCaller requires this for
+// every route) -- accepted, because WHO holds /admin is the secret, not
+// whether it exists; GET /auth/me exposes isPlatformAdmin to every caller
+// anyway. What the 404 buys: a signed-in member poking at the API learns
+// nothing, and nobody can map the subtree by watching which paths answer
+// differently.
 //
-// Being an admin is not enough: the request must also have arrived on a
-// browser session. ADR 7 rule 3 promises that a personal API token never
-// reaches /admin, and checking only WHO the caller is keeps that promise for
-// non-admins alone -- an admin's own token would pass, and get as far as the
-// re-auth password check behind this guard. So anything that is not a
-// session gets the non-admin 404, before the lookup, so it leaves no trace
-// behind the guard either. It is "not a session" rather than "is a token"
-// on purpose: an unset AuthVia is refused too (see authVia's doc comment),
-// and so is any third kind of credential added later until someone decides
-// it belongs here.
+// Being an admin is not enough: the request must also carry a browser
+// session (ADR 7 rule 3) -- otherwise an admin's own personal API token
+// would pass and reach the re-auth password check behind this guard.
+// Anything whose AuthVia is not exactly authViaSession gets the same
+// non-admin 404, before the lookup, so it leaves no trace behind the
+// guard. Don't narrow this to "is a token": an unset AuthVia (see
+// authVia's doc comment) and any future credential kind must be refused
+// too until someone decides they belong here.
 func requirePlatformAdmin(deps Deps) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -83,28 +73,21 @@ func requirePlatformAdmin(deps Deps) func(http.Handler) http.Handler {
 }
 
 // auditAdmin writes one admin_audit_log row per request that reaches it,
-// reads included. It is middleware rather than a call in each handler because
-// a handler that forgets is the failure mode, and middleware cannot forget.
+// reads included. It is middleware, not a per-handler call, because a
+// forgotten call is a handler bug and middleware cannot forget.
 //
-// The row is written before the handler runs, so a handler that panics or
-// times out still leaves a trace of the attempt. Target is the full request
-// path, never a body, a password or a row value: chi only populates a
-// route's URL parameters (the {key}, {householdID} kind) once its own
-// tree.FindRoute has matched, which happens inside routeHTTP -- the last
-// step of this subtree's middleware chain, run after requirePlatformAdmin,
-// this middleware and requireCSRF have all already executed. A row written
-// here, before the handler runs, therefore cannot carry those parameters;
-// the path itself already contains every value they would have held, so
-// Detail therefore never carries route parameters; it carries the raw query
-// string when the URL has one (a search term is worth recording, and it is
-// parsed before routing), and is otherwise an empty object.
+// The row is written before the handler runs, so a panic or timeout still
+// leaves a trace. Target is the request path, never a body, a password or
+// a row value. Detail never carries route parameters -- chi only
+// populates those once routing has matched, which happens after this
+// middleware chain runs -- but the request path already holds every value
+// they would carry; Detail instead carries the raw query string when
+// present, or an empty object.
 //
-// requireCSRF runs inside this middleware, not outside it, so a request
-// refused for a missing or mismatched CSRF token has already left its row.
-// That is the point rather than a side effect: a cross-site forgery aimed at
-// a real platform admin is precisely what admin_audit_log exists to make
-// visible, and refusing one silently would hide the one attack the log is
-// for. See router.go's /admin subtree for why the guards sit in that order.
+// requireCSRF runs inside this middleware, not outside it, so a request it
+// refuses still leaves its audit row: a forgery aimed at a real admin is
+// exactly what this log exists to catch, and refusing it silently would
+// hide the attack. See router.go's /admin subtree for the guard order.
 func auditAdmin(deps Deps) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -114,11 +97,8 @@ func auditAdmin(deps Deps) func(http.Handler) http.Handler {
 				return
 			}
 
-			// The query string is the one part of a request that is both
-			// meaningful to record (a search term, a limit) and available
-			// here, before chi has matched the route -- see the comment
-			// above on why route parameters are not. Absent on a URL with
-			// none, so the common row stays {}.
+			// Only the query string is available this early, before
+			// routing; a URL with none leaves the row {}.
 			detail := map[string]any{}
 			if r.URL.RawQuery != "" {
 				detail["query"] = r.URL.RawQuery
@@ -129,23 +109,22 @@ func auditAdmin(deps Deps) func(http.Handler) http.Handler {
 				Action:      r.Method + " " + r.URL.Path,
 				Target:      r.URL.Path,
 				Detail:      detail,
-				// clientIP is the TCP peer, or nginx's X-Real-IP when that peer
-				// is inside TRUSTED_PROXY_CIDRS (trustedProxyRealIP) -- so this
-				// column is exactly as trustworthy as that list. In production
-				// the list is the hearth Docker network, and web/nginx.conf
-				// overwrites X-Real-IP with the client its real_ip module
-				// resolved (X-Forwarded-For trusted only from 172.28.0.0/16,
-				// real_ip_recursive off). A container on that network could
-				// still name any address, the boundary nginx.conf's own comment
-				// accepts. A request from outside the list is recorded as the
-				// address that actually connected, never as a header it sent.
+				// clientIP: the TCP peer, or nginx's X-Real-IP when that peer
+				// is inside TRUSTED_PROXY_CIDRS (trustedProxyRealIP), so this
+				// column is only as trustworthy as that list. In production the
+				// list is the hearth Docker network; nginx overwrites X-Real-IP
+				// with what its own real_ip module resolved (X-Forwarded-For
+				// trusted only from 172.28.0.0/16, real_ip_recursive off),
+				// though a container on that network could still claim any
+				// address, which nginx.conf's own comment accepts. Outside the
+				// list, this is the address that actually connected, never a
+				// header.
 				IP: clientIP(r),
 				At: deps.Clock.Now(),
 			}); err != nil {
-				// An unwritable audit log closes the surface. The alternative
-				// -- serve the request and log a warning -- is an admin
-				// surface that works fine with auditing silently off, which is
-				// the exact state this table exists to make impossible.
+				// An unwritable audit log closes the surface, rather than
+				// serving the request with auditing silently off -- exactly
+				// the state this table exists to make impossible.
 				slog.ErrorContext(r.Context(), "admin audit write failed",
 					"request_id", middleware.GetReqID(r.Context()), "error", err)
 				WriteError(w, http.StatusServiceUnavailable, "AUDIT_UNAVAILABLE",
@@ -195,10 +174,11 @@ func withAdminGrant(ctx context.Context, expiresAt *time.Time) context.Context {
 type sessionHashKey struct{}
 
 // requestSessionHash reads the token hash of the session this request
-// authenticated with. The bool is false for any request that did not
-// authenticate with a session cookie -- a personal API token included --
-// so a caller that needs "the session speaking" cannot be handed a cookie
-// the request merely carried alongside some other credential.
+// authenticated with. The bool is false for anything that did not
+// authenticate with a session cookie, a personal API token included, so a
+// caller needing "the session speaking" is never handed a cookie the
+// request merely carried alongside some other credential (a cookie sent
+// beside a token can never be the one granted).
 func requestSessionHash(r *http.Request) ([]byte, bool) {
 	hash, ok := r.Context().Value(sessionHashKey{}).([]byte)
 	return hash, ok && len(hash) > 0

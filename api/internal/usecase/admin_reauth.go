@@ -6,14 +6,12 @@ import (
 	"github.com/andreasoentoro/hearth/api/internal/domain"
 )
 
-// AdminReauthService verifies the password again before the admin surface
-// opens. The session cookie lives 30 days; this exists so a stolen cookie
-// alone is not the key to every household's data.
-//
-// Its failures are counted in their own ledger, never in login_attempts. That
-// table's lockout is household-scoped, so an operator's mistypes there would
-// lock their whole household out of the ordinary product -- a bad outcome
-// caused by a screen nobody else can even see.
+// AdminReauthService re-verifies the password before the admin surface
+// opens, so a stolen 30-day session cookie alone isn't the key to every
+// household's data. Failures are counted in their own ledger, never
+// login_attempts -- that table's lockout is household-scoped, and would
+// lock a whole household out of the ordinary product over mistypes on a
+// screen nobody else can see.
 type AdminReauthService struct{ d AdminReauthDeps }
 
 type AdminReauthDeps struct {
@@ -33,10 +31,9 @@ func NewAdminReauthService(d AdminReauthDeps) *AdminReauthService {
 	return &AdminReauthService{d: d}
 }
 
-// Verify answers nil when password is this user's, domain.ErrInvalidCredentials
-// when it is not, and domain.ErrAdminLocked while the lockout is in force --
-// including for the correct password, since guessing right is exactly what the
-// lock exists to stop.
+// Verify answers nil for a correct password, domain.ErrInvalidCredentials
+// for a wrong one, and domain.ErrAdminLocked while locked -- even for the
+// correct password, since guessing right is what the lock exists to stop.
 func (s *AdminReauthService) Verify(ctx context.Context, userID, password string) error {
 	now := s.d.Clock.Now()
 
@@ -45,18 +42,12 @@ func (s *AdminReauthService) Verify(ctx context.Context, userID, password string
 		return err
 	}
 	if state := s.d.Policy.Evaluate(failures, now); state.Locked {
-		// Recording here is an accepted trade-off, not an oversight: it
-		// means continued guessing against an already-locked account keeps
-		// extending the lock indefinitely, the same choice AuthService.SignIn
-		// makes on its own locked branch and for the same reason -- a lock
-		// that stopped counting failures while under active attack would
-		// just expire on a schedule the attacker can wait out. Unlike that
-		// household lock, there is no in-product escape hatch here (no
-		// admin equivalent of magic-link sign-in): the way back in is
-		// `adminctl unlock-admin --email=`, run on the box (Task 9), which
-		// is an acceptable trade because the box is already the boundary
-		// that grants platform admin in the first place -- nobody without
-		// shell access could have become an admin to get locked out as one.
+		// Recording here is deliberate, matching AuthService.SignIn: an
+		// indefinitely extending lock beats one that expires on a schedule
+		// an attacker can wait out. Unlike the household lock, there's no
+		// in-product escape hatch -- the way back in is `adminctl
+		// unlock-admin --email=`, run on the box, an acceptable trade since
+		// only shell access could have made anyone an admin to begin with.
 		if recErr := s.d.Attempts.Record(ctx, userID, false, now); recErr != nil {
 			return recErr
 		}
@@ -78,11 +69,10 @@ func (s *AdminReauthService) Verify(ctx context.Context, userID, password string
 		return domain.ErrInvalidCredentials
 	}
 
-	// Clear before recording the success, in that order, mirroring
-	// AuthService.SignIn exactly (auth.go's ClearFailures-then-Record on its
-	// own success path): without this, two earlier mistypes followed by a
-	// success followed by one more mistype would count as three cumulative
-	// failures rather than one fresh strike, which is not the policy
+	// Clear before recording success, mirroring AuthService.SignIn's
+	// ClearFailures-then-Record order -- otherwise two mistypes, then a
+	// success, then one more mistype would count as three cumulative
+	// failures, not one fresh strike, which isn't what
 	// domain.DefaultLockoutPolicy describes.
 	if err := s.d.Attempts.ClearFailures(ctx, userID); err != nil {
 		return err

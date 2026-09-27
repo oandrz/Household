@@ -65,11 +65,10 @@ type GoalContribution struct {
 	SourceBudgetMonth *time.Time // set only when Source is ContributionBudgetRollover
 }
 
-// MonthsLeftInclusive counts whole calendar months from today's month to the
-// target month, counting both ends: Aug -> Dec is 5, and a target in the
-// current month is 1, because the household can still contribute this month.
-// A target month already past returns 0, and callers must treat 0 as "behind",
-// never as a divisor.
+// MonthsLeftInclusive counts whole months from today to targetMonth, inclusive
+// of both ends (Aug -> Dec is 5, this month is 1, since the household can
+// still contribute this month). A past target returns 0 -- treat that as
+// "behind", never as a divisor.
 func MonthsLeftInclusive(targetMonth, today time.Time) int {
 	target := time.Date(targetMonth.Year(), targetMonth.Month(), 1, 0, 0, 0, 0, time.UTC)
 	now := time.Date(today.Year(), today.Month(), 1, 0, 0, 0, 0, time.UTC)

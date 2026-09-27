@@ -12,8 +12,7 @@ import (
 
 // adminServiceNow is the fixed instant every AdminService test in this file
 // runs its Clock at. Nothing here exercises time passing, so an arbitrary
-// fixed date is fine (the convention every other fixture in this package
-// follows -- see testdouble_test.go's fixedClock).
+// date is fine -- see testdouble_test.go's fixedClock.
 var adminServiceNow = time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
 
 func TestFlagsForAppliesTheHouseholdOverride(t *testing.T) {
@@ -113,12 +112,11 @@ func TestOverviewMarksOrphanedRows(t *testing.T) {
 	}
 }
 
-// TestOverviewSortsOrphanedRowsFromBothLayers pins decision 1 from the task
-// brief: orphan keys are collected from *both* override layers into one set,
-// then sorted -- not appended in whatever order a map ranges over them,
-// which Go deliberately randomises. One orphan lives only in the global
-// layer, the other only in a household's, and their keys are chosen so that
-// map order and sorted order would disagree if the sort were ever dropped.
+// TestOverviewSortsOrphanedRowsFromBothLayers: orphan keys are collected
+// from both layers into one set, then sorted -- not appended in map order,
+// which Go randomises. One orphan is global, one is a household's, with the
+// global key named "z_..." so append order and sorted order disagree if the
+// sort is ever dropped.
 func TestOverviewSortsOrphanedRowsFromBothLayers(t *testing.T) {
 	flags := newFakeFlagRepo()
 	flags.global["z_orphan_global"] = true

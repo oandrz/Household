@@ -5,9 +5,9 @@ import (
 	"testing"
 )
 
-// TestAgreementLogColumnsSurviveTheirMembership proves decision 20's deliberate absence of any ON DELETE
-// action on agreement_proposals.proposed_by_membership_id and agreement_signatures.membership_id. Deleting
-// the HOUSEHOLD would cascade both sides away and prove nothing, so this deletes the membership row directly:
+// TestAgreementLogColumnsSurviveTheirMembership proves the deliberate absence of any ON DELETE action on
+// agreement_proposals.proposed_by_membership_id and agreement_signatures.membership_id. Deleting the
+// HOUSEHOLD would cascade both sides away and prove nothing, so this deletes the membership row directly:
 // CASCADE would silently un-sign an accepted agreement, RESTRICT would make removing an owner impossible
 // after their first proposal, and the record of who agreed has to outlive the person leaving.
 func TestAgreementLogColumnsSurviveTheirMembership(t *testing.T) {

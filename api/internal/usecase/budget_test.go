@@ -10,11 +10,10 @@ import (
 	"github.com/andreasoentoro/hearth/api/internal/usecase"
 )
 
-// budgetFixture wires a BudgetService against in-memory doubles, one
-// household ("house-1", SGD) with two expense categories and one income
-// category -- the income category exists so a test can prove Categories
-// leaves it out, the same way validateCategory keeps an income category off
-// a transaction's expense-only side.
+// budgetFixture wires a BudgetService against in-memory doubles: household
+// "house-1" (SGD), two expense categories, and one income category so a
+// test can prove Categories excludes it (the same Kind filter
+// validateCategory applies).
 type budgetFixture struct {
 	svc          *usecase.BudgetService
 	budgets      *fakeBudgetRepo
@@ -43,10 +42,9 @@ func newBudgetFixture(t *testing.T) *budgetFixture {
 
 	transactions := &fakeTransactionRepo{}
 	budgets := newFakeBudgetRepo()
-	// goals is wired both ways -- fakeBudgetRepo.RollOverToGoal writes into
-	// it, and goalDouble.DeleteContribution reaches back through it to clear
-	// a rollover stamp -- the same mutual-reference pattern testdouble_test.go
-	// documents on fakeBudgetRepo.setGoals itself.
+	// goals is wired both ways: fakeBudgetRepo.RollOverToGoal writes into it,
+	// and goalDouble.DeleteContribution reaches back to clear a rollover
+	// stamp (see fakeBudgetRepo.setGoals).
 	goals := newGoalDouble()
 	budgets.setGoals(goals)
 	goals.setBudgets(budgets)
@@ -69,13 +67,11 @@ func newBudgetFixture(t *testing.T) *budgetFixture {
 	}
 }
 
-// seedGoal creates a goal directly through the GoalRepository double, the
-// same way addExpense seeds the ledger double directly rather than going
-// through a service: a RollOver test needs a goal with a real id to name,
-// not also to depend on GoalService's own validation succeeding first.
-// householdID lets a test build a goal that belongs to a DIFFERENT
-// household (TestBudgetRollOverRefusesAGoalFromAnotherHousehold), which is
-// exactly the case Get's own household scoping exists to catch.
+// seedGoal writes a goal directly through the GoalRepository double, the
+// same way addExpense seeds the ledger: a RollOver test needs a real id
+// without depending on GoalService's own validation. householdID lets a
+// test build a goal in another household, which Get's scoping must catch
+// (TestBudgetRollOverRefusesAGoalFromAnotherHousehold).
 func (f *budgetFixture) seedGoal(t *testing.T, householdID, name, currency string, targetMinor int64, archived bool) domain.Goal {
 	t.Helper()
 	ctx := context.Background()
@@ -181,10 +177,9 @@ func TestBudgetMonthComposesTheDesignsFigures(t *testing.T) {
 		t.Fatalf("overCount = %d, want 1", got.OverCount)
 	}
 
-	// The fixture also has an income category ("cat-income"). Caps envelope
-	// spending only, so it must never get a Categories row -- exercising the
-	// Kind filter buildCategoryViews applies, not just asserting the two
-	// expense rows exist.
+	// cat-income must never get a Categories row -- caps envelope spending
+	// only, so this exercises buildCategoryViews' Kind filter, not just the
+	// row count.
 	if len(got.Categories) != 2 {
 		t.Fatalf("categories = %+v, want exactly 2 (an income category must be excluded)", got.Categories)
 	}
@@ -206,11 +201,10 @@ func TestBudgetMonthComposesTheDesignsFigures(t *testing.T) {
 	}
 }
 
-// TestBudgetMonthSpentReusesTheMonthSummaryRule is the spec's "reused
-// exactly" claim, tested rather than assumed: an income transaction and a
-// transfer must not move Spent, and a transaction with no available rate
-// must be excluded from both the total and its own category's figure while
-// still being named in ExcludedNoRate.
+// TestBudgetMonthSpentReusesTheMonthSummaryRule proves the spec's "reused
+// exactly" claim: income and transfers never move Spent, and a no-rate
+// expense is excluded from Spent and its category but still named in
+// ExcludedNoRate.
 func TestBudgetMonthSpentReusesTheMonthSummaryRule(t *testing.T) {
 	f := newBudgetFixture(t)
 	ctx := context.Background()
@@ -251,14 +245,11 @@ func TestBudgetMonthSpentReusesTheMonthSummaryRule(t *testing.T) {
 	}
 }
 
-// TestBudgetMonthHidesDailyPaceForAFutureMonth: the spec hides "S$X/day
-// left" when Remaining <= 0 *or* the viewed month is not the current one.
-// domain.DailyPace alone only ever checks the first half -- a future month
-// still gets a full DaysLeftInMonth and, with nothing spent yet, Remaining >
-// 0, so without Month comparing `month` to `today` itself this would read as
-// available. August is budgeted, has no spend, and is unambiguously after
-// July (`today`): DaysLeft and Remaining are both positive here, which is
-// exactly what would let a naive implementation show the card.
+// TestBudgetMonthHidesDailyPaceForAFutureMonth: domain.DailyPace only ever
+// checks Remaining <= 0, so Month itself must also compare `month` to
+// `today`. August here is budgeted with no spend, so DaysLeft and Remaining
+// are both positive -- exactly what would let a naive implementation still
+// show the pace card.
 func TestBudgetMonthHidesDailyPaceForAFutureMonth(t *testing.T) {
 	f := newBudgetFixture(t)
 	ctx := context.Background()
@@ -289,9 +280,9 @@ func TestBudgetMonthHidesDailyPaceForAFutureMonth(t *testing.T) {
 	}
 }
 
-// TestBudgetMonthUnbudgetedStillReportsSpend: the month has no budget row at
-// all, yet the categories grid still shows real spend against a zero cap,
-// and that zero cap must never itself read as "over".
+// TestBudgetMonthUnbudgetedStillReportsSpend: the month has no budget row
+// at all, yet Categories still shows real spend against a zero cap -- and
+// that zero cap must never read as "over".
 func TestBudgetMonthUnbudgetedStillReportsSpend(t *testing.T) {
 	f := newBudgetFixture(t)
 	ctx := context.Background()
@@ -327,7 +318,7 @@ func TestBudgetMonthUnbudgetedStillReportsSpend(t *testing.T) {
 
 // TestBudgetMonthArchivedCategoryWithCapStillRenders: archiving hides a
 // category from new-cap pickers, never from a month it already has a line
-// in (spec decision 5).
+// in.
 func TestBudgetMonthArchivedCategoryWithCapStillRenders(t *testing.T) {
 	f := newBudgetFixture(t)
 	ctx := context.Background()
@@ -360,12 +351,10 @@ func TestBudgetMonthArchivedCategoryWithCapStillRenders(t *testing.T) {
 }
 
 // TestBudgetMonthGroupsSpendByPerson: two memberships each get a converted
-// total, and the unattributed expense (PaidByMembershipID "") gets a row of
-// its own rather than being dropped -- see TestByPersonRowsSumToSpent below
-// for why the row exists. This is not the "Kids (shared)" grouping the spec
-// rejects: that would have attributed spend to people who never paid it.
-// This row attributes nothing to anyone -- it names the absence of a payer,
-// which is exactly what lets the rows reconcile with Spent.
+// total; the unattributed expense (PaidByMembershipID "") gets its own row
+// rather than being dropped (see TestByPersonRowsSumToSpent). This is not
+// the "Kids (shared)" grouping the spec rejects -- it attributes spend to
+// nobody, not to people who never paid.
 func TestBudgetMonthGroupsSpendByPerson(t *testing.T) {
 	f := newBudgetFixture(t)
 	ctx := context.Background()
@@ -400,12 +389,11 @@ func TestBudgetMonthGroupsSpendByPerson(t *testing.T) {
 	}
 }
 
-// TestByPersonRowsSumToSpent pins the fix for a defect that already existed
-// in shipped code and that Bills makes common: before this, a transaction
-// with no payer was counted in Spent but dropped from ByPerson, so the
-// card's rows quietly summed to less than the month's spend with nothing on
-// screen saying so. Once a bill can be saved with no "Paid by", that becomes
-// the common case -- a bill with no payer pays every month.
+// TestByPersonRowsSumToSpent guards a shipped defect: a transaction with no
+// payer was counted in Spent but dropped from ByPerson, so the rows
+// quietly summed to less than Spent. Don't drop the unattributed row again
+// -- Bills makes a payer-less transaction (a bill with no "Paid by") the
+// common case, not the exception.
 func TestByPersonRowsSumToSpent(t *testing.T) {
 	f := newBudgetFixture(t)
 	ctx := context.Background()
@@ -413,10 +401,9 @@ func TestByPersonRowsSumToSpent(t *testing.T) {
 
 	f.addMember("membership-andreas", "user-andreas", "Andreas")
 
-	// The unattributed expense is dated BEFORE the attributed one and is
-	// also the first transaction appended to the ledger -- proving
-	// personOrder sorts the unattributed row last on its own merit, not
-	// merely because it happened to arrive after every attributed row.
+	// The unattributed expense is dated BEFORE the attributed one, and is
+	// the first transaction appended -- proving personOrder sorts it last
+	// on its own merit, not because it arrived after every attributed row.
 	f.addExpense("tx-utilities", "cat-dining", "", july.AddDate(0, 0, 5), 14230, "SGD") // a bill payment, no payer
 	f.addExpense("tx-groceries", "cat-groceries", "membership-andreas", july.AddDate(0, 0, 6), 12000, "SGD")
 
@@ -444,12 +431,11 @@ func TestByPersonRowsSumToSpent(t *testing.T) {
 	}
 }
 
-// TestByPersonRowsSumToSpentAcrossCurrencyConversion extends the sum-to-Spent
-// guarantee to a mixed-currency month. Spent and the unattributed bucket both
-// call convert() once per transaction and Add the identical converted
-// result, so an unattributed transaction in a foreign currency must not make
-// the rows fall short by the unconverted difference the way the pre-fix code
-// did for every unattributed transaction, converted or not.
+// TestByPersonRowsSumToSpentAcrossCurrencyConversion extends the
+// sum-to-Spent guarantee to a mixed-currency month: Spent and the
+// unattributed bucket both call convert() once per transaction and Add the
+// identical result, so a foreign-currency unattributed transaction must not
+// make the rows fall short of Spent.
 func TestByPersonRowsSumToSpentAcrossCurrencyConversion(t *testing.T) {
 	f := newBudgetFixture(t)
 	ctx := context.Background()
@@ -477,11 +463,10 @@ func TestByPersonRowsSumToSpentAcrossCurrencyConversion(t *testing.T) {
 	}
 }
 
-// TestBudgetSaveValidates covers Save's whole contract in one test, the same
-// shape TestBudgetHistoryMarksOnlyTheCurrentMonthOpen uses for its own
-// multi-assertion story: duplicate, negative-cap and negative-income are all
-// refused before the repository is ever called, an unknown category's error
-// passes through untouched, and a nil expected income round-trips as nil.
+// TestBudgetSaveValidates covers Save's whole contract in one test:
+// duplicate, negative-cap, and negative-income are refused before the
+// repository is called; an unknown category's error passes through
+// untouched; and a nil expected income round-trips as nil.
 func TestBudgetSaveValidates(t *testing.T) {
 	f := newBudgetFixture(t)
 	ctx := context.Background()
@@ -535,10 +520,9 @@ func TestBudgetSaveValidates(t *testing.T) {
 	}
 }
 
-// TestBudgetHistoryMarksOnlyTheCurrentMonthOpen pins the windowing semantics
-// fakeBudgetRepo.History documents: the viewed month (if budgeted) plus
-// closed months walked back, newest first, an unbudgeted month simply
-// absent rather than zero-filled.
+// TestBudgetHistoryMarksOnlyTheCurrentMonthOpen pins History's windowing:
+// the viewed month (if budgeted) plus closed months walked back newest
+// first, with an unbudgeted month simply absent rather than zero-filled.
 func TestBudgetHistoryMarksOnlyTheCurrentMonthOpen(t *testing.T) {
 	f := newBudgetFixture(t)
 	ctx := context.Background()
@@ -576,14 +560,12 @@ func TestBudgetHistoryMarksOnlyTheCurrentMonthOpen(t *testing.T) {
 	}
 }
 
-// TestBudgetHistoryClosedFollowsTodayNotTheAnchorMonth pins which of
-// History's two time parameters governs "current": `today`, not `month`.
-// The previous test alone cannot tell them apart -- it always calls History
-// with `month` and `today` in the same calendar month, so implementing
-// Closed off either one passes it identically. Here the anchor is June while
-// today is July: none of the returned rows (June, May) is the month actually
-// in progress, so every row -- including the anchor month itself -- must
-// come back Closed.
+// TestBudgetHistoryClosedFollowsTodayNotTheAnchorMonth pins which param
+// governs "current": `today`, not `month`. The previous test can't tell
+// them apart -- it always calls History with `month` and `today` in the
+// same calendar month. Here the anchor is June while today is July, so
+// every returned row, including the anchor month itself, must come back
+// Closed.
 func TestBudgetHistoryClosedFollowsTodayNotTheAnchorMonth(t *testing.T) {
 	f := newBudgetFixture(t)
 	ctx := context.Background()
@@ -620,8 +602,7 @@ func TestBudgetHistoryClosedFollowsTodayNotTheAnchorMonth(t *testing.T) {
 // --- RollOver ------------------------------------------------------------
 //
 // Every RollOver test dates `today` in August so July is unambiguously
-// closed, following DaysLeftInMonth's own month-vs-month (not
-// instant-vs-instant) comparison rule.
+// closed, per DaysLeftInMonth's month-vs-month comparison rule.
 
 // TestBudgetRollOverWritesTheMonthsRemainingIntoTheGoal pins the spec's own
 // worked example: July budgeted S$5,200.00, spent S$3,420.00, so RollOver
@@ -672,17 +653,13 @@ func TestBudgetRollOverWritesTheMonthsRemainingIntoTheGoal(t *testing.T) {
 	}
 }
 
-// TestBudgetMonthRolloverAmountSurvivesALaterTransaction is the regression
-// test for the finding this closes: BudgetMonthView.Remaining is Budgeted
-// minus Spent, recomputed fresh on every call to Month from whatever
-// transactions exist in the ledger right now -- it is NOT a record of what a
-// past rollover actually moved. Three ordinary actions can change Remaining
-// after a rollover has already happened (a backdated transaction, an edit,
-// or a delete in that month), and none of them is blocked anywhere in this
-// codebase. This test exercises the first: a late expense lands in July
-// AFTER July has already been rolled over, which moves Remaining down from
-// what it was at rollover time -- and RolloverAmountMinor must still report
-// the original 178000 rolled over, not the new, lower Remaining.
+// TestBudgetMonthRolloverAmountSurvivesALaterTransaction: Remaining is
+// Budgeted minus Spent, recomputed live from the ledger on every call --
+// not a record of what a past rollover actually moved. A backdated
+// transaction, an edit, or a delete can all move Remaining after rollover,
+// and none is blocked anywhere in this codebase. This test exercises a
+// late expense landing in July after rollover: RolloverAmountMinor must
+// still report the original 178000, not the new, lower Remaining.
 func TestBudgetMonthRolloverAmountSurvivesALaterTransaction(t *testing.T) {
 	f := newBudgetFixture(t)
 	ctx := context.Background()
@@ -710,10 +687,9 @@ func TestBudgetMonthRolloverAmountSurvivesALaterTransaction(t *testing.T) {
 		t.Fatalf("RolloverAmountMinor right after rollover = %v, want 178000 (S$1,780.00)", before.RolloverAmountMinor)
 	}
 
-	// A late July receipt, entered in August -- TransactionService.Create has
-	// no closed-month guard to stop this, and neither does anything else in
-	// this codebase. It lands in the same category, the same month, after
-	// the rollover already happened.
+	// A late July receipt entered in August -- nothing in this codebase has
+	// a closed-month guard to stop it. It lands in the same category and
+	// month, after the rollover already happened.
 	f.addExpense("tx-late-receipt", "cat-groceries", "", july.AddDate(0, 0, 28), 15000, "SGD") // S$150.00
 
 	after, err := f.svc.Month(ctx, "house-1", july, today)
@@ -736,12 +712,11 @@ func TestBudgetMonthRolloverAmountSurvivesALaterTransaction(t *testing.T) {
 	}
 }
 
-// TestBudgetRollOverRefusesAnOpenMonth is the rule worth stating twice: only
-// a CLOSED month can be rolled over. Mid-month "unspent" is still moving,
-// and money moved out of a figure that later shrinks is a wrong number the
-// household cannot undo. The goal id here is never seeded -- it does not
-// need to exist for this refusal to fire, because the month check runs
-// before any repository is ever consulted.
+// TestBudgetRollOverRefusesAnOpenMonth is the rule stated twice on purpose:
+// only a CLOSED month can be rolled over -- mid-month "unspent" is still
+// moving, and money moved out of a figure that later shrinks can't be
+// undone. The goal id here is never seeded on purpose: the month check
+// must run before any repository call.
 func TestBudgetRollOverRefusesAnOpenMonth(t *testing.T) {
 	f := newBudgetFixture(t)
 	ctx := context.Background()
@@ -757,10 +732,10 @@ func TestBudgetRollOverRefusesAnOpenMonth(t *testing.T) {
 		t.Fatalf("future month err = %v, want domain.ErrRolloverMonthOpen", err)
 	}
 
-	// A ListContributions check against "goal-nonexistent" would be
-	// tautological -- a goal that was never seeded has no contributions no
-	// matter what RollOver does. rolledOverGoalID is the one piece of state
-	// a wrongly-permissive month check could actually have touched.
+	// A ListContributions check on "goal-nonexistent" would be tautological
+	// -- an unseeded goal has no contributions regardless. rolledOverGoalID
+	// is the one piece of state a wrongly-permissive month check could
+	// actually touch.
 	if _, done := f.budgets.rolledOverGoalID("house-1", current); done {
 		t.Fatal("current month stamped as rolled over -- the month check must refuse before any write")
 	}
@@ -770,10 +745,9 @@ func TestBudgetRollOverRefusesAnOpenMonth(t *testing.T) {
 }
 
 // TestBudgetRollOverRefusesAMonthWithNoBudgetRow: a closed month can have
-// spend and no caps (Budget decision 4), and that must surface as
-// domain.ErrNotFound -- not a silent zero-remaining refusal, which is what a
-// naive "just check Remaining <= 0" implementation would produce, since an
-// unbudgeted month's Budgeted is zero and Remaining goes negative on its own.
+// spend with no caps, so this must surface as domain.ErrNotFound, not
+// ErrRolloverNothingUnspent -- Budgeted is zero for an unbudgeted month, so
+// a naive Remaining <= 0 check would read it as nothing to move instead.
 func TestBudgetRollOverRefusesAMonthWithNoBudgetRow(t *testing.T) {
 	f := newBudgetFixture(t)
 	ctx := context.Background()
@@ -820,12 +794,11 @@ func TestBudgetRollOverRefusesNothingUnspent(t *testing.T) {
 	}
 }
 
-// TestBudgetRollOverRefusesANonPrimaryCurrencyGoal: budgets carry no
-// currency column and are implicitly in the household's primary currency,
-// while a goal carries an explicit one. Converting inside a rollover would
-// store a rate nobody can audit, so a goal outside the primary currency is
-// refused even though the FX double knows a live SGD<->IDR rate -- the
-// refusal is about auditability, not availability.
+// TestBudgetRollOverRefusesANonPrimaryCurrencyGoal: budgets have no
+// currency column and are implicitly the household's primary; a goal
+// carries its own. Converting inside a rollover would store an unauditable
+// rate, so a mismatched goal is refused even though the FX double could
+// convert it -- the refusal is about auditability, not availability.
 func TestBudgetRollOverRefusesANonPrimaryCurrencyGoal(t *testing.T) {
 	f := newBudgetFixture(t)
 	ctx := context.Background()
@@ -878,9 +851,8 @@ func TestBudgetRollOverRefusesAnArchivedGoal(t *testing.T) {
 }
 
 // TestBudgetRollOverTwiceIsRefused: the double stamps like the real
-// repository -- a conditional write that finds the month already stamped --
-// so the second call must fail as domain.ErrRolloverAlreadyDone with
-// exactly one contribution in existence, never a second one.
+// repository (a conditional write that finds the month already stamped),
+// so the second call must fail with exactly one contribution ever written.
 func TestBudgetRollOverTwiceIsRefused(t *testing.T) {
 	f := newBudgetFixture(t)
 	ctx := context.Background()
@@ -914,13 +886,12 @@ func TestBudgetRollOverTwiceIsRefused(t *testing.T) {
 	}
 }
 
-// TestBudgetRollOverRefusesAGoalFromAnotherHousehold pins the fix Task 5's
-// review required: RollOverToGoal writes the goal id into a SQL value
-// position, so an id that does not belong to this household must be caught
-// by this service's own Goals.Get BEFORE the repository is ever called --
-// otherwise it would reach a foreign-key violation and surface as an
+// TestBudgetRollOverRefusesAGoalFromAnotherHousehold: RollOverToGoal writes
+// the goal id into a SQL value position, so an id from another household
+// must be caught by this service's own Goals.Get before the repository is
+// called -- otherwise it hits a foreign-key violation and surfaces as an
 // unmapped 500 instead of a clean domain error. Nothing may be written: not
-// a contribution on the foreign goal, and not a stamp on July.
+// a contribution on the foreign goal, not a stamp on July.
 func TestBudgetRollOverRefusesAGoalFromAnotherHousehold(t *testing.T) {
 	f := newBudgetFixture(t)
 	ctx := context.Background()

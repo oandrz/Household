@@ -22,22 +22,18 @@ const occurredOnLayout = "2006-01-02"
 const monthLayout = "2006-01"
 
 // monthAll is the one wire value that widens the ledger to every month. It is
-// spelled out rather than inferred from an empty `month=`, because an empty
-// value is what a cleared form control sends by accident and must not silently
-// mean something different from sending no month at all. See
-// parseTransactionFilter.
+// spelled out rather than inferred from an empty `month=`: a cleared form
+// control sends empty too, and that must not silently mean something
+// different from "no month" (see parseTransactionFilter).
 const monthAll = "all"
 
 // defaultPageSize and maxPageSize mirror TransactionRepository.List's own
-// constants (see its doc comment in package usecase): the repository
-// defaults an unset or non-positive limit to 50 and clamps anything above 200
-// down to it. The handler clamps here too, before the filter is ever built, so
-// filter.Limit always holds the limit the repository will *actually* use.
-// Without this, a caller asking for limit=500 would get back at most 201
-// rows (200 clamped by the repository, +1 peek), but this handler's own trim
-// check (len(views) > filter.Limit) would compare that 201 against the
-// unclamped 500, never trim the peek row, and never set nextCursor -- silently
-// serving a truncated "last" page that looks complete.
+// constants (see its doc comment in package usecase): default 50, clamp
+// above 200. The handler clamps here too, before building the filter, so
+// filter.Limit always equals what the repository actually applies. Without
+// that, the trim check below would compare a repository-clamped row count
+// against an unclamped filter.Limit, never trim the peek row or set
+// nextCursor, and silently serve a truncated "last" page that looks complete.
 const (
 	defaultPageSize = 50
 	maxPageSize     = 200
@@ -45,12 +41,11 @@ const (
 
 // uuidPattern is the canonical 8-4-4-4-12 hex form every id in this system is
 // generated in. Filters below use it to fail closed on a malformed id at the
-// HTTP boundary -- the same defence in depth TransactionRepository.List
-// already applies one layer down (Task 8): that repository turns a malformed
-// account_id, category_id or paid_by into an empty result rather than an
-// error, because a nullable-filter query cannot tell "bad id" apart from "no
-// filter". A caller who mistyped an id deserves a 422 telling them so, not a
-// silently empty page that reads exactly like "nothing matched."
+// HTTP boundary -- defence in depth: TransactionRepository.List already
+// turns a malformed account_id, category_id or paid_by into an empty result
+// one layer down, since a nullable-filter query can't tell "bad id" from "no
+// filter". A mistyped id deserves a 422 saying so, not a silently empty page
+// that reads like "nothing matched."
 var uuidPattern = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
 
 func isValidUUID(s string) bool {
@@ -126,11 +121,10 @@ type transactionsResponse struct {
 // together, because they are one screen and must describe the same month.
 func handleListTransactions(deps Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		// Every transactions route sits behind requireCapability and
-		// requireOwner (router.go), so by the time this runs the caller is an
-		// owner holding money and the explicit check other handlers make would
-		// be dead code. Unlike accounts, there is no redaction branch here at
-		// all: a limited member never reaches this handler.
+		// requireCapability and requireOwner (router.go) guard every
+		// transactions route, so the caller is always an owner -- the explicit
+		// check other handlers make would be dead code. Unlike accounts, there
+		// is no redaction branch: a limited member never reaches this handler.
 		scope, _ := RequestScope(r)
 
 		filter, month, ok := parseTransactionFilter(w, r)
@@ -157,9 +151,8 @@ func handleListTransactions(deps Deps) http.HandlerFunc {
 		// The repository returns limit+1 rows so we can tell there is another
 		// page without counting the table. The extra row is the cursor, not
 		// content -- returning it would show one row twice. filter.Limit is
-		// already the effective limit (defaulted and clamped in
-		// parseTransactionFilter), so it agrees with what the repository
-		// actually used to build views.
+		// already the effective, clamped limit (parseTransactionFilter), so it
+		// matches what the repository used.
 		limit := filter.Limit
 		if len(views) > limit {
 			last := views[limit-1]
@@ -193,16 +186,13 @@ func decodeCursor(raw string) (time.Time, string, bool) {
 		return time.Time{}, "", false
 	}
 	id := raw[len(occurredOnLayout)+1:]
-	// The id half needs its own check. Left to SQL, a garbage id arrives as
-	// NULL inside `(occurred_on, id) < (date, NULL)`, and that does not
-	// return zero rows: row comparison stops at the first unequal pair, so
-	// every transaction dated strictly before the cursor date still matches
-	// and only the ones dated ON it drop out. The page would look almost
-	// right, which is worse than looking empty -- a caller paging through the
-	// ledger would silently lose one day's rows and see the rest repeated.
-	// Refusing the cursor here, with a 422 that names the problem, is what
-	// stops that. TransactionRepository.List carries the matching fail-closed
-	// guard for the same value, so neither layer depends on the other.
+	// The id half needs its own check: left to SQL, a garbage id becomes NULL
+	// inside `(occurred_on, id) < (date, NULL)`. Row comparison stops at the
+	// first unequal pair, so rows before the cursor date still match while
+	// only the ones ON it drop out -- an "almost right" page that silently
+	// loses one day's rows and repeats the rest, worse than looking empty.
+	// Refusing here with a 422 stops that; the repository carries the same
+	// fail-closed guard, so neither layer depends on the other.
 	if !isValidUUID(id) {
 		return time.Time{}, "", false
 	}
@@ -220,11 +210,10 @@ func parseTransactionFilter(w http.ResponseWriter, r *http.Request) (usecase.Tra
 		Limit: defaultPageSize,
 	}
 
-	// account_id, category_id and paid_by are refused at 422 when malformed,
-	// rather than passed down to become a silently empty page. Task 8 made
-	// TransactionRepository.List fail closed on a bad id for exactly this
-	// filter set; this is the second line of defence in front of it, and the
-	// one that can actually tell the caller what was wrong.
+	// account_id, category_id and paid_by are refused at 422 when malformed
+	// rather than passed down to become a silently empty page --
+	// TransactionRepository.List already fails closed on a bad id here too,
+	// but only this layer can tell the caller what was wrong.
 	var ok bool
 	if filter.AccountID, ok = parseOptionalUUIDFilter(w, q, "account_id",
 		"INVALID_ACCOUNT_FILTER", "That account id could not be read."); !ok {
@@ -239,22 +228,18 @@ func parseTransactionFilter(w http.ResponseWriter, r *http.Request) (usecase.Tra
 		return usecase.TransactionFilter{}, time.Time{}, false
 	}
 
-	// The default month applies to BOTH halves of this response. Setting only
-	// the summary's month here and leaving filter.Month zero -- which
-	// TransactionFilter documents as "every month" -- is what let the ledger
-	// list July under a header reading "0 in August 2026". The contract
-	// handleListTransactions states in its own doc comment is that the list and
-	// the two figures above it describe the same month.
+	// The default month applies to BOTH halves of this response. Don't set
+	// only the summary's month and leave filter.Month zero ("every month" per
+	// TransactionFilter): that let the ledger list July under a header
+	// reading "0 in August 2026".
 	//
-	// month=all is the deliberate way out, and it widens the list only: the
-	// summary stays on the current month. MonthSummary answers for exactly one
-	// calendar month by construction -- TransactionRepository.MonthTotals
-	// returns that month's rows so the usecase layer can convert currencies
-	// before summing, and the single-month bound is the stated reason it may
-	// return rows at all rather than a SQL SUM. "Spent ever" is a different
-	// question from "spent this month" and would need its own query and its own
-	// wording, so it is not invented here. The frontend names the month beside
-	// the figure, so a widened list never shows an unlabelled one.
+	// month=all is the deliberate way out, and widens the list only -- the
+	// summary stays on the current month. MonthTotals returns rows so the
+	// usecase layer can convert currencies before summing, which is only
+	// affordable because it is bounded to one month. "Spent ever" is a
+	// different question needing its own query and wording, so it is not
+	// invented here; the frontend names the month beside the figure, so a
+	// widened list never shows an unlabelled one.
 	month := time.Now().UTC()
 	switch raw := q.Get("month"); raw {
 	case "":
@@ -279,10 +264,9 @@ func parseTransactionFilter(w http.ResponseWriter, r *http.Request) (usecase.Tra
 				"Limit must be a positive whole number.", nil)
 			return usecase.TransactionFilter{}, time.Time{}, false
 		}
-		// Clamped here, not just left for the repository to clamp: this
-		// handler's own trim logic below reads filter.Limit to decide where
-		// the peek row is, so it must already equal the limit the repository
-		// will actually apply.
+		// Clamped here too (see maxPageSize) so filter.Limit already equals
+		// what the repository will apply, before the trim logic below reads
+		// it.
 		if parsed > maxPageSize {
 			parsed = maxPageSize
 		}
@@ -357,15 +341,15 @@ func toMonthSummaryDTO(s usecase.MonthSummary) monthSummaryDTO {
 	return dto
 }
 
-// createTransactionRequest carries no currency, deliberately: a transaction is
-// denominated in its account's currency and the service derives it. A field
-// here that the service overwrote would be a field this handler accepts and
-// never persists -- the shape guarding-partial-writes exists for.
 // idempotencyKeyHeader carries a caller's key on POST /transactions. The
 // IETF draft's name, so a generic HTTP client that already knows the
 // convention needs no Hearth-specific knowledge.
 const idempotencyKeyHeader = "Idempotency-Key"
 
+// createTransactionRequest carries no currency, deliberately: a transaction
+// is denominated in its account's currency and the service derives it. A
+// field the service silently overwrote would be exactly the shape
+// guarding-partial-writes exists to catch.
 type createTransactionRequest struct {
 	Kind                string  `json:"kind"`
 	OccurredOn          string  `json:"occurredOn"`
@@ -378,14 +362,14 @@ type createTransactionRequest struct {
 	ReceivedAmountMinor *int64  `json:"receivedAmountMinor"`
 }
 
-// updateTransactionRequest's fields are all pointers so a field the caller did
-// not name reaches usecase.TransactionUpdate as nil and keeps its stored
+// updateTransactionRequest's fields are all pointers so a field the caller
+// did not name reaches usecase.TransactionUpdate as nil and keeps its stored
 // value -- the same real-patch convention TestUpdateHouseholdIsARealPatch
 // pins.
 //
-// clearReceivedAmount is how a transfer that stops crossing currencies loses
-// the figure that no longer applies: with pointers alone, "remove it" and
-// "leave it" are the same nil.
+// clearReceivedAmount exists because pointers alone can't tell "remove it"
+// from "leave it" -- both are nil. It's how a transfer that stops crossing
+// currencies loses the figure that no longer applies.
 type updateTransactionRequest struct {
 	Kind                *string `json:"kind"`
 	OccurredOn          *string `json:"occurredOn"`
@@ -414,13 +398,12 @@ func handleCreateTransaction(deps Deps) http.HandlerFunc {
 			return
 		}
 
-		// The key rides in a header, not the body, so the body DTO the
-		// web app sends is unchanged and a missing header is exactly
-		// today's behaviour. Header.Values, not Get: Get answers "" for
-		// both "absent" and "present but empty", and a caller who sent the
-		// header empty is refused (ValidateIdempotencyKey) rather than
-		// silently treated as having sent none. See the 2026-09-08
-		// idempotent-import spec.
+		// The key rides in a header, not the body, so the body DTO the web
+		// app sends is unchanged and a missing header means an ordinary
+		// unkeyed write. Header.Values, not Get: Get can't tell "absent" from
+		// "present but empty", and an empty header is refused
+		// (ValidateIdempotencyKey) rather than silently treated as none
+		// (2026-09-08 idempotent-import spec).
 		var idempotencyKey string
 		if values := r.Header.Values(idempotencyKeyHeader); len(values) > 0 {
 			idempotencyKey = values[0]
@@ -508,7 +491,8 @@ func handleUpdateTransaction(deps Deps) http.HandlerFunc {
 // handleDeleteTransaction answers 204 with no body -- the one status in this
 // API permitted to carry none, and permitted because apiFetch does not try to
 // parse it. A transaction is hard deleted: nothing references it, so nothing
-// is orphaned. See the spec's decision 8 for why this differs from accounts.
+// is orphaned -- unlike an account, which transactions reference and which is
+// archived, never deleted.
 func handleDeleteTransaction(deps Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		scope, _ := RequestScope(r)

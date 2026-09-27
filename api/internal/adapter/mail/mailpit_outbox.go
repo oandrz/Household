@@ -17,34 +17,31 @@ import (
 
 // MailpitOutbox reads the messages Mailpit has caught. It is the only
 // implementation of usecase.MailOutbox, and it is a plain JSON client on
-// purpose: everything interesting about a message -- which of its strings
-// are links -- is domain.ExtractLinks' job, one layer in.
+// purpose: which of a message's strings are links is domain.ExtractLinks'
+// job, one layer in.
 //
 // Two Mailpit endpoints are used and no others:
 //
 //	GET /api/v1/messages?limit=N   the list, newest first
 //	GET /api/v1/message/{id}       one message, both body parts
 //
-// GET /api/v1/message/{id}/link-check is deliberately NOT used, and a test
-// asserts that no other path is ever requested. It issues a real HTTP request
-// to every URL it finds in order to report each one's status, and every URL
-// in a Hearth email is a live single-use token on a public host.
+// GET /api/v1/message/{id}/link-check is deliberately never used (a test
+// asserts no other path is requested): it issues a real HTTP request to
+// every URL it finds, and every URL in a Hearth email is a live single-use
+// token on a public host.
 //
-// Reading a message marks it read in Mailpit's own store. That is a write,
-// from a panel described as read-only, and it is accepted: the flag is not
-// product state and nothing in Hearth reads it. Avoiding it would mean
-// fetching the raw source and parsing MIME here.
+// Reading a message marks it read in Mailpit's own store -- a write from a
+// panel described as read-only. Accepted: the flag is not product state and
+// nothing in Hearth reads it, and avoiding it would mean parsing MIME here.
 type MailpitOutbox struct {
 	base string
 	http *http.Client
 }
 
 // NewMailpitOutbox points at Mailpit's HTTP API -- http://mailpit:8025 in
-// both Compose stacks.
-//
-// The timeout is short because Mailpit is a container on the same host: a
-// slow answer means something is wrong, not that something is far away, and
-// an operator is better served by a prompt 502 than by a page that hangs.
+// both Compose stacks. The timeout is short because Mailpit is a container
+// on the same host: a slow answer means something is wrong, not far away,
+// and an operator is better served by a prompt 502 than a page that hangs.
 func NewMailpitOutbox(baseURL string) *MailpitOutbox {
 	return &MailpitOutbox{
 		base: strings.TrimRight(baseURL, "/"),
@@ -77,22 +74,19 @@ type mailpitMessage struct {
 	ID      string           `json:"ID"`
 	To      []mailpitAddress `json:"To"`
 	Subject string           `json:"Subject"`
-	// Date is the message's own header, falling back to the received time.
-	// The detail response has no Created field, so this is the only sent-at
-	// Mailpit offers here. It can differ from the list's Created by the
-	// length of the SMTP hop, which is to a container on the same host and
-	// which Hearth's own client stamps at send -- so in this install the two
-	// agree, and a one-second difference between the two screens is the hop
-	// rather than a bug.
+	// Date is the message's own header, falling back to the received time;
+	// the detail response has no Created field, so it's the only sent-at
+	// available here. It can differ from the list's Created by the SMTP hop
+	// -- a same-host container here, so a one-second difference between the
+	// two screens is the hop, not a bug.
 	Date time.Time `json:"Date"`
 	Text string    `json:"Text"`
 	HTML string    `json:"HTML"`
 }
 
-// firstRecipient fails closed. Hearth addresses every message to exactly one
-// person (adapter/mail/smtp.go), so an empty list means the assumption this
-// mapping rests on has changed -- better a 502 the operator can report than a
-// blank cell nobody notices.
+// firstRecipient fails closed: Hearth addresses every message to exactly one
+// person (adapter/mail/smtp.go), so an empty list means that assumption has
+// changed. A 502 the operator can report beats a blank cell nobody notices.
 func firstRecipient(addresses []mailpitAddress) (string, error) {
 	if len(addresses) == 0 || addresses[0].Address == "" {
 		return "", fmt.Errorf("%w: a message with no recipient", usecase.ErrOutboxUnavailable)
@@ -100,19 +94,18 @@ func firstRecipient(addresses []mailpitAddress) (string, error) {
 	return addresses[0].Address, nil
 }
 
-// errUpstreamNotFound is get's own signal that the upstream answered 404. It
-// is not domain.ErrNotFound: what a 404 MEANS depends on which route asked.
-// On the message route it is "Mailpit no longer holds that message"; on the
-// list route there is nothing to not-find, and a 404 there means the base URL
-// is wrong -- Mailpit supports a configured webroot, so a stray path segment
-// in MAILPIT_API_URL produces exactly that. Each caller translates it.
+// errUpstreamNotFound is get's own signal that the upstream answered 404,
+// not domain.ErrNotFound: what a 404 means depends on the route. On the
+// message route it means Mailpit no longer holds that message; on the list
+// route it means the base URL is wrong (Mailpit supports a configured
+// webroot, so a stray path segment in MAILPIT_API_URL produces exactly this
+// 404). Each caller translates it.
 var errUpstreamNotFound = errors.New("mailpit answered 404")
 
 // get performs one upstream request and decodes its body. A 404 becomes
 // errUpstreamNotFound for the caller to interpret; every other failure --
-// transport, status, body -- becomes usecase.ErrOutboxUnavailable, because
-// from a caller's point of view they are the same event: the outbox is there
-// and could not be read.
+// transport, status, body -- becomes usecase.ErrOutboxUnavailable, since to
+// a caller they're the same event: the outbox is there and couldn't be read.
 func (m *MailpitOutbox) get(ctx context.Context, path string, out any) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, m.base+path, nil)
 	if err != nil {

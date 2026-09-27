@@ -217,11 +217,11 @@ func TestCountLiveForAccountIgnoresArchivedHoldings(t *testing.T) {
 	}
 }
 
-// THE ordering contract. occurred_on is a date, so two events share one when
-// a household buys and sells the same morning, and domain.Holding.Position
-// sorts stably -- it keeps whatever order it is handed for a tie. So the tie
-// has to be broken here, by the order the events were actually recorded in.
-// Return them any other way and realised gain changes silently.
+// THE ordering contract: occurred_on is a date, so two events can share one
+// when a household buys and sells the same morning. domain.Holding.Position
+// sorts stably, keeping whatever order it's handed for a tie, so the tie
+// must be broken here by recorded order -- return them any other way and
+// realised gain changes silently.
 func TestHoldingEventsComeBackInRecordedOrderForTheSameDay(t *testing.T) {
 	db := openTestDB(t)
 	ctx := context.Background()
@@ -435,16 +435,12 @@ func TestDeletingAnotherHouseholdsEventIsNotFound(t *testing.T) {
 	}
 }
 
-// Two sales of the same holding, racing. Each on its own is legal -- 30 of 50
-// grams -- and together they are not: 60 of 50. Without a lock both fold
-// against the same 50 and both commit, leaving a holding whose events cannot
-// be folded at all, which is a page that throws every time it loads and can
-// only be fixed from the page that is broken.
-//
-// InsertWithFold is what closes that: it locks the holding row, lists the
-// events inside the same transaction, and inserts only if the caller's fold
-// accepts them. The fold itself stays in the domain -- the repository owns the
-// transaction and the lock, never the rule.
+// Two sales of the same holding, racing: each is legal alone (30 of 50
+// grams) but not together (60 of 50). Without a lock, both fold against the
+// same 50 and commit, leaving events that can never fold again -- a page
+// that throws on every load and can't be fixed except from the page that's
+// broken. InsertWithFold closes that by locking the holding row and folding
+// inside the same transaction; see its doc comment for the mechanism.
 func TestTwoRacingDisposalsCannotBothCommit(t *testing.T) {
 	db := openTestDB(t)
 	ctx := context.Background()
@@ -463,15 +459,14 @@ func TestTwoRacingDisposalsCannotBothCommit(t *testing.T) {
 		t.Fatalf("buy: %v", err)
 	}
 
-	// The fold deliberately sleeps, to hold the check-to-write window open long
-	// enough for the two goroutines to genuinely overlap. Without it they
-	// serialise by luck and the test passes even with no lock at all -- which
-	// is exactly what happened the first time this was written, and what a
-	// mutation run caught.
+	// The fold deliberately sleeps, holding the check-to-write window open
+	// long enough for the two goroutines to genuinely overlap. Don't remove
+	// it: without the sleep the goroutines serialise by luck and the test
+	// passes even with no lock at all -- a mutation run is what caught that.
 	//
-	// With the lock: the second writer blocks inside LockHolding before it ever
-	// reaches fold, and folds the first one's committed result.
-	// Without it: both fold the same starting position, both sleep, both write.
+	// With the lock, the second writer blocks inside LockHolding until the
+	// first commits, then folds its result. Without it, both fold the same
+	// starting position, both sleep, and both write.
 	sell := func() error {
 		_, err := events.InsertWithFold(ctx, domain.HoldingEvent{
 			HoldingID: h.ID, HouseholdID: householdID, Kind: domain.HoldingDisposal,

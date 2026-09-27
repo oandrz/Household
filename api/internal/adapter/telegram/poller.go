@@ -8,9 +8,8 @@ import (
 
 // StartHandler is what the poller hands a parsed /start to. It is declared
 // here, in the adapter, rather than imported from usecase, so this package
-// depends on a shape rather than on a concrete service. username is display
-// only; the chat id is the identity, and it is the only one of the two that
-// Telegram guarantees.
+// depends on a shape, not a concrete service. username is display only --
+// the chat id is the identity, the only one of the two Telegram guarantees.
 type StartHandler interface {
 	HandleStart(ctx context.Context, chatID int64, payload, username string) error
 }
@@ -26,16 +25,14 @@ const (
 
 // Poller long-polls Telegram for updates and dispatches /start commands.
 //
-// Exactly one process may run this. Telegram hands each update to a single
-// getUpdates caller, so a second replica would silently steal updates and the
-// symptom would be "sign-in works about half the time". True on one box today;
-// this comment is here because the constraint is invisible until it bites.
+// Exactly one process may run this: Telegram delivers each update to a
+// single getUpdates caller, so a second replica would silently steal
+// updates, and the symptom would be "sign-in works about half the time".
 //
-// The offset is held in memory. After a restart Telegram redelivers updates it
-// was never acknowledged for, so a /start can be processed twice. That is safe
-// because the nonce was already consumed: the second pass takes the
-// already-consumed branch and the bot says the link expired. Recorded rather
-// than left to luck.
+// The offset is held in memory: a restart can redeliver an unacknowledged
+// /start and process it twice. That's safe -- the nonce was already
+// consumed, so the second pass hits the already-consumed branch and the bot
+// replies that the link expired.
 type Poller struct {
 	client      *Client
 	handler     StartHandler
@@ -45,7 +42,7 @@ type Poller struct {
 }
 
 // CommandHandler is what the poller hands a parsed chat command to; nil
-// leaves the bot a sign-in-only bot, exactly as before commands existed.
+// leaves the bot sign-in-only.
 type CommandHandler interface {
 	HandleCommand(ctx context.Context, cmd Command) error
 }

@@ -16,10 +16,9 @@ import (
 )
 
 // transaction import: many rows from a CSV, one POST /transactions each,
-// every row carrying an idempotency key so the same file run twice creates
-// nothing new. No server route exists for bulk insert on purpose -- rows are
-// independent and replay-safe, so a client-side loop is correct and the
-// server stays simple (spec decision 8).
+// every row carrying an idempotency key so running the file twice creates
+// nothing new. No bulk-insert route exists on purpose: rows are
+// independent and replay-safe, so a client-side loop keeps the server simple.
 
 // importColumns is the header vocabulary. Any other header is an error
 // rather than ignored: a misspelt column silently dropped would import a
@@ -124,10 +123,10 @@ func cmdImport(ctx context.Context, c *client, args []string, stdout, stderr io.
 	return nil
 }
 
-// nameIndex resolves a name or an id to an id. Names are matched
-// case-insensitively and must be unambiguous; an id is passed through only
-// if it is one the household actually has, so a typo in an id fails here
-// with a line number rather than at the server as a bare 422.
+// nameIndex resolves a name or an id to an id. A name matches
+// case-insensitively and must be unambiguous; an id passes through only if
+// the household actually has it, so a typo fails here with a line number
+// instead of a bare 422 from the server.
 type nameIndex struct {
 	label string
 	byID  map[string]bool
@@ -215,10 +214,10 @@ func (c *client) getJSON(ctx context.Context, path string, into any) error {
 		return err
 	}
 	if err := refuse(res, io.Discard); err != nil {
-		// refuse already chose the exit code -- 2 for a lapsed session, 3
-		// for anything else -- and the skill tells an agent to act on that
-		// code. Rewrapping here as exit 3 would turn "sign in again" into
-		// "a field is wrong". Only the message is improved.
+		// refuse already chose the right exit code (2 lapsed session, 3
+		// anything else) for the skill to act on; rewrapping as exit 3
+		// here would turn "sign in again" into "a field is wrong". Only
+		// the message is improved.
 		var ee *exitError
 		if errors.As(err, &ee) {
 			ee.msg = fmt.Sprintf("GET %s answered %d: %s", path, res.status, strings.TrimSpace(string(res.body)))
@@ -289,10 +288,10 @@ func parseImport(r io.Reader, names householdNames) ([]importRow, []importFailur
 	return rows, problems, nil
 }
 
-// deriveKey is spec decision 12: a hash of the row's content, plus "#n" for
-// the n-th identical row in the same file. A hash alone would fold two
-// genuine identical coffees into one; a line number alone would re-key
-// every row below an edit and duplicate them on the next run.
+// deriveKey hashes the row's content, then appends "#n" for the n-th
+// identical row in the same file. A hash alone would fold two genuine
+// identical coffees into one; a line number alone would re-key every row
+// below an edit and duplicate them on the next run.
 func deriveKey(fingerprint string, seen map[string]int) string {
 	sum := sha256.Sum256([]byte(fingerprint))
 	key := hex.EncodeToString(sum[:])[:32]
@@ -303,10 +302,10 @@ func deriveKey(fingerprint string, seen map[string]int) string {
 	return key
 }
 
-// buildImportBody turns one record into the exact POST /transactions body
-// and the canonical string the default key is hashed from. The fingerprint
-// uses resolved ids, not the names typed, so renaming an account later does
-// not re-key an already-imported row.
+// buildImportBody turns one record into the POST /transactions body and the
+// canonical string the default key is hashed from. The fingerprint uses
+// resolved ids, not typed names, so renaming an account later does not
+// re-key an already-imported row.
 func buildImportBody(rec []string, get func([]string, string) string, names householdNames) (map[string]any, string, error) {
 	kind := get(rec, "kind")
 	date := get(rec, "date")

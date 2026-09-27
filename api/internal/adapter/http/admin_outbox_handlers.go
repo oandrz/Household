@@ -14,17 +14,16 @@ import (
 // and requireAdminGrant apply by construction -- nothing here checks who is
 // asking. Every timestamp leaves as RFC 3339 in UTC.
 //
-// The list carries no body text of any kind, and the detail carries the plain
-// text and the links pulled out of it, never the HTML part. A rendered email
-// is not what this screen is for; see the spec's decision 1.
+// The list carries no body text of any kind, and the detail carries the
+// plain text and the links pulled out of it, never the HTML part. A
+// rendered email is not what this screen is for.
 
 // mailpitIDPattern is Mailpit v1.30.5's id shape exactly: 22 characters from
 // a 62-character alphanumeric alphabet (internal/shortuuid). Refusing
-// anything else before the upstream request is made is this route's "fail
-// closed on values you did not construct" -- with two specific teeth, since
-// Mailpit reads the literal id "latest" as "the most recent message", and an
-// id containing a slash would aim the request at a different endpoint
-// entirely.
+// anything else before the upstream request -- "fail closed on values you
+// did not construct" -- has two specific teeth: Mailpit reads the literal id
+// "latest" as "the most recent message", and an id containing a slash would
+// aim the request at a different endpoint entirely.
 var mailpitIDPattern = regexp.MustCompile(`^[0-9A-Za-z]{22}$`)
 
 type outboxMessageSummaryDTO struct {

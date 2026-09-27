@@ -64,12 +64,11 @@ func TestVerifyRejectsMalformedInput(t *testing.T) {
 		"empty salt field":    "$argon2id$v=19$m=65536,t=3,p=2$$" + hash,
 		"non-empty but wrong-length hash field": "$argon2id$v=19$m=65536,t=3,p=2$" + salt + "$" +
 			base64.RawStdEncoding.EncodeToString([]byte("too short to be a real key")),
-		// The bug this guards against: Verify used to derive its comparison
-		// key's length from this field instead of from the hasher's own
-		// fixed keyLen, so an empty field asked argon2 to derive a
-		// zero-length key and compare it against nothing — a comparison
-		// that can only ever "succeed". This case must keep returning
-		// false; do not "simplify" the len(want) == h.keyLen check away.
+		// The bug this guards against: Verify once derived its comparison
+		// key's length from this field instead of the hasher's fixed keyLen,
+		// so an empty field asked argon2 for a zero-length key and compared
+		// it against nothing -- which can only "succeed". Don't "simplify"
+		// away the len(want) == h.keyLen check.
 		"empty hash field": "$argon2id$v=19$m=65536,t=3,p=2$" + salt + "$",
 	}
 

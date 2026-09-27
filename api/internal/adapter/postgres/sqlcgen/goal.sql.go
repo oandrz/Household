@@ -22,14 +22,13 @@ type ClearBudgetRolloverParams struct {
 	Month       pgtype.Date
 }
 
-// ClearBudgetRollover undoes RollOverToGoal's stamp when the contribution it
-// wrote is deleted -- see GoalRepository.DeleteContribution's own doc comment
-// for why leaving the stamp behind would strand the household: money gone
-// from the goal, a month still claiming it was rolled over, and a 409 on
-// every retry. It is unconditional on rolled_over_at's existing value:
-// GoalRepo.DeleteContribution only ever runs this after confirming the
-// deleted row's source was budget_rollover, so there is exactly one budget
-// row -- this household-month -- that stamp could belong to.
+// ClearBudgetRollover undoes RollOverToGoal's stamp when the contribution
+// it wrote is deleted: leaving the stamp behind would strand the household --
+// money gone from the goal, a month still claiming it was rolled over,
+// and a 409 on every retry (GoalRepository.DeleteContribution). It is
+// unconditional on rolled_over_at because GoalRepo.DeleteContribution only
+// runs this after confirming the deleted row's source was budget_rollover,
+// so exactly one budget row -- this household-month -- could own the stamp.
 func (q *Queries) ClearBudgetRollover(ctx context.Context, arg ClearBudgetRolloverParams) error {
 	_, err := q.db.Exec(ctx, clearBudgetRollover, arg.HouseholdID, arg.Month)
 	return err
@@ -50,13 +49,13 @@ type CreateGoalParams struct {
 	PlannedMonthlyMinor int64
 }
 
-// CreateGoal inserts the goal row only -- GoalRepo.Create wraps this with the
-// opening contribution insert in one pgx.BeginFunc transaction (see its own
-// comment), so a name collision here rolls back before any contribution is
-// ever attempted. A name collision -- archived rows included, since
-// archived_at is not part of goals' own UNIQUE (household_id, name) --
-// surfaces as a 23505 that translate maps to domain.ErrGoalNameTaken by
-// constraint name, the same pattern CreateCategory's own comment describes.
+// CreateGoal inserts the goal row only -- GoalRepo.Create wraps this with
+// the opening contribution insert in one pgx.BeginFunc transaction, so a
+// name collision here rolls back before any contribution is attempted. A
+// collision -- archived rows included, since archived_at is not part of
+// goals' UNIQUE (household_id, name) -- surfaces as a 23505 that translate
+// maps to domain.ErrGoalNameTaken by constraint name, the same pattern
+// CreateCategory uses.
 func (q *Queries) CreateGoal(ctx context.Context, arg CreateGoalParams) (Goal, error) {
 	row := q.db.QueryRow(ctx, createGoal,
 		arg.HouseholdID,
@@ -100,12 +99,10 @@ type DeleteGoalContributionRow struct {
 }
 
 // DeleteGoalContribution removes one contribution row, scoped by id, goal_id
-// AND household_id together for the same reason ListGoalContributions' own
-// comment gives. It returns source and source_budget_month so
-// GoalRepo.DeleteContribution can decide, inside the same transaction,
-// whether a budget's rollover stamp needs clearing -- the invariant is
-// proven end to end only once Task 5 exists, since no budget_rollover row can
-// be written before then.
+// AND household_id together, the same reason ListGoalContributions gives.
+// It returns source and source_budget_month so GoalRepo.DeleteContribution
+// can decide, inside the same transaction, whether a budget's rollover
+// stamp needs clearing.
 func (q *Queries) DeleteGoalContribution(ctx context.Context, arg DeleteGoalContributionParams) (DeleteGoalContributionRow, error) {
 	row := q.db.QueryRow(ctx, deleteGoalContribution, arg.ID, arg.GoalID, arg.HouseholdID)
 	var i DeleteGoalContributionRow
@@ -187,17 +184,16 @@ type GoalProgressByIDsRow struct {
 }
 
 // GoalProgressByIDs is Vision's one read of Goals (usecase.GoalProgressReader).
-// It returns a row only for an id that belongs to THIS household, so a goal
-// in another household is indistinguishable from one that does not exist --
-// an id this query does not return is a miss, not an error; ProgressByIDs
-// turns that into a plain absence from the returned map, and Vision renders
-// a figureless measure for it.
+// It returns a row only for an id belonging to THIS household, so a goal in
+// another household is indistinguishable from one that doesn't exist: a
+// missing id is a miss, not an error. ProgressByIDs turns that into a plain
+// absence from the returned map, and Vision renders a figureless measure.
 //
 // Deliberately NOT filtered on archived_at: an archived goal counts as found
-// and keeps its figure (spec decision 8, "archiving is not deletion anywhere
-// else in this product either" -- usecase.GoalProgressReader's own doc
-// comment). Only a real DELETE unlinks a measure, by firing goals.id's own
-// ON DELETE SET NULL into vision_measures.goal_id.
+// and keeps its figure ("archiving is not deletion anywhere else in this
+// product either" -- usecase.GoalProgressReader). Only a real DELETE
+// unlinks a measure, by firing goals.id's own ON DELETE SET NULL into
+// vision_measures.goal_id.
 //
 // The contributed total is ListGoalsWithTotals' own expression, verbatim --
 // same LEFT JOIN, same COALESCE -- so this codebase never carries two
@@ -243,13 +239,13 @@ type InsertGoalContributionParams struct {
 	SourceBudgetMonth pgtype.Date
 }
 
-// InsertGoalContribution writes one contribution row. Both GoalRepo.Create's
-// opening contribution (source starting_balance) and GoalRepo.AddContribution's
-// manual one (source manual, or budget_rollover once Task 5 exists) share this
-// one query -- a contribution row's shape does not depend on why it was
-// written. It carries no currency column: a contribution is its goal's
-// currency by construction (00007_goals.sql's own comment), so the caller
-// supplies the goal's currency separately when it needs a domain.Money back.
+// InsertGoalContribution writes one contribution row. GoalRepo.Create's
+// opening contribution (source starting_balance), GoalRepo.AddContribution's
+// manual one (source manual), and a budget rollover (source budget_rollover)
+// all share this one query -- a contribution row's shape does not depend on
+// why it was written. It carries no currency column: a contribution is its
+// goal's currency by construction (00007_goals.sql), so the caller supplies
+// the goal's currency separately when it needs a domain.Money back.
 func (q *Queries) InsertGoalContribution(ctx context.Context, arg InsertGoalContributionParams) (GoalContribution, error) {
 	row := q.db.QueryRow(ctx, insertGoalContribution,
 		arg.GoalID,
@@ -306,17 +302,15 @@ type ListGoalContributionsRow struct {
 
 // ListGoalContributions returns one goal's contributions, newest first by
 // occurred_on, tie-broken by created_at DESC ("most recently added first") --
-// the same tiebreak the in-memory double gives, since AddContribution only
-// ever appends and two contributions can share a calendar date. It joins to
-// goals for currency: a contribution row carries none of its own
-// (00007_goals.sql's own comment), so this is the one read path that must
-// fetch it to build a domain.Money at all.
+// matching the in-memory double, since AddContribution only appends and
+// two contributions can share a date. It joins to goals for currency: a
+// contribution row carries none of its own (00007_goals.sql), so this is
+// the one read path that must fetch it to build a domain.Money.
 //
-// Scoped by household_id AND goal_id together, never by either alone --
-// GoalRepository's own package doc comment: goal_contributions carries no
-// database-level guarantee that its household_id agrees with its own
-// goal_id's household, so both must be checked or a contribution could leak
-// across households.
+// Scoped by household_id AND goal_id together, never either alone
+// (GoalRepository's package doc): goal_contributions has no database-level
+// guarantee that its household_id agrees with its goal_id's household, so
+// both must be checked or a contribution could leak across households.
 func (q *Queries) ListGoalContributions(ctx context.Context, arg ListGoalContributionsParams) ([]ListGoalContributionsRow, error) {
 	rows, err := q.db.Query(ctx, listGoalContributions, arg.HouseholdID, arg.GoalID, arg.RowLimit)
 	if err != nil {
@@ -378,18 +372,16 @@ type ListGoalsWithTotalsRow struct {
 }
 
 // ListGoalsWithTotals returns one household's goals joined to the sum of
-// their own contributions, COALESCEd to 0 for a goal with none at all (a
-// plain SUM over an empty LEFT JOIN group is NULL, not 0). include_archived
-// is a UNION, not a filter swap -- GoalRepository.List's own doc comment:
-// false returns only the live goals, true returns the live ones AND the
-// archived ones together, each carrying its own archived_at.
+// their own contributions, COALESCEd to 0 (a plain SUM over an empty LEFT
+// JOIN group is NULL, not 0). include_archived is a UNION, not a filter
+// swap (GoalRepository.List): false returns only live goals, true returns
+// live and archived together, each with its own archived_at.
 //
-// Ordering is the port's own pinned contract: dated goals first, newest
-// target_month first, ties (and every dateless goal, which all compare equal
-// on target_month) broken by name. "DESC NULLS LAST" is doing the real work
-// here -- Postgres's own default null-ordering for DESC is NULLS FIRST, so
-// without the explicit NULLS LAST a dateless goal would sort ahead of every
-// dated one, exactly the placement the port's doc comment forbids.
+// Ordering is the port's pinned contract: dated goals first, newest
+// target_month first, ties (and every dateless goal, which all compare
+// equal) broken by name. NULLS LAST does the real work -- Postgres's DESC
+// default is NULLS FIRST, so without it a dateless goal would sort ahead of
+// every dated one, exactly what the port forbids.
 func (q *Queries) ListGoalsWithTotals(ctx context.Context, arg ListGoalsWithTotalsParams) ([]ListGoalsWithTotalsRow, error) {
 	rows, err := q.db.Query(ctx, listGoalsWithTotals, arg.HouseholdID, arg.IncludeArchived)
 	if err != nil {
@@ -446,19 +438,16 @@ type MonthContributionTotalsRow struct {
 }
 
 // MonthContributionTotals sums each unarchived goal's contributions inside
-// one calendar month, excluding source = 'starting_balance' -- the exclusion
-// GoalRepository.MonthContributionTotals' own doc comment calls load-bearing:
-// without it, a household that created goals with existing balances would
-// read its opening balances as money added this month. Joined to goals so an
-// archived goal's contributions never appear, matching "sums each unarchived
-// goal's contributions" exactly.
+// one calendar month, excluding source = 'starting_balance': without that
+// exclusion, a household that created goals with existing balances would
+// read its opening balances as money added this month. Joined to goals so
+// an archived goal's contributions never appear.
 //
 // Both g.household_id and c.household_id are checked against $1, matching
-// goalDouble.MonthContributionTotals -- the tie-breaker where the port is
-// silent (usecase/testdouble_test.go): 00007_goals.sql gives
-// goal_contributions.household_id no database-level guarantee of agreeing
-// with its own goal_id's household, so a mismatched row must not be summed
-// under either household's total.
+// goalDouble.MonthContributionTotals where the port itself is silent:
+// goal_contributions.household_id has no database-level guarantee of
+// agreeing with its own goal_id's household, so a mismatched row must not
+// be summed under either household's total.
 func (q *Queries) MonthContributionTotals(ctx context.Context, arg MonthContributionTotalsParams) ([]MonthContributionTotalsRow, error) {
 	rows, err := q.db.Query(ctx, monthContributionTotals, arg.HouseholdID, arg.Column2)
 	if err != nil {
@@ -495,13 +484,11 @@ type SetGoalArchivedParams struct {
 }
 
 // SetGoalArchived stamps or clears archived_at depending on the caller's
-// boolean, scoped the same way UpdateGoal is. The COALESCE is the whole of
-// "archiving is idempotent, keeping the first stamp": archiving an
-// already-archived goal keeps its original archived_at rather than moving it
-// forward to the caller's `at`, mirroring SetCategoryArchived's own
+// boolean, scoped the same way UpdateGoal is. The COALESCE keeps "archiving
+// is idempotent": an already-archived goal keeps its original archived_at
+// rather than moving to the caller's `at`, mirroring SetCategoryArchived's
 // COALESCE(archived_at, now()) with a caller-supplied timestamp standing in
-// for that query's now() -- GoalRepository.SetArchived's own doc comment
-// requires exactly this shape.
+// for now() -- GoalRepository.SetArchived requires exactly this shape.
 func (q *Queries) SetGoalArchived(ctx context.Context, arg SetGoalArchivedParams) (Goal, error) {
 	row := q.db.QueryRow(ctx, setGoalArchived,
 		arg.Archived,
@@ -542,16 +529,14 @@ type UpdateGoalParams struct {
 }
 
 // UpdateGoal replaces every mutable column -- name, target amount, target
-// month (NULL clears it) and planned monthly -- and deliberately has no SET
-// clause for currency or archived_at: currency is not mutable
-// (GoalRepository.Update's own doc comment; see GoalService.Update for why),
-// and archiving has its own dedicated method. Because the SET list omits
-// them, RETURNING hands back whatever the row already had for both --
-// exactly the "read back off the existing row regardless of what the caller
-// passed" behaviour the in-memory double implements by hand. Same collision
-// contract as CreateGoal. Scoped by household_id AND id, so an id from
-// another household matches no row and translate turns that pgx.ErrNoRows
-// into domain.ErrNotFound.
+// month (NULL clears it) and planned monthly -- with no SET clause for
+// currency (not mutable, see GoalService.Update) or archived_at (archiving
+// has its own dedicated method). Omitting them from SET means RETURNING
+// echoes whatever the row already had, matching the in-memory double's
+// "read back off the existing row" behaviour. Same collision contract as
+// CreateGoal. Scoped by household_id AND id, so an id from another
+// household matches no row and translate turns that pgx.ErrNoRows into
+// domain.ErrNotFound.
 func (q *Queries) UpdateGoal(ctx context.Context, arg UpdateGoalParams) (Goal, error) {
 	row := q.db.QueryRow(ctx, updateGoal,
 		arg.HouseholdID,

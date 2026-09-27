@@ -7,11 +7,10 @@ import (
 	"github.com/andreasoentoro/hearth/api/internal/domain"
 )
 
-// The fixtures are Hearth's four real message bodies (adapter/mail/smtp.go)
-// plus the cases that body text alone would never produce. Two of them are
-// constructed rather than captured and the reason is in their names: a real
-// token ends in "-" or "_" only about one time in thirty-two, so a captured
-// sample would pass a broken strip set by luck.
+// The fixtures are Hearth's four real message bodies, plus cases body text
+// alone would never produce. Two are constructed rather than captured: a
+// real token ends in "-" or "_" only about one time in thirty-two, so a
+// captured sample could pass a broken strip set by luck.
 func TestExtractLinks(t *testing.T) {
 	tests := []struct {
 		name string

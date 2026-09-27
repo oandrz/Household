@@ -57,13 +57,13 @@ func (r *MembershipRepo) ByUser(ctx context.Context, userID string) (domain.Memb
 }
 
 // Create passes m straight through to Postgres without re-checking the
-// capability rules domain.NewMembership already enforces: the database's
+// capability rules domain.NewMembership already enforces. The database's
 // CHECK constraints (owners_hold_all_capabilities,
 // limited_members_have_no_marriage, capabilities_are_known) are the second
-// gate for exactly this reason, and a caller that bypassed the first --
-// building a Membership struct literal directly, which the domain doc
-// comment on NewMembership explicitly allows -- must see that second gate's
-// error rather than have this repository silently re-validate and swallow it.
+// gate for exactly that case: a caller that built a Membership literal
+// directly -- which NewMembership's own doc comment allows -- must see
+// that gate's error rather than have this repository silently re-validate
+// and swallow it.
 func (r *MembershipRepo) Create(ctx context.Context, m domain.Membership) (domain.Membership, error) {
 	row, err := r.q.CreateMembership(ctx, sqlcgen.CreateMembershipParams{
 		HouseholdID:  uuid(m.HouseholdID),
@@ -132,19 +132,18 @@ func (r *MembershipRepo) DeleteWithCheck(
 		})
 }
 
-// writeUnderHouseholdLock is the one shape both guarded writes share: begin a
-// transaction, take the household's membership lock, list the memberships,
-// then hand them to write, which runs the caller's check and the one
-// statement. A write that touched no row is domain.ErrNotFound: the
-// membership is not this household's, and the caller must be told so rather
-// than see a silent success.
+// writeUnderHouseholdLock is the one shape both guarded writes share: begin
+// a transaction, take the household's membership lock, list the
+// memberships, then hand them to write, which runs the caller's check and
+// the one statement. A write that touches no row means the membership is
+// not this household's, so it comes back as domain.ErrNotFound rather than
+// a silent success.
 //
-// Errors are handled in two groups on purpose. An error from inside the
-// transaction is already a domain error -- the caller's check's own error, or
-// one translate has produced -- and comes back unchanged, which the port
-// promises. Anything else pgx.BeginFunc returns is BEGIN or COMMIT itself
-// failing, a raw driver error that must be translated here so no pgx type
-// leaves the adapter.
+// Errors are handled in two groups on purpose. One from inside the
+// transaction is already a domain error -- the caller's check, or
+// translate -- and comes back unchanged, as the port promises. Anything
+// else from pgx.BeginFunc is BEGIN or COMMIT itself failing, a raw driver
+// error that must be translated here so no pgx type leaves the adapter.
 func (r *MembershipRepo) writeUnderHouseholdLock(
 	ctx context.Context,
 	householdID, op string,

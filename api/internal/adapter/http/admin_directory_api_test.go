@@ -145,11 +145,10 @@ type householdPageBody struct {
 	Lockout        json.RawMessage   `json:"lockout"`
 }
 
-// pendingInviteChannelBody decodes just the one field the drill-in test
-// below needs a real value from, not only its presence: assertKeys checks
-// the key set, so a dropped struct field or json tag fails it, but a
-// dropped literal assignment (the field stays, the value silently becomes
-// Go's zero value) does not change the key set at all and needs this.
+// pendingInviteChannelBody decodes the one field the drill-in test below
+// needs a real value from, not just its presence: assertKeys only checks
+// the key set, so a dropped literal assignment (zero value, key still
+// present) would pass unnoticed without this.
 type pendingInviteChannelBody struct {
 	Channel string `json:"channel"`
 }
@@ -158,18 +157,12 @@ func TestAdminHouseholdDrillInShowsMembersAndTheLockout(t *testing.T) {
 	env := newTestEnv(t)
 	// One pending invite, seeded through the real invite endpoint rather
 	// than the repo directly, so pendingInviteDTO is exercised with a row
-	// present -- this household otherwise has none, and nothing else in
-	// this file drills into one that does. Without this, a dropped Channel
-	// (from the struct, its json tag, or just the literal below at
-	// handleAdminHousehold's `Channel: string(i.Channel)`) would still pass
-	// the whole suite, and the row would render as the blank cell this
-	// task exists to eliminate. assertKeys alone would not have been
-	// enough: dropping the struct field removes the "channel" key
-	// entirely, which assertKeys catches, but dropping only the literal
-	// assignment leaves the key present with its Go zero value "" --
-	// assertKeys checks the key set, never values, so that mutation would
-	// have passed silently. The Channel value check below is what closes
-	// that half.
+	// present -- no other test in this file drills into one that does.
+	// Without this, a dropped Channel (struct field, json tag, or the
+	// literal assignment at handleAdminHousehold's `Channel:
+	// string(i.Channel)`) would still pass the whole suite and render as
+	// a blank cell. See pendingInviteChannelBody: assertKeys alone
+	// wouldn't catch a dropped literal assignment, only a dropped field.
 	ownerSession, ownerCSRF := env.signIn(t, env.ownerEmail, env.ownerPassword)
 	env.mustInviteOwner(t, ownerSession, ownerCSRF, "Christine", "christine@example.test")
 

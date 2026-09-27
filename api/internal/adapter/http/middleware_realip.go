@@ -7,27 +7,27 @@ import (
 	"strings"
 )
 
-// trustedProxyRealIP sets r.RemoteAddr to the address in the X-Real-IP
-// header, and does so only when the request's own TCP peer is inside one of
-// trusted -- in production, the Docker network nginx reaches the API from
-// (TRUSTED_PROXY_CIDRS). Everything downstream that needs the client's
-// address (the per-IP rate limiters, the admin audit log) reads r.RemoteAddr
-// through clientIP, so this is the one place that decides whose word about
-// the client to believe.
+// trustedProxyRealIP sets r.RemoteAddr to the X-Real-IP header's address,
+// but only when the request's TCP peer is inside trusted (in production,
+// TRUSTED_PROXY_CIDRS is the Docker network nginx reaches the API from).
+// Everything downstream reads the client's address via clientIP, which
+// reads r.RemoteAddr, so this is the one place that decides whose word to
+// believe.
 //
 // It replaces chi's middleware.RealIP, which believed True-Client-IP,
-// X-Real-IP and X-Forwarded-For from anyone. That made the API only as safe
-// as whatever happened to sit in front of it: with nginx configured exactly
-// right it was fine, and with anything else in front, or nothing, a caller
-// chose its own address and walked past the sign-up limiter. This one reads
-// one header, from listed peers only, and never reads True-Client-IP or
-// X-Forwarded-For -- nginx overwrites X-Real-IP with the client it resolved,
-// so there is exactly one header to trust and no list to walk.
+// X-Real-IP and X-Forwarded-For from anyone -- making the API only as safe
+// as whatever sat in front of it, letting a caller walk past the sign-up
+// limiter by naming its own address whenever nginx wasn't configured
+// exactly right, or wasn't there at all. This reads one header, from
+// listed peers only, and never True-Client-IP or X-Forwarded-For, since
+// nginx already overwrites X-Real-IP with the client it resolved -- one
+// header to trust, no list to walk.
 //
-// With trusted empty nothing is ever rewritten and every request is keyed by
-// the address that actually connected (config.Load's own comment on why that
-// is the default). No cleverness: a peer outside the list, a missing header
-// and a header that is not an address all leave the request untouched.
+// With trusted empty, nothing is rewritten and every request is keyed by
+// the address that actually connected (config.Load's own comment explains
+// why that is the default). No cleverness: a peer outside the list, a
+// missing header, or a header that isn't an address all leave the request
+// untouched.
 func trustedProxyRealIP(trusted []netip.Prefix) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

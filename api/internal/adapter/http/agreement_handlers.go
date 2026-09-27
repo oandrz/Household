@@ -13,13 +13,13 @@ import (
 
 // maxAgreementRequestBodyBytes replaces the ordinary maxRequestBodyBytes for
 // two routes only: POST /marriage/agreements/proposals and
-// POST /marriage/agreements/proposals/{id}/park. Between them they carry four
-// rune-capped free-text fields (body, previousBody, note, park note) at 500
-// runes each, and a 500-rune CJK field alone is 1500 bytes -- the 1 KiB
-// default would answer 413 to a body the domain considers legal. 8 KiB clears
-// all four comfortably while still refusing anything absurd, the same
-// reasoning maxRetroRequestBodyBytes and maxVisionRequestBodyBytes give for
-// their own overrides.
+// POST /marriage/agreements/proposals/{id}/park. Between them they carry
+// four rune-capped free-text fields (body, previousBody, note, park note) at
+// 500 runes each, and a single 500-rune CJK field alone is 1500 bytes -- the
+// 1 KiB default would answer 413 to a body the domain considers legal. 8 KiB
+// clears all four comfortably while still refusing anything absurd, the
+// same reasoning maxRetroRequestBodyBytes and maxVisionRequestBodyBytes give
+// for their own overrides.
 const maxAgreementRequestBodyBytes = 8 * 1024
 
 type createAgreementSectionRequest struct {
@@ -32,7 +32,7 @@ type createAgreementSectionRequest struct {
 // PreviousBody is required rather than optional on those two kinds -- an
 // agreement body is never empty, so an omitted one would always read as stale.
 type proposeAgreementChangeRequest struct {
-	Kind              string `json:"kind"`              // "add" | "edit" | "remove", parsed here (decision 21)
+	Kind              string `json:"kind"`              // "add" | "edit" | "remove", parsed at the HTTP boundary
 	SectionID         string `json:"sectionId"`         // add: required. edit/remove: blanked by the handler
 	TargetAgreementID string `json:"targetAgreementId"` // edit/remove: required
 	Body              string `json:"body"`              // add/edit: required
@@ -46,21 +46,21 @@ type parkAgreementProposalRequest struct {
 	Note string `json:"note"`
 }
 
-// Number is the design's "01" as an integer, derived at render (decision 11);
-// the zero padding is the browser's. No addedAt and no signer ids on the wire:
-// the design renders neither, and a field nothing reads is a field nothing
-// keeps honest.
+// Number is the design's "01" as an integer, derived at render, never
+// stored; the zero padding is the browser's. No addedAt and no signer ids on
+// the wire: the design renders neither, and a field nothing reads is a field
+// nothing keeps honest.
 type agreementDTO struct {
 	ID     string `json:"id"`
 	Number int    `json:"number"`
 	Body   string `json:"body"`
 }
 
-// Every section travels, empty ones included (decision 8). Count is its live
-// agreements and Visible is Count > 0, both stamped by the service: the page
-// renders the visible ones and the propose picker offers them all, off ONE
-// array. Two arrays would ship every section twice on every write response,
-// for one boolean.
+// Every section travels, even ones with no agreements yet: an empty section
+// is invisible in the document but still has to appear in the propose
+// picker. Count and Visible (Count > 0) are stamped by the service, and one
+// array serves both -- two arrays would ship every section twice for one
+// boolean.
 type agreementSectionDTO struct {
 	ID         string         `json:"id"`
 	Name       string         `json:"name"`
@@ -91,7 +91,7 @@ type agreementProposalDTO struct {
 	ProposedByMembershipID string    `json:"proposedByMembershipId"`
 	ProposedByName         string    `json:"proposedByName"` // "" if the membership no longer resolves
 	ProposedAt             time.Time `json:"proposedAt"`
-	AwaitingNames          []string  `json:"awaitingNames"` // owners yet to sign, evaluated live (decision 4)
+	AwaitingNames          []string  `json:"awaitingNames"` // owners yet to sign, evaluated live
 	TargetChanged          bool      `json:"targetChanged"` // previousBody no longer matches the live target
 	CanAgree               bool      `json:"canAgree"`
 	CanWithdraw            bool      `json:"canWithdraw"`
@@ -120,7 +120,7 @@ type agreementsDocumentDTO struct {
 	// Its length IS the owner count; no second count travels beside these rows,
 	// so the locked screen and the pending card cannot disagree about it.
 	Owners    []agreementOwnerDTO        `json:"owners"`
-	Version   int                        `json:"version"`   // count(accepted) + 1 (decision 10)
+	Version   int                        `json:"version"`   // count(accepted) + 1, never stored
 	UpdatedAt *time.Time                 `json:"updatedAt"` // null until the first accepted change
 	Sections  []agreementSectionDTO      `json:"sections"`  // every slice on the wire is [], never null
 	Proposals []agreementProposalDTO     `json:"proposals"` // pending and parked only
@@ -147,24 +147,23 @@ type agreementProposalWriteResponse struct {
 }
 
 // toAgreementProposalDTO stamps canAgree and canWithdraw HERE, not in the
-// service: the service composes what is true of the household, and only the
-// HTTP layer knows who is asking (CLAUDE.md -- no service takes an actor
-// parameter to decide whether a caller may act).
+// service: only the HTTP layer knows who is asking (ADR 8), so the service
+// composes what's true of the household and this function turns that into
+// what THIS caller may do.
 //
-// canAgree's second clause is decision 16: because the signer set is evaluated
-// live, a proposal can become fully signed by nobody's action -- three owners,
-// one proposes, one agrees, the third leaves -- and completion is only ever
-// decided during a signing, so without this clause that proposal would sit
-// pending, needing nobody, forever. The idempotent re-Agree is what closes it.
+// canAgree stays true even once awaiting is empty: the signer set is
+// evaluated live, so a proposal can become fully signed by nobody's action
+// (three owners; one proposes, one agrees, the third leaves). Completion is
+// only decided during a signing, so without this it would sit pending
+// forever; an idempotent re-Agree closes it.
 //
-// canWithdraw tests the proposer against the LIVE owner set (decision 15),
-// never a column: once the proposer is no longer an owner, any owner may
-// withdraw it, or a proposal left behind by a departed partner could never be
-// removed by anyone.
+// canWithdraw checks the LIVE owner set, not a column: once the proposer is
+// no longer an owner, any owner may withdraw, or a proposal left behind by a
+// departed partner could never be removed.
 //
-// Both say the caller MAY act, not that the write will succeed -- freshness is
-// targetChanged's job -- and both are false on a locked household, so nothing
-// clickable would 409 (decision 3).
+// Both mean "may act", not "will succeed" -- staleness is targetChanged's
+// job -- and both are false on a locked household, so nothing clickable
+// 409s.
 func toAgreementProposalDTO(p usecase.AgreementProposalView, doc usecase.AgreementsView, viewer string) agreementProposalDTO {
 	awaiting := make([]string, 0, len(p.AwaitingNames))
 	awaiting = append(awaiting, p.AwaitingNames...)
@@ -244,11 +243,11 @@ func toAgreementsDTO(doc usecase.AgreementsView, viewer string) agreementsDocume
 	}
 }
 
-// handleGetAgreements answers 200 for a locked household too (decision 3):
-// what it lacks is a second owner, not permission, and the empty state IS the
-// page. The read is never gated on locked -- a household that dropped to one
-// owner keeps seeing what it agreed to and its frozen proposals, and the
-// banner explaining why is the frontend's job off doc.locked.
+// handleGetAgreements answers 200 even when locked: a household with one
+// owner keeps seeing what it agreed to and its frozen proposals -- it lacks
+// a second owner, not permission, and for a never-paired household the
+// empty state IS the page. The read never gates on locked; the banner
+// explaining why is the frontend's job off doc.locked.
 func handleGetAgreements(deps Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		scope, _ := RequestScope(r)
@@ -263,16 +262,15 @@ func handleGetAgreements(deps Deps) http.HandlerFunc {
 	}
 }
 
-// respondProposal answers the body every proposal write shares: the row the
-// write touched at the status it now holds, plus the whole freshly composed
-// document, because each write moves the version, the 01..N numbering, the
-// history list and which proposals are open.
+// respondProposal answers the body every proposal write shares: the row just
+// written plus the whole freshly composed document, because any write can
+// move the version, the 01..N numbering, the history list and which
+// proposals are open.
 //
-// The document is composed AFTER the write and outside its transaction, so a
-// concurrent agree may already have overtaken it. That is accepted rather than
-// worked around: the frontend's refetch stays the authority, and a response
-// that tried to be authoritative would need the read inside the write's
-// transaction for no gain the screen can see.
+// The document is composed AFTER the write, outside its transaction, so a
+// concurrent Agree may already have overtaken it. That's accepted: the
+// frontend's refetch stays the authority, and reading inside the write's
+// transaction would buy nothing the screen can see.
 func respondProposal(w http.ResponseWriter, viewer string, status int,
 	p usecase.AgreementProposalView, doc usecase.AgreementsView) {
 	WriteJSON(w, status, agreementProposalWriteResponse{
@@ -282,17 +280,16 @@ func respondProposal(w http.ResponseWriter, viewer string, status int,
 }
 
 // handleProposeAgreementChange parses the kind itself and answers 422 from
-// here (decision 21), the way parseVisionYear answers a bad year. A kind
-// arrives from two places -- a request body, where a bad value is the caller's
-// mistake, and a database column, where a bad value is a corrupt row -- and one
-// sentinel serving both jobs would make a broken row indistinguishable from a
-// typo. So domain.ErrUnknownAgreementProposalKind deliberately has no
-// MapDomainError case: anything reaching the mapper with it came from a column.
+// here, the way parseVisionYear answers a bad year: a kind arrives both from
+// a request body (a caller's typo) and a database column (a corrupt row),
+// and one sentinel can't tell those apart. So
+// domain.ErrUnknownAgreementProposalKind has no MapDomainError case --
+// anything that reaches the mapper with it came from a column.
 //
-// SectionID is blanked for anything but an add, because the modal still holds
-// one from add mode and on an edit or a remove the server copies the section
-// from the target anyway. Validate's refusal of a caller-supplied section on
-// those two kinds stays the fail-closed backstop behind that.
+// SectionID is blanked for anything but an add: the modal still holds one
+// from add mode, and on an edit or remove the server (the repository)
+// copies the section from the target anyway. Validate's refusal of a
+// caller-supplied section there is the fail-closed backstop.
 func handleProposeAgreementChange(deps Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		scope, _ := RequestScope(r)
@@ -310,10 +307,9 @@ func handleProposeAgreementChange(deps Deps) http.HandlerFunc {
 		if kind != domain.ProposalAdd {
 			sectionID = ""
 		}
-		// HouseholdID and ProposedByMembershipID are left zero in the struct on
-		// purpose: the service stamps both from the two arguments below -- the
-		// route and the session -- so a body carrying either is ignored rather
-		// than trusted. Filling them in here from req would be the mistake.
+		// HouseholdID and ProposedByMembershipID are left zero here on purpose:
+		// the service stamps both from the route and the session below, so a
+		// body carrying either is ignored, never trusted from req.
 		p, doc, err := deps.Agreements.Propose(r.Context(), scope.HouseholdID, scope.Membership.ID,
 			domain.AgreementProposal{
 				Kind:              string(kind),
@@ -331,19 +327,18 @@ func handleProposeAgreementChange(deps Deps) http.HandlerFunc {
 	}
 }
 
-// handleWithdrawAgreementProposal owns the refusal order 404 -> 403 -> 409
-// (decision 22). It must read the proposal before it can know whose it is, so
-// the order is a property of THIS handler and not of the guards, and without
-// it "every write refuses 409 when the household is locked" is false on the
-// wire.
+// handleWithdrawAgreementProposal owns the refusal order 404 -> 403 -> 409.
+// It must read the proposal before it can know whose it is, so the order is
+// a property of THIS handler, not the guards -- without it, "every write
+// refuses 409 when locked" would be false on the wire.
 //
 // The proposer is compared against the LIVE owner set, never a column: once
-// they are no longer an owner, any owner may withdraw it (decision 15), or a
-// proposal left behind by a departed partner could never be removed by anyone
-// -- the permanently-stuck state this codebase already shipped once, in
-// invites. That is a "who is asking" question, which is why it lives here and
-// no service takes an actor parameter for it. AgreementRepository.Withdraw's
-// own SQL clause is the backstop behind this, and it never branches on $by.
+// they are no longer an owner, any owner may withdraw it, or a proposal left
+// behind by a departed partner could never be removed by anyone -- the
+// permanently-stuck state this codebase already shipped once, in invites.
+// That's a "who is asking" question, so it lives here rather than in a
+// service. AgreementRepository.Withdraw's own SQL clause backs this up and
+// never branches on $by.
 func handleWithdrawAgreementProposal(deps Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		scope, _ := RequestScope(r)
@@ -380,10 +375,9 @@ func handleWithdrawAgreementProposal(deps Deps) http.HandlerFunc {
 	}
 }
 
-// handleCreateAgreementSection answers 201, because a section creates a row --
-// and creating one is immediate and unsigned, since a heading is not a promise
-// (decision 8). decodeJSONBody's 1 KiB default is right here: the body is one
-// name, capped at 60 runes.
+// handleCreateAgreementSection answers 201: creating a section is immediate
+// and unsigned, since a heading is not a promise. decodeJSONBody's 1 KiB
+// default is right here -- the body is one name, capped at 60 runes.
 func handleCreateAgreementSection(deps Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		scope, _ := RequestScope(r)
@@ -404,10 +398,10 @@ func handleCreateAgreementSection(deps Deps) http.HandlerFunc {
 	}
 }
 
-// handleSeedStarterAgreementSections answers 200, not 201: the starter set is
-// idempotent (decision 17) and a second click may create nothing. It answers
-// the bare document rather than a row plus a document because nothing renders
-// from the four rows' order -- render order is always the document's.
+// handleSeedStarterAgreementSections answers 200, not 201: seeding is
+// idempotent and a second click may create nothing. It answers the bare
+// document rather than a row plus a document, because nothing renders off
+// the four rows' order -- render order is always the document's.
 func handleSeedStarterAgreementSections(deps Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		scope, _ := RequestScope(r)
@@ -423,11 +417,11 @@ func handleSeedStarterAgreementSections(deps Deps) http.HandlerFunc {
 }
 
 // handleAgreeAgreementProposal records one Agree. A repeat Agree is an
-// idempotent 200 that may complete the set (decision 16) -- the signature write
-// is an upsert -- while an Agree on a proposal already accepted or withdrawn is
-// 409 AGREEMENT_PROPOSAL_RESOLVED from the service. Every count and comparison
-// that decides the outcome lives inside the repository's transaction; nothing
-// is decided here.
+// idempotent 200 that may complete the set -- the signature write is an
+// upsert -- while agreeing on a proposal already accepted or withdrawn is
+// 409 AGREEMENT_PROPOSAL_RESOLVED from the service. Every count and
+// comparison that decides the outcome lives inside the repository's
+// transaction; nothing is decided here.
 func handleAgreeAgreementProposal(deps Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		scope, _ := RequestScope(r)
@@ -442,10 +436,10 @@ func handleAgreeAgreementProposal(deps Deps) http.HandlerFunc {
 }
 
 // handleParkAgreementProposal is Discuss: the proposal stays open, stays
-// answerable, and is rendered in the read-only To-discuss block on the Retros
-// page (decision 7). Nothing here touches a retro table and there is no
-// foreign key to a retro row -- the next retro usually does not exist yet,
-// which is exactly when a couple parks something.
+// answerable, and is rendered in the read-only To-discuss block on the
+// Retros page. Nothing here touches a retro table and there is no foreign
+// key to a retro row -- the next retro usually does not exist yet, which is
+// exactly when a couple parks something.
 func handleParkAgreementProposal(deps Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		scope, _ := RequestScope(r)

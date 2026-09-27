@@ -11,18 +11,18 @@ import (
 const csrfCookieName = "csrf_token"
 const csrfHeaderName = "X-CSRF-Token"
 
-// requireCSRF implements the double-submit cookie check. GET, HEAD and
-// OPTIONS are read-only and skip it entirely; every other method must carry
-// a csrf_token cookie whose value matches the X-CSRF-Token header, compared
-// with subtle.ConstantTimeCompare. A missing cookie, a missing header, or a
-// mismatch all answer 403 CSRF_INVALID identically -- there is nothing a
-// caller should learn from telling the three apart.
+// requireCSRF implements the double-submit cookie check: GET, HEAD and
+// OPTIONS skip it since they are read-only; every other method must send a
+// csrf_token cookie matching its X-CSRF-Token header, compared with
+// subtle.ConstantTimeCompare. A missing cookie, a missing header, or a
+// mismatch all answer 403 CSRF_INVALID identically, so a caller learns
+// nothing from telling the three apart.
 //
-// A request that authenticated with a personal API token skips the check.
-// CSRF is a browser problem: a cross-site form can make the browser attach
-// cookies, but it cannot attach an Authorization header, so a request that
-// proved itself with one was not forged by a page. Only a Scope whose
-// AuthVia is exactly token skips; an unset AuthVia is checked like a cookie.
+// A request authenticated with a personal API token skips the check: a
+// cross-site form can make the browser attach cookies but not an
+// Authorization header, so proving identity with a token rules out forgery.
+// Only a Scope whose AuthVia is exactly token skips; an unset AuthVia is
+// checked like a cookie.
 func requireCSRF(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {

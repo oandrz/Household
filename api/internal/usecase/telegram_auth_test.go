@@ -29,12 +29,10 @@ func TestStartLinkMintsADeepLinkAndStoresTheNonceHashed(t *testing.T) {
 		t.Fatal("no row was stored for the minted nonce")
 	}
 	// 10 minutes mirrors telegram_auth.go's unexported telegramNonceTTL,
-	// hardcoded here because this file cannot see an unexported constant.
-	// doubles.clock is a fixedClock that never advances on its own, so this
-	// is an exact equality, not a tolerance check -- a service that returned
-	// a zero-valued or otherwise wrong ExpiresAt while still passing the
-	// right value to Links.Create would pass every other assertion in this
-	// test and still ship a broken expiry to whatever calls StartLink.
+	// hardcoded here since this file cannot see it. doubles.clock never
+	// advances on its own, so this is exact equality, not a tolerance check --
+	// a service shipping a wrong ExpiresAt while still passing the right
+	// value to Links.Create would pass every other assertion here.
 	if want := doubles.clock.Now().Add(10 * time.Minute); !link.ExpiresAt.Equal(want) {
 		t.Fatalf("ExpiresAt = %v, want %v", link.ExpiresAt, want)
 	}
@@ -74,8 +72,8 @@ func TestHandleStartSendsASignUpLinkToAnUnknownChat(t *testing.T) {
 }
 
 // HandleStart's username parameter must actually reach Links.Consume, not
-// just sit in a log line -- the redeemed row is what a future confirm screen
-// (Task 5) reads back to name the chat someone is about to approve.
+// just sit in a log line -- the redeemed row is what the confirm screen
+// reads back to name the chat someone is about to approve.
 func TestHandleStartForwardsTheSenderNameToConsume(t *testing.T) {
 	svc, doubles := newTelegramAuthService(t)
 	raw := doubles.links.mintLive(t, time.Now().Add(10*time.Minute))
@@ -92,17 +90,12 @@ func TestHandleStartForwardsTheSenderNameToConsume(t *testing.T) {
 	}
 }
 
-// deadNonceAnswer computes the dead-link answer via a fresh fixture and an
-// unknown nonce, so every test in this file that needs to prove "this
-// refusal is byte-identical to an ordinary dead nonce" computes its baseline
-// the same way, rather than substring-matching a message this package cannot
-// see the literal text of (telegramDeadLinkMessage is unexported). A
-// substring check like strings.Contains(got, "expired") also passes for a
-// message that leaks extra information alongside the expected text -- e.g.
-// telegramDeadLinkMessage+" Too many attempts." -- which is exactly the
-// enumeration oracle the identical-answer property exists to close. Byte
-// equality against an independently-computed baseline is what actually
-// pins it.
+// deadNonceAnswer computes the dead-link baseline via a fresh fixture and an
+// unknown nonce, so every test needing "byte-identical to an ordinary dead
+// nonce" uses the same baseline rather than substring-matching text this
+// package cannot see (telegramDeadLinkMessage is unexported). A substring
+// check would still pass if extra text leaked alongside it -- an enumeration
+// oracle -- so only byte equality against this baseline actually pins it.
 func deadNonceAnswer(t *testing.T) string {
 	t.Helper()
 	svc, doubles := newTelegramAuthService(t)
@@ -141,14 +134,11 @@ func TestHandleStartAnswersIdenticallyForEveryDeadNonce(t *testing.T) {
 		}
 		answers = append(answers, doubles.sender.lastTo(900))
 	}
-	// Guards against a vacuous pass: if HandleStart silently sent nothing at
-	// all for a dead nonce, every entry in answers would be "", the equality
-	// check below would pass trivially, and the substring check after it
-	// would also pass (an empty string contains neither "/sign-in/" nor
-	// "/sign-up/"). A dead nonce answering nothing is itself a defect --
-	// HandleStart's own doc comment requires an ordinary refusal to always
-	// answer in the chat, since the poller drops the update the instant a
-	// non-nil error comes back instead.
+	// Guards against a vacuous pass: if HandleStart sent nothing at all for a
+	// dead nonce, every entry would be "", and both the equality and
+	// substring checks below would pass trivially. Answering nothing is
+	// itself a defect -- HandleStart's doc comment requires an answer in the
+	// chat, since the poller drops the update on any non-nil error.
 	if answers[0] == "" {
 		t.Fatal("no message was sent for a dead nonce; the identical-answer checks below would pass vacuously")
 	}
@@ -181,14 +171,12 @@ func TestHandleStartRateLimitsPerChatWithTheSameAnswer(t *testing.T) {
 	}
 }
 
-// Exactly telegramLinksPerHourLimit (3) redemptions within an hour must still
-// succeed -- the limit is 3/hour, not 2/hour. Every other rate-limit test in
-// this file starts a chat at 0 or 3 prior redemptions; without this one,
-// changing `count > telegramLinksPerHourLimit` to
-// `count >= telegramLinksPerHourLimit` -- the likeliest "make this consistent
-// with auth.go's >= check" edit anyone will ever make to this file -- would
-// silently drop the real limit to 2/hour while every other test in this file
-// stayed green.
+// Exactly telegramLinksPerHourLimit (3) redemptions within an hour must
+// still succeed -- the limit is 3/hour, not 2/hour. Every other rate-limit
+// test here starts a chat at 0 or 3 prior redemptions, so without this one,
+// changing `count > telegramLinksPerHourLimit` to `>=` -- the likeliest
+// "make this consistent with auth.go" edit -- would silently drop the limit
+// to 2/hour while every other test stayed green.
 func TestHandleStartAllowsTheThirdRedemptionWithinAnHour(t *testing.T) {
 	svc, doubles := newTelegramAuthService(t)
 	doubles.accounts.bind(602, "user-3")
@@ -217,11 +205,10 @@ func TestHandleStartSpendsTheNonceEvenWhenRateLimited(t *testing.T) {
 }
 
 // CountLinksSince's real SQL boundary is `consumed_at >= since` (inclusive --
-// see queries/telegram.sql), which Task 3's repository tests never covered
-// (see this task's brief). A redemption landing exactly on the hour-old
-// cutoff must still count toward the limit; if the boundary were exclusive
-// instead, this exact case would let a chat squeeze out one extra redemption
-// right at the edge of the window every single hour.
+// see queries/telegram.sql). A redemption landing exactly on the hour-old
+// cutoff must still count toward the limit; an exclusive boundary would let
+// a chat squeeze out one extra redemption at the edge of the window every
+// hour.
 func TestHandleStartRateLimitCountsARedemptionExactlyOnTheSinceBoundary(t *testing.T) {
 	deadNonce := deadNonceAnswer(t)
 
@@ -238,23 +225,20 @@ func TestHandleStartRateLimitCountsARedemptionExactlyOnTheSinceBoundary(t *testi
 	}
 }
 
-// R5: SignupService.Request's global daily ceiling (SignupGlobalDailyLimit)
-// covers rows in the signups table with no channel filter, and
-// CreateForTelegram writes into that same table. Without a check here, a
-// flood of Telegram sign-ups could silently exhaust the ceiling meant for
-// email sign-up while Telegram sign-up itself stayed unbounded. The ceiling
-// answers with the identical telegramDeadLinkMessage every other refusal
-// uses -- pinned here by comparing against a second fixture's unknown-nonce
-// answer, not by matching a substring, so this test cannot pass against an
-// implementation that merely refuses with *some* message.
+// SignupService.Request's global daily ceiling counts rows in the signups
+// table with no channel filter, and CreateForTelegram writes into that same
+// table -- without a check here, a flood of Telegram sign-ups could exhaust
+// the ceiling meant for email while staying unbounded itself. The refusal is
+// pinned against a second fixture's unknown-nonce answer, not a substring
+// match, so this cannot pass against an implementation that merely refuses
+// with *some* message.
 func TestHandleStartRefusesSignUpAtTheGlobalDailyCeilingWithTheSameAnswerAsADeadNonce(t *testing.T) {
 	deadNonce := deadNonceAnswer(t)
 
 	svc, doubles := newTelegramAuthService(t)
-	// setGlobalCount is set to exactly the limit, not one above it, to pin
-	// that the check is >=, matching SignupService.Request's own >= check --
-	// a > check would let exactly one Telegram sign-up through right at the
-	// ceiling every day.
+	// Set to exactly the limit, not one above it, to pin that the check is
+	// >= (matching Request's own check) -- a > check would let one sign-up
+	// through right at the ceiling every day.
 	doubles.signups.setGlobalCount(usecase.SignupGlobalDailyLimit)
 	raw := doubles.links.mintLive(t, time.Now().Add(10*time.Minute))
 
@@ -269,12 +253,11 @@ func TestHandleStartRefusesSignUpAtTheGlobalDailyCeilingWithTheSameAnswerAsADead
 		t.Fatalf("ceiling answer = %q, want the identical dead-nonce answer %q", got, deadNonce)
 	}
 
-	// R5 requires a calendar-day cutoff (startOfDay(now)), not now itself and
-	// not a rolling 24-hour window -- see signup.go's Request doc comment for
-	// why. setGlobalCount's override answers CountSince before its since
-	// argument is ever inspected, so the assertions above pass regardless of
-	// what sendSignUp actually passed as the cutoff; this is the assertion
-	// that catches a wrong cutoff. midnight is recomputed test-side because
+	// The cutoff must be startOfDay(now), not now itself and not a rolling
+	// 24-hour window (see startOfDay's doc comment). setGlobalCount's
+	// override answers CountSince before its since argument is inspected, so
+	// the assertions above pass regardless of the real cutoff -- this is the
+	// one that catches a wrong cutoff. midnight is recomputed test-side since
 	// startOfDay is unexported.
 	midnight := startOfDayForTest(doubles.clock.Now())
 	if got := doubles.signups.lastCountSinceArg(); !got.Equal(midnight) {
@@ -295,10 +278,10 @@ func TestHandleStartSendsASignUpLinkBelowTheGlobalDailyCeiling(t *testing.T) {
 	if doubles.signups.telegramCount(889) != 1 {
 		t.Fatalf("telegram signups created = %d, want 1", doubles.signups.telegramCount(889))
 	}
-	// Same class of gap as Item 3(b): telegramSenderDouble.lastTo returns ""
-	// for "nothing was sent", so a mutation that stops sendSignUp from ever
-	// calling say() on its success path -- provisioning the row but telling
-	// nobody about it -- would leave the createCount assertion above green.
+	// telegramSenderDouble.lastTo returns "" for "nothing was sent", so a
+	// mutation that stops sendSignUp calling say() on success -- provisioning
+	// the row but telling nobody -- would leave the createCount assertion
+	// above green without this check.
 	if sent := doubles.sender.lastTo(889); !strings.Contains(sent, "/sign-up/") {
 		t.Fatalf("message = %q, want the sign-up URL", sent)
 	}
@@ -325,11 +308,10 @@ func TestHandleStartWithALinkNonceLeavesTheBindingUnwritten(t *testing.T) {
 	}
 }
 
-// Decision 2 of the design: a chat that already belongs to someone else's
-// account gets the same bland refusal as every other case a stolen nonce
-// could probe with. It must not learn that the target account exists, let
-// alone that a different chat already holds it -- and the existing binding
-// must not move just because someone else's nonce turned up here.
+// A chat that already belongs to someone else's account gets the same
+// bland refusal as every other case a stolen nonce could probe with. It
+// must not learn the target account exists, or that a different chat
+// already holds it, and the existing binding must not move.
 func TestHandleStartWithALinkNonceForAChatSomeoneElseOwnsSaysNothingUseful(t *testing.T) {
 	svc, doubles := newTelegramAuthService(t)
 	doubles.accounts.bind(602, "someone-else")
@@ -349,10 +331,9 @@ func TestHandleStartWithALinkNonceForAChatSomeoneElseOwnsSaysNothingUseful(t *te
 	}
 }
 
-// Decision 2's second row: a chat already connected to the *same* user the
-// nonce names is told so plainly, not with the bland refusal -- there is
-// nothing to protect by hiding this from a chat that is already the
-// account's own.
+// A chat already connected to the *same* user the nonce names is told so
+// plainly, not with the bland refusal -- there is nothing to protect by
+// hiding this from a chat that is already the account's own.
 func TestHandleStartWithALinkNonceForAChatAlreadyConnectedToTheSameUserSaysSo(t *testing.T) {
 	svc, doubles := newTelegramAuthService(t)
 	doubles.accounts.bind(606, "user-7")
@@ -372,12 +353,11 @@ func TestHandleStartWithALinkNonceForAChatAlreadyConnectedToTheSameUserSaysSo(t 
 	}
 }
 
-// Decision 2's fourth row: a link nonce redeemed from a chat that has no
-// binding of its own is still refused with the bland line, not told to go
-// confirm, when the nonce's user already has a *different* chat bound.
-// Without this row the person would be sent back to Hearth believing the
-// link worked, only for Confirm to refuse them there -- exactly the round
-// trip the row exists to save.
+// A link nonce redeemed from a chat with no binding of its own is still
+// refused with the bland line, not told to go confirm, when the nonce's
+// user already has a *different* chat bound. Otherwise the person would be
+// sent back to Hearth believing the link worked, only for Confirm to refuse
+// them there -- exactly the round trip this row exists to save.
 func TestHandleStartWithALinkNonceForAUserAlreadyBoundToADifferentChatSaysNothingUseful(t *testing.T) {
 	svc, doubles := newTelegramAuthService(t)
 	doubles.accounts.bind(604, "user-7")
@@ -445,8 +425,8 @@ func TestStartWithAnInviteTokenRecordsOneKnock(t *testing.T) {
 		t.Fatalf("the chat was told %q, which does not contain its code %q", said, code)
 	}
 
-	// One knock per link (spec decision 2). A second tap -- by the same
-	// chat or another -- gets the dead-link reply and changes nothing.
+	// One knock per link: a second tap -- by the same chat or another --
+	// gets the dead-link reply and changes nothing.
 	if err := svc.HandleStart(ctx, 9999, "inv_"+rawToken, "someone_else"); err != nil {
 		t.Fatalf("second HandleStart: %v", err)
 	}
@@ -486,10 +466,10 @@ func TestEveryRefusedInviteStartGetsTheSameReply(t *testing.T) {
 }
 
 // A chat that already belongs to a Hearth account is the one refusal that
-// is NOT bland, and that is safe because it is not about the link: it tells
-// the tapper only about their own chat, which they could learn by sending
-// /start with no payload at all. Saying it plainly saves them tapping a
-// link that will never work for them (spec decision 15).
+// is NOT bland -- it is safe because it is not about the link. It tells the
+// tapper only about their own chat, which they could learn by sending
+// /start with no payload anyway, and saves them tapping a link that will
+// never work for them.
 func TestAChatThatAlreadyBelongsToAnAccountIsToldSo(t *testing.T) {
 	svc, doubles := newTelegramAuthService(t)
 	boundChat := doubles.seedBoundChat(t)
@@ -499,7 +479,7 @@ func TestAChatThatAlreadyBelongsToAnAccountIsToldSo(t *testing.T) {
 		t.Fatalf("HandleStart: %v", err)
 	}
 	if got := doubles.sender.lastTo(boundChat); got != "This Telegram account already belongs to a Hearth household." {
-		t.Fatalf("got %q, want decision 15's own sentence", got)
+		t.Fatalf("got %q, want the already-belongs-to-a-household sentence", got)
 	}
 	// And it did not spend the link on its way to being refused: the check
 	// runs before the guarded UPDATE, so somebody else can still knock.
@@ -523,12 +503,11 @@ func TestStartWithoutTheInvitePrefixIsUnchanged(t *testing.T) {
 	}
 }
 
-// --- Task 8: TelegramAuthService as InviteService's InviteChats ----------
+// --- TelegramAuthService as InviteService's InviteChats -----------------
 
-// SendSignIn is InviteChats' half of admitting a knocked chat. It must mint
-// through the same sendSignIn HandleStart itself uses -- a second magic-link
-// path would mean two expiry rules and two rate limits drifting apart (the
-// type's own doc comment).
+// SendSignIn is InviteChats' half of admitting a knocked chat: it mints
+// through the same sendSignIn HandleStart uses, so there aren't two expiry
+// rules and two rate limits drifting apart.
 func TestSendSignInReusesTheOrdinaryMagicLinkPath(t *testing.T) {
 	svc, doubles := newTelegramAuthService(t)
 

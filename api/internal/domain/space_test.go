@@ -166,15 +166,10 @@ func TestAnOwnerSeesACustomSpace(t *testing.T) {
 	}
 }
 
-// TestAnUnrecognisedVisibilityFailsClosed pins the default case in
-// VisibleSpaces's switch. Without it, a Visibility value that is not
-// "everyone", "parents_only" or "custom" -- e.g. a future value, a bad
-// migration, or corrupt data read back from Postgres -- would fall through
-// with no restriction and be treated as visible to everyone, subject only to
-// the capability check. That is the fail-open direction this package
-// rejects elsewhere (validateCapabilitiesForRole's ErrUnknownRole for an
-// unrecognised Role in identity.go). This test exists so the default case
-// is not deleted as unreachable dead code.
+// TestAnUnrecognisedVisibilityFailsClosed pins the switch's default case:
+// an unrecognised Visibility must fail closed (owner-only), matching
+// ErrUnknownRole's fail-closed handling of an unrecognised Role. Without
+// this test the default case looks dead and could be deleted.
 func TestAnUnrecognisedVisibilityFailsClosed(t *testing.T) {
 	all := []domain.Space{{
 		ID: "s3", HouseholdID: "h1", Key: "grandma", Name: "Grandma's Space",

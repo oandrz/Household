@@ -35,12 +35,10 @@ func TestLimitedMemberMayHoldCalendarAndChores(t *testing.T) {
 	}
 }
 
-// TestNewMembershipRejectsAnUnrecognisedRole guards the default case in
-// validateCapabilitiesForRole: a Role value that is neither RoleOwner nor
-// RoleLimited (only reachable by bypassing ParseRole, e.g. a raw conversion
-// like this one) must fail closed rather than skip capability validation
-// entirely. Do not delete this as unreachable -- it is exactly what makes
-// the default case reachable in the first place.
+// TestNewMembershipRejectsAnUnrecognisedRole guards validateCapabilitiesForRole's
+// default case: a Role bypassing ParseRole (like this raw conversion) must
+// fail closed, not skip validation. Don't delete this as unreachable -- it
+// is what makes that case reachable.
 func TestNewMembershipRejectsAnUnrecognisedRole(t *testing.T) {
 	_, err := domain.NewMembership("m1", "h1", "u1", domain.Role("admin"),
 		domain.Capabilities{domain.CapCalendar})
@@ -108,10 +106,9 @@ func TestValidateMembershipRemovalRejectsAnUnknownTarget(t *testing.T) {
 }
 
 // TestCapabilityOnlyEditOnALimitedMemberNeverConsultsTheOwnerRule guards
-// against the bug where requireAnotherOwner ran for every non-owner role,
-// including a change that never touches ownership. In a household with no
-// owners at all, a pure capability edit on an already-limited member must
-// still succeed: ownership is not at stake.
+// against requireAnotherOwner running on a change that never touches
+// ownership -- a capability-only edit on an already-limited member must
+// succeed even with no owners in the household.
 func TestCapabilityOnlyEditOnALimitedMemberNeverConsultsTheOwnerRule(t *testing.T) {
 	all := []domain.Membership{kid("m1", domain.Capabilities{domain.CapCalendar})}
 

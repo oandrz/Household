@@ -87,8 +87,8 @@ type contributionsResponse struct {
 // createGoalRequest is POST /goals' body. Currency is a plain string, not a
 // pointer: "" and an omitted key decode identically, and both mean the same
 // thing here -- fill in the household's primary, done by the handler so the
-// service never has to guess (GoalService.Create's own doc comment: it
-// refuses an empty currency rather than defaulting one).
+// service never has to guess. GoalService.Create refuses an empty currency
+// rather than defaulting one.
 type createGoalRequest struct {
 	Name                 string  `json:"name"`
 	TargetMinor          int64   `json:"targetMinor"`
@@ -99,15 +99,14 @@ type createGoalRequest struct {
 }
 
 // updateGoalRequest is PATCH /goals/{id}'s body. Every field but
-// ClearTargetMonth is a pointer so an absent key round-trips as "unchanged"
-// (usecase.GoalUpdate's own convention) rather than a stored zero.
+// ClearTargetMonth is a pointer, so an absent key round-trips as
+// "unchanged" (usecase.GoalUpdate's own convention), not a stored zero.
 //
-// Currency exists on this struct even though usecase.GoalUpdate has no field
-// for it at all: GoalUpdate's own doc comment explains that its absence is
-// what makes currency immutability type-enforced one layer down, but a
-// caller can still put a "currency" key in the JSON body, and this handler
-// is the only place left that can see it and refuse it (domain.
-// ErrGoalCurrencyImmutable) rather than silently dropping it on the floor.
+// Currency exists here even though usecase.GoalUpdate has none: that
+// absence is what makes currency immutability type-enforced one layer
+// down, but a caller can still send a "currency" key, and this handler is
+// the only place left that can see and refuse it
+// (domain.ErrGoalCurrencyImmutable) rather than silently drop it.
 type updateGoalRequest struct {
 	Name                *string `json:"name"`
 	TargetMinor         *int64  `json:"targetMinor"`
@@ -117,14 +116,13 @@ type updateGoalRequest struct {
 	PlannedMonthlyMinor *int64  `json:"plannedMonthlyMinor"`
 }
 
-// addContributionRequest is POST /goals/{id}/contributions' body. Currency is
-// optional and exists only to be checked -- a contribution has no currency of
-// its own, it is always written in its goal's (usecase.NewContribution's own
-// doc comment) -- so this field never reaches the service at all; it is
-// compared against the goal's stored currency in the handler and either
-// matches (accepted) or does not (domain.ErrGoalCurrencyImmutable), the same
-// "never silently drop a value the caller did not construct" rule the PATCH
-// currency field above closes.
+// addContributionRequest is POST /goals/{id}/contributions' body. Currency
+// is optional and exists only to be checked -- a contribution has no
+// currency of its own, it is always written in its goal's
+// (usecase.NewContribution's own doc comment). This field never reaches the
+// service: the handler compares it against the goal's stored currency and
+// either accepts it or refuses with domain.ErrGoalCurrencyImmutable -- the
+// same rule the PATCH currency field above closes.
 type addContributionRequest struct {
 	AmountMinor int64   `json:"amountMinor"`
 	OccurredOn  string  `json:"occurredOn"`
@@ -163,16 +161,14 @@ func handleListGoals(deps Deps) http.HandlerFunc {
 
 // handleListGoalContributions serves one goal's contribution history.
 //
-// It performs no existence check of its own on the goal id --
-// GoalService.Contributions' own contract does none either (unlike
-// AddContribution, which reads the goal first to check it is not archived).
-// GoalRepository.ListContributions filters by household_id AND goal_id
-// together, so a made-up or foreign-household id simply matches zero rows;
-// nothing leaks either way, and a goal with no contributions yet is
-// indistinguishable from one that does not exist, which is fine here because
-// there is nothing sensitive an empty list could disclose. Task 8's own
-// TestGoalContributionsListForUnknownGoalIsEmpty pins this deliberately
-// rather than adding a lookup this route does not otherwise need.
+// It performs no existence check of its own -- GoalService.Contributions'
+// own contract has none either, unlike AddContribution, which reads the
+// goal first to check it is not archived. GoalRepository.ListContributions
+// filters by household_id AND goal_id together, so an unknown or
+// foreign-household id just matches zero rows -- nothing leaks, since an
+// empty list is indistinguishable from a missing goal either way, an
+// ambiguity accepted because an empty list discloses nothing.
+// TestGoalContributionsListForUnknownGoalIsEmpty pins this on purpose.
 func handleListGoalContributions(deps Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		scope, _ := RequestScope(r)
@@ -203,9 +199,8 @@ func handleCreateGoal(deps Deps) http.HandlerFunc {
 			return
 		}
 		// Read once and thread through: createdOn (Create) and the re-read
-		// below (writeGoal) must agree on "now" within this one request, the
-		// same single-read convention handleBudgetHistory's own "today" local
-		// follows.
+		// below (writeGoal) must agree on "now" within this request -- the
+		// same single-read convention handleBudgetHistory's "today" follows.
 		today := deps.Clock.Now()
 
 		currency := strings.TrimSpace(req.Currency)
@@ -307,11 +302,10 @@ func handleRestoreGoal(deps Deps) http.HandlerFunc { return setGoalArchived(deps
 
 // setGoalArchived backs both the archive and the restore route -- the same
 // "one function, not two near-identical ones" shape account_handlers.go's
-// setArchived and category_handlers.go's setCategoryArchived both use.
-// Archive and restore are their own routes rather than a field on PATCH: an
-// ordinary rename that happened to include it would archive the goal as a
-// side effect of saving a name, the reason router.go's own comment gives for
-// accounts and categories.
+// setArchived and category_handlers.go's setCategoryArchived use. Archive
+// and restore are their own routes rather than a PATCH field: an ordinary
+// rename would otherwise archive the goal as a side effect of saving a name
+// (router.go's own comment, for accounts and categories).
 func setGoalArchived(deps Deps, archived bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		scope, _ := RequestScope(r)
@@ -372,14 +366,13 @@ func handleAddGoalContribution(deps Deps) http.HandlerFunc {
 	}
 }
 
-// handleDeleteGoalContribution removes one contribution. 204 with no body is
-// the one status on this API allowed to carry none -- apiFetch does not try
-// to parse it (the same contract handleDeleteTransaction documents).
-// DeleteContribution scopes its delete by household_id AND goal_id AND
-// contribution id together (GoalRepository.DeleteContribution's own
-// contract), so a contribution that belongs to a different goal of this same
-// household -- not just a foreign household -- answers the same 404: the id
-// pair is what is checked, never the contribution id alone.
+// handleDeleteGoalContribution removes one contribution. 204 with no body
+// is the one status on this API allowed to carry none -- apiFetch does not
+// parse it (handleDeleteTransaction's own contract). DeleteContribution
+// scopes by household_id AND goal_id AND contribution id together, so a
+// contribution belonging to a different goal in this same household -- not
+// just a foreign household -- answers the same 404: the id pair is
+// checked, never the contribution id alone.
 func handleDeleteGoalContribution(deps Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		scope, _ := RequestScope(r)
@@ -409,25 +402,23 @@ func findArchivedGoalByName(views []usecase.GoalView, name string) (usecase.Goal
 
 // writeGoal re-reads the goal through GoalService.View so every write
 // response carries the derived figures (contributed, percent, status,
-// required monthly) that Create/Update/SetArchived's own return values do not
-// -- GoalService computes them, and a handler computing them itself would be
-// exactly the arithmetic this layer is not allowed to do. The same "re-read
-// after write" shape writeAccount and writeTransaction already use, for the
-// same reason: the write call's own return value is never quite enough to
-// answer with.
+// required monthly) that Create/Update/SetArchived's return values do
+// not -- GoalService computes them, and a handler computing them itself
+// would be exactly the arithmetic this layer may not do. writeAccount and
+// writeTransaction use the same "re-read after write" shape, for the same
+// reason: a write call's return value is never quite enough.
 //
-// View reads archived goals too, which is what lets archive and restore
-// re-read successfully -- a re-read that skipped archived goals would 404 its
-// own just-completed archive.
+// View reads archived goals too, which lets archive and restore re-read
+// successfully -- skipping archived goals here would 404 the goal's own
+// just-completed archive.
 func writeGoal(w http.ResponseWriter, r *http.Request, deps Deps, householdID, goalID string, today time.Time, status int) {
 	view, err := deps.Goals.View(r.Context(), householdID, goalID, today)
 	if errors.Is(err, domain.ErrNotFound) {
 		// The write that got us here (Create/Update/SetArchived) already
-		// succeeded and already checked existence on the way in -- a miss on
-		// this immediate re-read is not a client mistake to explain with 404,
-		// it is this handler's own invariant broken, and the generic
-		// logged-500 path is what says so rather than reporting a successful
-		// write as "not found."
+		// succeeded and checked existence on the way in, so a miss on this
+		// immediate re-read is this handler's own invariant broken, not a
+		// client mistake -- the generic logged-500 path says so, rather than
+		// reporting a successful write as "not found."
 		logAndWriteInternal(w, r, fmt.Errorf("goal %s not found on the re-read immediately after a successful write", goalID))
 		return
 	}
@@ -440,10 +431,9 @@ func writeGoal(w http.ResponseWriter, r *http.Request, deps Deps, householdID, g
 
 // writeGoalNameConflict answers a Create or Update failure. Every error but
 // ErrGoalNameTaken passes straight through to MapDomainError unchanged. For
-// ErrGoalNameTaken specifically, it looks for an ARCHIVED goal holding the
-// attempted name and, if it finds one, answers 409 with that goal's id in
-// details so the New/Edit modal can offer Restore instead of a dead end --
-// the categories gotcha this task's brief names. A live-goal collision, or a
+// ErrGoalNameTaken, it looks for an ARCHIVED goal holding the attempted name
+// and, if found, answers 409 with that goal's id in details so the New/Edit
+// modal can offer Restore instead of a dead end. A live-goal collision, or a
 // failure of the lookup itself, falls back to MapDomainError's own
 // GOAL_NAME_TAKEN case: a failed best-effort enhancement must never mask the
 // real 409 the create or update already failed with.

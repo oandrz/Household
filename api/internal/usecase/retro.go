@@ -10,10 +10,10 @@ import (
 )
 
 // MoodPoint is one point on the twelve-month mood chart. HasMood false is a
-// gap -- a month with no finished retro, or a finished retro that carries no
-// mood -- and is never rendered as Mood == 0, because 0 is not a mood
-// (spec's formulas table, "Mood over 12 months": "Never zero -- zero is a
-// claim, the same rule Budget applies to transactions it cannot convert").
+// gap -- no finished retro that month, or one with no mood recorded -- and
+// is never rendered as Mood == 0: zero would read as a claim about the
+// mood, not as "no data" (spec's formulas table, "Never zero -- zero is a
+// claim").
 type MoodPoint struct {
 	Month   time.Time
 	Mood    int
@@ -41,8 +41,8 @@ type RetroView struct {
 
 // RetroService composes the Retros screen and every write against it. Like
 // every other service here it takes no actor parameter: services enforce
-// what is *valid*, middleware enforces who is *asking* -- the marriage
-// capability and the owner check live in the router (Task 8).
+// what is *valid*, the channel's inbound edge enforces who is *asking*
+// (ADR 8) -- the marriage capability and the owner check live in the router.
 type RetroService struct {
 	retros  RetroRepository
 	actions RetroActionRepository
@@ -52,29 +52,24 @@ func NewRetroService(retros RetroRepository, actions RetroActionRepository) *Ret
 	return &RetroService{retros: retros, actions: actions}
 }
 
-// monthKey turns a month into a value safe to use as a map key across two
-// time.Time values that name the same calendar month but disagree on
-// *time.Location or time-of-day -- which two round trips through a
-// database column are free to do even when both ultimately mean "UTC"
-// (different *time.Location pointers compare unequal, and time.Time is a
-// map key by struct equality, location pointer included). Year()/Month()
-// read the calendar fields as the value's own location sees them, which is
-// exactly what "the month this row belongs to" means here -- there is no
-// second, competing interpretation to convert between.
+// monthKey turns a month into a value safe to use as a map key. Two
+// time.Time values naming the same calendar month can still disagree on
+// *time.Location or time-of-day -- a round trip through a database column
+// is free to do that even when both ultimately mean "UTC" -- and time.Time
+// is a map key by struct equality, location pointer included, so comparing
+// the values directly would treat "the same month" as two different keys.
+// Year() and Month() read the calendar fields in the value's own location,
+// which is exactly the month the row belongs to, so there is nothing to
+// convert.
 func monthKey(t time.Time) int { return t.Year()*12 + int(t.Month()) }
 
 // List composes the whole history screen for one household: every summary
-// row (newest first, as RetroRepository.List's own contract already
-// guarantees -- this method does not re-sort), the twelve-month mood chart,
-// the finished count and its earliest month, and the startable month. today
-// drives the chart's window and the startable-month calculation, taken as a
-// parameter -- never read from a clock in here -- so every figure is
-// deterministic in tests and the wall clock is read exactly once, at the
-// HTTP layer.
-//
-// Every derived figure below cites the spec's formulas table
-// (docs/superpowers/specs/2026-08-16-hearth-retros-design.md) so a later
-// reader does not have to reverse-engineer the rule from the arithmetic.
+// row (newest first, per RetroRepository.List's own contract), the
+// twelve-month mood chart, the finished count and its earliest month, and
+// the startable month. today is a parameter, never read from a clock here
+// -- the HTTP layer reads the wall clock once -- so every figure is
+// deterministic in tests. Each derived figure below follows the spec's
+// formulas table (docs/superpowers/specs/2026-08-16-hearth-retros-design.md).
 func (s *RetroService) List(ctx context.Context, householdID string, today time.Time) (RetrosView, error) {
 	records, err := s.retros.List(ctx, householdID)
 	if err != nil {
@@ -97,12 +92,10 @@ func (s *RetroService) List(ctx context.Context, householdID string, today time.
 		summary.Quote = domain.FirstSentence(rec.Retro.Notes)
 		summaries = append(summaries, summary)
 
-		// Normalise before any comparison -- budget.go's startOfMonth is the
-		// house convention (budget.go:638's own comment; BudgetService.Month
-		// applies it before comparing for the identical reason). A repository
-		// value that is not exactly midnight-on-the-first would otherwise
-		// silently miss every Equal/Before check below, on both List's
-		// finished-month bookkeeping and the mood chart's map key.
+		// Normalise before any comparison -- startOfMonth is the house
+		// convention (BudgetService.Month does the same). An un-normalised
+		// value would silently miss every Equal/Before check below, in both
+		// the finished-month bookkeeping and the mood chart's map key.
 		month := startOfMonth(rec.Retro.Month)
 		if month.Equal(current) {
 			currentExists = true
@@ -113,7 +106,7 @@ func (s *RetroService) List(ctx context.Context, householdID string, today time.
 
 		// "12 done since Aug 2025": count(*) WHERE completed_at IS NOT NULL,
 		// "since" is min(month) of those rows. A draft (CompletedAt nil)
-		// counts toward neither -- decision 2, "a draft is not a data point".
+		// counts toward neither -- "a draft is not a data point".
 		finished := rec.Retro.CompletedAt != nil
 		if finished {
 			doneCount++
@@ -123,13 +116,10 @@ func (s *RetroService) List(ctx context.Context, householdID string, today time.
 			}
 		}
 
-		// "Mood over 12 months": a finished retro's own mood. `finished` is
-		// tested here on its own -- deliberately not folded into the
-		// doneCount branch above -- so a draft's mood cannot reach the chart
-		// even if the doneCount/since bookkeeping were somehow untouched
-		// (decision 2's second half). A finished retro with no mood picked
-		// (Mood nil) leaves no entry, which the loop below already reads as
-		// a gap.
+		// "Mood over 12 months": a finished retro's own mood, read
+		// independently of the doneCount branch above so a draft's mood can
+		// never reach the chart (same rule: a draft is not a data point).
+		// Mood nil leaves no entry, which the loop below reads as a gap.
 		if finished && rec.Retro.Mood != nil {
 			finishedMood[monthKey(month)] = rec.Retro.Mood
 		}
@@ -147,7 +137,7 @@ func (s *RetroService) List(ctx context.Context, householdID string, today time.
 	}
 
 	// "Startable month": the earlier of {previous month, current month}
-	// with no retro row; nil when both already have one (decision 5).
+	// with no retro row; nil when both already have one.
 	var startMonth *time.Time
 	if sm, ok := domain.StartableMonth(today, currentExists, previousExists); ok {
 		startMonth = &sm
@@ -164,18 +154,16 @@ func (s *RetroService) List(ctx context.Context, householdID string, today time.
 
 // Month composes one month's detail screen: the retro, its own actions, and
 // the "Still open from July" carry-over offer -- the immediately previous
-// month's unticked actions only, never further back (spec decision 4).
-// domain.ErrNotFound from ByMonth is returned untouched: the page reads a
-// missing retro as "not started," not as an error, and this method does not
-// obscure that by wrapping it.
+// month's unticked actions only, never further back. domain.ErrNotFound from
+// ByMonth is returned untouched: the page reads a missing retro as "not
+// started," not as an error, and this method does not obscure that by
+// wrapping it.
 func (s *RetroService) Month(ctx context.Context, householdID string, month time.Time) (RetroView, error) {
-	// Normalise once, at the top, and use the normalised value for every
-	// call below -- both ByMonth's lookup and the carry-over month it feeds
-	// into. Normalising only for the carry-over computation (as an earlier
-	// version of this method did) while passing the raw, possibly
-	// mid-month `month` straight to ByMonth would look up the right retro
-	// by luck whenever a caller already normalises, and the wrong one
-	// (domain.ErrNotFound) the moment one does not.
+	// Normalise once, at the top, and reuse the value for both ByMonth's
+	// lookup and the carry-over month -- don't normalise only for the
+	// carry-over and pass the raw `month` to ByMonth, which finds the right
+	// retro by luck and domain.ErrNotFound the moment a caller doesn't
+	// already normalise.
 	month = startOfMonth(month)
 
 	retro, err := s.retros.ByMonth(ctx, householdID, month)
@@ -197,13 +185,12 @@ func (s *RetroService) Month(ctx context.Context, householdID string, month time
 	return RetroView{Retro: retro, Actions: actions, CarryOver: carryOver}, nil
 }
 
-// Start creates a new draft for the month domain.StartableMonth chooses from
-// the household's own retros -- the earlier of {previous month, current
-// month} that has none yet. It never falls back to "today's month anyway"
-// when neither candidate is free: a stale tab left open across a month
-// boundary would otherwise be able to file a retro against a month the
-// button never actually offered it. Both candidates already having a retro
-// is domain.ErrRetroNothingToStart, not a silently invented third month.
+// Start creates a new draft for the month domain.StartableMonth picks -- the
+// earlier of {previous, current} that has none yet. It never falls back to
+// "today's month anyway": a stale tab open across a month boundary could
+// otherwise file a retro against a month the button never offered. Both
+// already having a retro is domain.ErrRetroNothingToStart, not an invented
+// third month.
 func (s *RetroService) Start(ctx context.Context, householdID string, today time.Time) (RetroRecord, error) {
 	current := startOfMonth(today)
 	previous := current.AddDate(0, -1, 0)
@@ -224,11 +211,10 @@ func (s *RetroService) Start(ctx context.Context, householdID string, today time
 	return s.retros.Create(ctx, householdID, month)
 }
 
-// retroExists answers whether householdID already has a retro for month by
-// asking ByMonth and translating its domain.ErrNotFound into false: "no
-// retro yet" is the expected half of this question, not a failure to
-// propagate. Any other error is returned untouched -- a real infrastructure
-// failure must not be read as "this month is free."
+// retroExists asks ByMonth whether householdID has a retro for month,
+// translating domain.ErrNotFound into false -- "no retro yet" is expected,
+// not a failure. Any other error passes through untouched: an
+// infrastructure failure must not be read as "this month is free."
 func (s *RetroService) retroExists(ctx context.Context, householdID string, month time.Time) (bool, error) {
 	_, err := s.retros.ByMonth(ctx, householdID, month)
 	switch {
@@ -241,35 +227,26 @@ func (s *RetroService) retroExists(ctx context.Context, householdID string, mont
 	}
 }
 
-// Save validates the mood BEFORE the repository is ever called -- an
-// impossible mood must produce zero writes, not a write the repository then
-// has to refuse (TestRetroSaveRefusesAnImpossibleMood reads the double's
-// write count to prove exactly that ordering, not just that an error came
-// back). Mood nil clears the mood, which a household can legitimately do,
-// so it is only checked when a value is actually present.
+// Save validates the mood before the repository is ever called: an
+// impossible mood must produce zero writes, not one the repository has to
+// refuse (TestRetroSaveRefusesAnImpossibleMood checks the write count, not
+// just the error). Mood nil is a legitimate clear, so it's checked only
+// when a value is present.
 //
-// u.Month is normalised with startOfMonth here, not left to the caller.
-// RetroUpdate.Month's own doc comment says the repository never normalises
-// and "the caller normalises" -- RetroService IS that caller, the same way
-// List and Month (Task 3) normalise before comparing against or looking up
-// a stored value. Skipping this would be the worst-shaped failure available
-// here: the guarded UPDATE itself matches on household + id + version, never
-// month -- but when that UPDATE matches zero rows, RetroRepository.Update's
-// own recheck (ByMonth) DOES match on household + month, to tell "this retro
-// is gone" apart from "the version moved." An un-normalised month would not
-// stop a real write from landing, but it WOULD make that recheck miss the
-// very row whose version just failed to match, misreporting a live conflict
-// (domain.ErrRetroChanged: reload, your partner saved first) as
-// domain.ErrNotFound -- telling an editor their retro vanished when in fact
-// it is sitting one PATCH away, correctly versioned, under the midnight-UTC
-// month a caller merely forgot to round to.
+// u.Month is normalised here since RetroUpdate.Month's doc comment says the
+// repository never does. Skipping it would break Update's zero-row recheck:
+// the guarded UPDATE matches on household + id + version, never month, so
+// an un-normalised month would not stop the write itself from landing --
+// but ByMonth's recheck (which matches on household + month, to tell "gone"
+// apart from "version moved") would miss the very row whose version
+// failed, misreporting a live conflict (domain.ErrRetroChanged) as
+// domain.ErrNotFound.
 //
-// The three text fields are trimmed; Version passes straight through
-// unmodified. The version comparison itself is deliberately NOT done here:
-// RetroRepository.Update's own guarded UPDATE is the only place that can
-// compare against the stored value atomically, and re-checking it in this
-// layer first would open exactly the read-then-write race that guard exists
-// to close.
+// The three text fields are trimmed; Version passes through unmodified. The
+// version comparison itself is deliberately not done here: only
+// RetroRepository.Update's guarded UPDATE can compare atomically, and
+// re-checking first would reopen the read-then-write race that guard
+// closes.
 func (s *RetroService) Save(ctx context.Context, u RetroUpdate) (RetroRecord, error) {
 	if u.Mood != nil {
 		if _, err := domain.ParseMood(*u.Mood); err != nil {
@@ -285,29 +262,24 @@ func (s *RetroService) Save(ctx context.Context, u RetroUpdate) (RetroRecord, er
 	return s.retros.Update(ctx, u)
 }
 
-// Finish stamps the retro complete. RetroRepository.Complete is itself
-// idempotent -- finishing an already-finished retro keeps the FIRST
-// timestamp rather than moving it forward -- so a double-submit or a retry
-// after a dropped response is harmless and needs no guard here.
+// Finish stamps the retro complete. RetroRepository.Complete is idempotent
+// -- it keeps the first timestamp rather than moving it forward -- so a
+// double-submit or retry needs no guard here.
 func (s *RetroService) Finish(ctx context.Context, householdID, retroID string, at time.Time) (RetroRecord, error) {
 	return s.retros.Complete(ctx, householdID, retroID, at)
 }
 
-// DiscardDraft removes a retro that has not been finished. The refusal for a
-// finished retro lives in RetroRepository.DeleteDraft's own WHERE ...
-// completed_at IS NULL -- domain.ErrNotFound passes through untouched here,
-// never re-checked with a service-level `if`, so there is exactly one place
-// that decides whether a retro is still a draft (the same reasoning
-// DeleteDraft's own doc comment gives for putting the condition in SQL
-// rather than in a check-then-delete).
+// DiscardDraft removes a retro that has not been finished; the refusal for a
+// finished one lives in DeleteDraft's own WHERE completed_at IS NULL clause.
+// domain.ErrNotFound passes through untouched and is never re-checked here,
+// so exactly one place decides whether a retro is still a draft.
 func (s *RetroService) DiscardDraft(ctx context.Context, householdID, retroID string) error {
 	return s.retros.DeleteDraft(ctx, householdID, retroID)
 }
 
-// AddAction refuses a blank body with domain.ErrRetroActionBodyRequired --
-// the design's own control is "+ Add an action & assign it to one of you",
-// and a blank row on the retro detail would be indistinguishable from a
-// rendering bug -- and stores the trimmed body.
+// AddAction refuses a blank body with domain.ErrRetroActionBodyRequired -- a
+// blank row on the retro detail would look like a rendering bug -- and
+// stores the trimmed body.
 func (s *RetroService) AddAction(ctx context.Context, in RetroActionInput) (RetroActionRecord, error) {
 	in.Body = strings.TrimSpace(in.Body)
 	if in.Body == "" {
@@ -316,11 +288,10 @@ func (s *RetroService) AddAction(ctx context.Context, in RetroActionInput) (Retr
 	return s.actions.Add(ctx, in)
 }
 
-// SetActionDone ticks or unticks one action. It touches only
-// RetroActionRepository, never RetroRepository: an action's own done state
-// must not bump the retro's version, or one partner ticking every action
-// this month would invalidate the other's already-open editor tab for no
-// reason connected to what they are editing.
+// SetActionDone ticks or unticks one action, touching only
+// RetroActionRepository, never RetroRepository: an action's done state must
+// not bump the retro's version, or one partner ticking every action would
+// invalidate the other's already-open editor tab for no related reason.
 func (s *RetroService) SetActionDone(ctx context.Context, householdID, actionID string, done bool, at time.Time) error {
 	return s.actions.SetDone(ctx, householdID, actionID, done, at)
 }

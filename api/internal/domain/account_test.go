@@ -23,10 +23,8 @@ func TestParseAccountTypeAcceptsTheFiveKnownTypes(t *testing.T) {
 	}
 }
 
-// TestParseAccountTypeRefusesAnythingElse is the fail-closed rule: an account
-// type arrives from a request body or a database column, so it is a value this
-// code did not construct. Guessing at an unrecognised one would put an account
-// on the wrong side of the net worth subtraction.
+// TestParseAccountTypeRefusesAnythingElse pins the fail-closed rule: an
+// unrecognised type would put an account on the wrong side of net worth.
 func TestParseAccountTypeRefusesAnythingElse(t *testing.T) {
 	for _, input := range []string{"", "savings", "CASH", "cash ", "crypto"} {
 		if _, err := domain.ParseAccountType(input); !errors.Is(err, domain.ErrUnknownAccountType) {

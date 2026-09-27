@@ -8,12 +8,12 @@ import (
 	"github.com/andreasoentoro/hearth/api/internal/domain"
 )
 
-// TestUserRepoStoresAnEmptyEmailAsNull proves the "" <-> SQL NULL convention
-// StoredUser's doc comment gives Email as well as PasswordHash, which
-// users.email being citext UNIQUE and nullable requires: if Create stored ""
-// instead of NULL for a credential-less child, a second such child would
-// collide on the unique index. Multiple NULLs never collide, so this only
-// passes if nullableText (not text) is used for Email in UserRepo.Create.
+// TestUserRepoStoresAnEmptyEmailAsNull proves the "" <-> SQL NULL
+// convention StoredUser's doc comment gives for Email and PasswordHash.
+// users.email is citext UNIQUE and nullable, so storing "" instead of NULL
+// for a credential-less child would collide with a second one on the
+// unique index -- multiple NULLs never collide. This only passes if
+// UserRepo.Create uses nullableText, not text, for Email.
 func TestUserRepoStoresAnEmptyEmailAsNull(t *testing.T) {
 	db := openTestDB(t)
 	ctx := context.Background()
@@ -115,17 +115,13 @@ func TestUserRepoCreateWithMembershipCreatesBothRowsAtomically(t *testing.T) {
 	}
 }
 
-// TestUserRepoCreateWithMembershipRollsBackOnMembershipConstraintViolation is
-// the test that proves the whole point of CreateWithMembership's
-// transaction, mirroring TestInviteAcceptRollsBackOnMembershipConstraintViolation
-// in invite_repo_test.go: a failure partway through -- forced here by a
-// role/capability combination the owners_hold_all_capabilities check
-// constraint rejects -- must leave no trace, not a user row committed with a
-// NULL email and no membership. That email being NULL matters specifically
-// because it is not unique-constrained the way a real email would be: a
-// caller retrying after a partial failure would not hit a loud
-// unique-violation telling them something is wrong, they would silently
-// create another orphaned user, and another, on every retry.
+// TestUserRepoCreateWithMembershipRollsBackOnMembershipConstraintViolation
+// proves the point of CreateWithMembership's transaction (mirroring
+// TestInviteAcceptRollsBackOnMembershipConstraintViolation in
+// invite_repo_test.go): a failure partway through -- forced here by
+// owners_hold_all_capabilities -- must leave no trace, not an orphaned user
+// row with a NULL email and no membership (see CreateWithMembership's own
+// doc comment for why that NULL email matters).
 func TestUserRepoCreateWithMembershipRollsBackOnMembershipConstraintViolation(t *testing.T) {
 	db := openTestDB(t)
 	ctx := context.Background()
@@ -157,11 +153,10 @@ func TestUserRepoCreateWithMembershipRollsBackOnMembershipConstraintViolation(t 
 	}
 }
 
-// countUsersByDisplayName exists because the child case CreateWithMembership
-// serves has a NULL email -- countUsersByEmail (invite_repo_test.go) can't
-// find a row with no email to match against, so this counts by display name
-// instead, which is what CreateWithMembership's own signature accepts as
-// the one caller-supplied identifier that survives a NULL email.
+// countUsersByDisplayName exists because CreateWithMembership's child case
+// has a NULL email, which countUsersByEmail (invite_repo_test.go) cannot
+// match against -- display name is the one caller-supplied identifier that
+// survives a NULL email.
 func countUsersByDisplayName(t *testing.T, db *postgres.DB, displayName string) int {
 	t.Helper()
 	var count int

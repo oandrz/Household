@@ -10,8 +10,6 @@ import (
 	"github.com/andreasoentoro/hearth/api/internal/usecase"
 )
 
-// The three ports are one method each, so each double is a func.
-
 type tokenListerFunc func(ctx context.Context, householdID string) ([]domain.APIToken, error)
 
 func (f tokenListerFunc) ListForHousehold(ctx context.Context, h string) ([]domain.APIToken, error) {

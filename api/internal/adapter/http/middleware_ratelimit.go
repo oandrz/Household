@@ -7,23 +7,21 @@ import (
 	"time"
 )
 
-// ipRateLimiter is a fixed-window counter keyed by client IP, used to bound the
-// unauthenticated endpoints: sign-up, sign-in, the magic-link request and
-// Telegram start each hold their own instance (router.go). The reasoning below
-// was written for sign-up and applies to each.
+// ipRateLimiter is a fixed-window counter keyed by client IP. Each
+// unauthenticated endpoint -- sign-up, sign-in, magic-link request,
+// Telegram start -- holds its own instance (router.go); the reasoning below
+// is written for sign-up and applies to all of them.
 //
-// Sign-up is open to anyone -- a deliberate product decision -- and the
-// per-address limit in SignupService is trivially bypassed by varying the
-// address. That makes this the thing standing between the SMTP relay and a
-// stranger with a loop, not a hardening nicety.
+// Sign-up is open to anyone by design, and SignupService's per-address
+// limit is trivially bypassed by varying the address, so this is what
+// actually stands between the SMTP relay and a stranger with a loop.
 //
-// IT IS IN-MEMORY AND THEREFORE PER-PROCESS. A second API replica doubles the
-// effective limit, and a restart clears it. Anyone adding a replica must
-// replace this with a shared counter -- a signup_attempts table indexed by
-// (ip, at) is the obvious move, and SignupService's global daily ceiling
-// already reads from the database for exactly this reason. It is in-memory here
-// because there is one API container today and a table per request rejected is
-// a worse trade at that scale.
+// IT IS IN-MEMORY AND THEREFORE PER-PROCESS: a second replica doubles the
+// effective limit, and a restart clears it. Replacing it with a shared
+// counter (a signup_attempts table keyed by (ip, at), the way
+// SignupService's daily ceiling already works) is the fix once there is
+// more than one API container; in-memory is the right trade only at
+// today's scale of one.
 type ipRateLimiter struct {
 	mu      sync.Mutex
 	counts  map[string]int
@@ -33,14 +31,15 @@ type ipRateLimiter struct {
 	now     func() time.Time
 }
 
-// newIPRateLimiter does not call now itself. NewRouter builds the whole route
-// tree -- including this limiter -- unconditionally, and some callers build a
-// router with a deliberately incomplete Deps to exercise one unrelated route in
-// isolation (health_test.go's Deps{Pinger: ...} for /healthz is exactly this);
-// calling now() here would panic on a nil deps.Clock before a single request
-// had been served. allow (below) seeds resetAt lazily on its own first call
-// instead, which costs nothing: nothing can call allow before a real request
-// reaches the sign-up route, and by then Clock is always set.
+// newIPRateLimiter does not call now itself: NewRouter builds the whole
+// route tree, including this limiter, unconditionally, and some callers
+// build a router with a deliberately incomplete Deps to exercise one
+// unrelated route in isolation (health_test.go's Deps{Pinger: ...} for
+// /healthz is exactly this) -- calling now() here would panic on a nil
+// deps.Clock before a single request had been served. allow (below) seeds
+// resetAt lazily on its own first call instead, which costs nothing:
+// nothing can call allow before a real request reaches the sign-up route,
+// by which point Clock is always set.
 func newIPRateLimiter(limit int, window time.Duration, now func() time.Time) *ipRateLimiter {
 	return &ipRateLimiter{
 		counts: map[string]int{},
@@ -56,10 +55,11 @@ func (l *ipRateLimiter) allow(ip string) bool {
 	defer l.mu.Unlock()
 
 	if now := l.now(); l.resetAt.IsZero() || !now.Before(l.resetAt) {
-		// Whole-map reset rather than per-key expiry: it bounds memory without
-		// a sweeper goroutine, and the imprecision at a window boundary does
-		// not matter for a limit whose job is to stop a loop. resetAt.IsZero()
-		// covers the very first call, when newIPRateLimiter left it unset.
+		// Whole-map reset, not per-key expiry: it bounds memory with no
+		// sweeper goroutine, and the imprecision at a window boundary
+		// doesn't matter for a limit whose job is only to stop a loop.
+		// resetAt.IsZero() covers the very first call, before
+		// newIPRateLimiter has ever set it.
 		l.counts = map[string]int{}
 		l.resetAt = now.Add(l.window)
 	}
@@ -71,12 +71,11 @@ func (l *ipRateLimiter) allow(ip string) bool {
 	return true
 }
 
-// signInAttemptsPerIPPerWindow is generous next to the per-household lockout
-// (3 failures), because one address can be a whole office or a mobile carrier's
-// shared exit. Its job is not to stop guessing -- the lockout does that -- but to
-// stop one client making the server run argon2 as fast as it can send requests.
-// The concurrency bound in crypto.Argon2Hasher caps the memory whatever gets
-// past this.
+// signInAttemptsPerIPPerWindow is generous next to the per-household
+// lockout (3 failures), because one address can be a shared office or
+// carrier exit. Its job is not to stop guessing -- the lockout does that --
+// but to stop one client running argon2 as fast as it can send requests;
+// crypto.Argon2Hasher's concurrency bound caps whatever gets past it.
 const (
 	signInAttemptsPerIPPerWindow = 20
 	signInLimitWindow            = 15 * time.Minute
@@ -93,10 +92,10 @@ const magicLinkRequestsPerIPPerHour = 10
 const telegramStartsPerIPPerHour = 20
 
 // clientIP is the address the per-IP limiters and the admin audit log use:
-// r.RemoteAddr, which trustedProxyRealIP has already replaced with nginx's
-// X-Real-IP when, and only when, the request came from a trusted proxy. The
-// port is stripped so repeat requests from one client, which arrive on
-// different ephemeral ports, count together -- forgetting that makes the
+// r.RemoteAddr, already replaced with nginx's X-Real-IP by trustedProxyRealIP
+// when, and only when, the request came from a trusted proxy. The port is
+// stripped so repeat requests from one client -- which arrive on different
+// ephemeral ports -- count together; forgetting that would make the
 // limiter count nothing at all.
 func clientIP(r *http.Request) string {
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
@@ -106,11 +105,11 @@ func clientIP(r *http.Request) string {
 	return host
 }
 
-// rateLimitByIP answers 429 when an IP is over its window. This is the one
-// place in the sign-up flow that may answer something other than 202, and that
-// is safe: the limit is keyed by IP, not by address, so what it reveals is "you
-// have sent a lot of requests" -- something the caller already knows -- and
-// never anything about whether any particular address is registered.
+// rateLimitByIP answers 429 when an IP is over its window -- the one place
+// in the sign-up flow that may answer something other than 202. That is
+// safe: keyed by IP, not by address, so all it reveals is "you have sent a
+// lot of requests," something the caller already knows, never whether any
+// particular address is registered.
 func rateLimitByIP(l *ipRateLimiter) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

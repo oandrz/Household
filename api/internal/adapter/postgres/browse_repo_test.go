@@ -13,10 +13,9 @@ import (
 	"github.com/andreasoentoro/hearth/api/internal/usecase"
 )
 
-// browseFixture holds both connections to the same container: the read-write
-// one only ever used to put rows there, and the read-only one under test.
-// One container per Test func, subtests inside -- StartPostgres boots a fresh
-// container on every call and there is no reuse.
+// browseFixture holds both connections to the same container: read-write to
+// seed rows, read-only under test. One container per Test func (subtests
+// inside) -- StartPostgres boots a fresh container each call, no reuse.
 type browseFixture struct {
 	admin *postgres.DB
 	repo  *postgres.BrowseRepo
@@ -42,11 +41,10 @@ func newBrowseFixture(t *testing.T) browseFixture {
 	return browseFixture{admin: admin, repo: postgres.NewBrowseRepo(readonly)}
 }
 
-// A name that is not a table must be answered the same way whether it is a
-// typo, a table in another schema, or an attempt to smuggle SQL through the
-// URL. The interesting half is the second: these strings must come back as
-// ErrNotFound, never as an error from Postgres, because an error from
-// Postgres would mean the name reached a query.
+// A name that is not a table -- a typo, a table in another schema, or an
+// attempt to smuggle SQL through the URL -- must always come back as
+// ErrNotFound, never as an error from Postgres: a Postgres error would mean
+// the name reached a query.
 func TestRowsRefusesAnythingThatIsNotATable(t *testing.T) {
 	f := newBrowseFixture(t)
 
@@ -67,14 +65,12 @@ func TestRowsRefusesAnythingThatIsNotATable(t *testing.T) {
 	}
 }
 
-// The bytes of a redacted column must not be in the answer at all -- not
-// hex-encoded, not truncated, not anywhere. This asserts on the whole page
-// rather than on the one cell, because "the cell says «redacted»" would still
-// pass if the value were also being carried somewhere else.
-//
-// The whole-page assertion runs first on purpose: it is the one that has to
-// go red when the SELECT list stops replacing a redacted column, and an
-// equality check on the single cell would fire before it and hide it.
+// The bytes of a redacted column must not appear anywhere in the page, not
+// hex-encoded or truncated -- so this checks the whole page, not one cell,
+// which could still pass while the value leaked elsewhere. The whole-page
+// check runs first for the same reason: it must go red when the SELECT
+// list stops redacting, and a single-cell check would catch that first and
+// hide the failure.
 func TestRowsRedactsSecretsAndNeverCarriesTheirBytes(t *testing.T) {
 	f := newBrowseFixture(t)
 	ctx := context.Background()
@@ -112,18 +108,16 @@ func TestRowsRedactsSecretsAndNeverCarriesTheirBytes(t *testing.T) {
 	}
 }
 
-// NULL and the empty string are different facts and [][]string cannot carry
-// the difference on its own.
+// NULL and the empty string are different facts and [][]string cannot
+// carry the difference on its own.
 //
-// The column is users.email rather than users.password_hash, which is what
-// this task's brief named: password_hash ends in _hash, so
-// domain.ColumnIsRedacted is true for it and it renders «redacted» whether
-// its value is NULL or not. That is asserted below too, because it is the
-// stronger fact -- a redacted column must not leak "this member has no
-// password at all" through the NULL marker. email is NULL for a
-// Telegram-only account (UserRepo.Create writes NULL when it is given no
-// address) and display_name carries the empty string the NULL marker must
-// not be confused with.
+// The NULL check uses users.email, not password_hash: password_hash ends
+// in _hash, so it is redacted and renders «redacted» whether it is NULL or
+// not. That is asserted too, and it is the stronger fact -- a redacted
+// column must never leak "this member has no password" through the NULL
+// marker. email is NULL for a Telegram-only account (UserRepo.Create
+// writes NULL when given no address); display_name carries the empty
+// string the NULL marker must not be confused with.
 func TestRowsDistinguishesNullFromEmpty(t *testing.T) {
 	f := newBrowseFixture(t)
 	ctx := context.Background()
@@ -145,19 +139,16 @@ func TestRowsDistinguishesNullFromEmpty(t *testing.T) {
 	}
 }
 
-// OFFSET without ORDER BY lets Postgres return rows in any order it likes,
-// and it exercises that permission: page 2 can repeat a row from page 1 and
-// skip another entirely, with nothing raising an error. The operator simply
-// does not see a row that is there.
+// OFFSET without ORDER BY lets Postgres return rows in any order: page 2
+// can repeat a row from page 1 and skip another, with nothing raising an
+// error and the operator not seeing a row that is there.
 //
-// The write between the pages is the point, and it is why this read-only
-// test writes at all. On a table that is only ever read, one connection at a
-// time, an unordered LIMIT/OFFSET happens to return the same heap order to
-// every page and the defect stays invisible at any row count. An operator
-// pages a live database over seconds in which the product keeps writing, and
-// a row rewritten between two clicks moves to the end of the heap: page 2
-// then skips a row it never showed and the last page hands back one page 1
-// already did. That is the failure this ORDER BY exists to prevent.
+// The write between the pages is why this read-only test writes at all: on
+// a table nobody else touches, an unordered LIMIT/OFFSET happens to return
+// the same heap order every time, hiding the defect. A live operator pages
+// while the product keeps writing, and a row rewritten between clicks moves
+// to the end of the heap -- page 2 skips it and the last page repeats what
+// page 1 already showed. That is the failure this ORDER BY prevents.
 func TestRowsPagesWithoutRepeatingOrSkipping(t *testing.T) {
 	f := newBrowseFixture(t)
 	ctx := context.Background()
@@ -189,29 +180,25 @@ func TestRowsPagesWithoutRepeatingOrSkipping(t *testing.T) {
 	}
 }
 
-// The two orderings the test above does not reach. accounts has a
-// single-column primary key, and every other table these tests read does
-// too, so neither the multi-column ordering nor the ctid fallback runs
-// anywhere else.
+// The two orderings no other test reaches: every table here has a
+// single-column primary key, so neither the multi-column case nor the
+// ctid fallback runs anywhere else.
 //
-// Both are real. Two tables in this schema are keyed on a pair of columns
-// today -- putting those two back in the order the index declares them is the
-// whole job of the array_position expression in orderBy -- and the first
-// migration that creates a table without a primary key would otherwise reach
-// the ctid branch in production having never run it once.
+// Both are real: two tables today have a composite key (what
+// array_position in orderBy exists for), and the first no-primary-key
+// migration would otherwise hit ctid for the first time in production.
 func TestRowsOrdersByWhateverKeyTheTableHas(t *testing.T) {
 	f := newBrowseFixture(t)
 	ctx := context.Background()
 
 	t.Run("a composite primary key", func(t *testing.T) {
 		// Seeded out of key order deliberately. household_feature_flags is
-		// keyed (household_id, key) and there is one household here, so the
-		// ordering the array_position expression has to produce is the keys
-		// alphabetically -- and only an insert that disagrees with it can
-		// tell that apart from doing nothing. Seeded in key order (which is
-		// what this subtest used to do) a static heap reads back in insertion
-		// order with or without the ORDER BY, so it proved that the
-		// int2vector cast is valid SQL and nothing about ordering.
+		// keyed (household_id, key), so the ordering array_position has to
+		// produce is the keys alphabetically -- only an insert that
+		// disagrees with it can tell that apart from doing nothing. Don't
+		// seed in key order: a static heap reads back in insertion order
+		// with or without the ORDER BY, so that would only prove the
+		// int2vector cast is valid SQL, not that ordering works.
 		seedFeatureFlags(t, f.admin, "money", "budgets", "chores")
 
 		got := assertEveryRowIsPagedOnce(t, f.repo, "household_feature_flags", "key", 3)
@@ -257,16 +244,14 @@ func TestRowsAnswersAnEmptyPagePastTheEnd(t *testing.T) {
 	}
 }
 
-// Nothing is hidden from the list: the migration bookkeeping and the audit
-// log are tables like any other. admin_audit_log matters twice over, because
-// descoping the /admin/audit screen left this browse as its only UI.
+// Nothing is hidden from the list: migration bookkeeping and the audit log
+// are tables like any other. admin_audit_log matters twice over, since
+// there is no /admin/audit screen, so this browse is its only UI.
 //
-// The counts are asserted by value, not merely read. rowCounts sends one
-// SELECT holding a count per table and binds the answers back to the names
-// POSITIONALLY, so nothing but a value check can tell a correct binding from
-// a shifted one -- every count would still be an int64 and the call would
-// still succeed. Three distinct expected numbers are needed for that: two
-// tables the seed filled to different depths, and one it did not touch.
+// Counts are asserted by value, not merely read: rowCounts binds its
+// answers back to table names POSITIONALLY, so only a value check (not a
+// mere type check) can catch a shifted binding. Three distinct numbers are
+// needed for that -- two tables filled to different depths, one untouched.
 func TestTablesListsEverythingIncludingTheBookkeeping(t *testing.T) {
 	f := newBrowseFixture(t)
 
@@ -302,37 +287,36 @@ func TestTablesListsEverythingIncludingTheBookkeeping(t *testing.T) {
 	}
 }
 
-// The test the design spec named as the one that must exist and would be easy
-// to omit (spec section 9): a redaction sweep driven by the schema itself,
-// not by a list somebody typed. domain/dbbrowse_test.go is that typed list,
-// and a typed list can only ever be as complete as its author's memory --
-// it says nothing about the column a migration adds next year.
+// The test the design spec calls the one easy to omit
+// (docs/superpowers/specs/2026-09-04-hearth-database-browse-design.md §9):
+// a redaction sweep driven by the schema itself, not a hand-typed list.
+// domain/dbbrowse_test.go is that typed list, and it can only ever be as
+// complete as its author's memory -- it says nothing about a column a
+// migration adds next year.
 //
-// The oracle is the CATALOGUE, read on the admin connection, and it is
-// deliberately not the same expression the code under test uses. It resolves
-// each column's type through pg_type -- an array to its element type, a
-// domain to its base type, repeatedly -- and asks whether pg_catalog.bytea is
-// anywhere in that chain. That matters twice:
+// The oracle is the CATALOGUE, read on the admin connection, deliberately
+// not the same expression the code under test uses. It resolves each
+// column's type through pg_type -- an array to its element, a domain to its
+// base, repeatedly -- and asks whether pg_catalog.bytea appears anywhere in
+// that chain. That matters twice:
 //
-//   - information_schema.data_type would have been the obvious oracle and is
-//     the wrong one. It reports a CATEGORY rather than a name for exactly the
-//     shapes this test exists to catch: bytea[] reads "ARRAY" and a domain
-//     over bytea reads "USER-DEFINED". An oracle built on it would pass
-//     forever while those went unredacted, certifying the blind spot instead
-//     of finding it.
-//   - the chain resolves domains, which ColumnIsRedacted cannot (it is
-//     stdlib-only and pg_type.typbasetype is a catalogue read). No column in
-//     this schema is a domain over bytea today, so the oracle and the code
-//     agree and this test is green. The day a migration introduces one, this
-//     test goes red and names it -- which is the whole reason the doc comment
-//     on ColumnIsRedacted is allowed to describe that gap rather than close
-//     it.
+//   - information_schema.data_type would be the obvious oracle and is the
+//     wrong one: it reports a CATEGORY, not a name, for exactly the shapes
+//     this test exists to catch (bytea[] reads "ARRAY", a domain over bytea
+//     reads "USER-DEFINED"). An oracle built on it would certify the blind
+//     spot instead of finding it.
+//   - the chain resolves domains, which ColumnIsRedacted cannot -- it is
+//     stdlib-only, and typbasetype is a catalogue read. No column here is a
+//     domain over bytea today, so oracle and code agree and this test is
+//     green; the day a migration adds one, this test goes red, which is why
+//     ColumnIsRedacted's doc comment is allowed to describe that gap rather
+//     than close it.
 //
-// The migrated schema alone cannot carry this test: all five of its bytea
-// columns are also named *_hash, so the name rule covers every one of them
-// and deleting the type rule outright would leave a schema-wide sweep green.
-// type_shapes is what makes the type rule load-bearing -- two bytea columns
-// under names no name rule matches.
+// The migrated schema alone can't carry this test: every real bytea column
+// is also named *_hash, so the name rule alone would keep a schema-wide
+// sweep green even with the type rule deleted. type_shapes supplies two
+// bytea columns under names no name rule matches, making the type rule
+// load-bearing.
 func TestEveryColumnTheCatalogueCallsSecretIsRedacted(t *testing.T) {
 	f := newBrowseFixture(t)
 	ctx := context.Background()
@@ -374,10 +358,10 @@ func TestEveryColumnTheCatalogueCallsSecretIsRedacted(t *testing.T) {
 		}
 	}
 
-	// Without this the sweep could pass by finding nothing to check -- an
-	// oracle whose SQL quietly matched no rows would look exactly like a
-	// clean schema. These two columns are the ones the type rule alone
-	// carries, so they are also what makes deleting it show up here.
+	// Without this the sweep could pass by finding nothing to check: an
+	// oracle whose SQL quietly matched no rows looks exactly like a clean
+	// schema. These two columns are the ones only the type rule catches, so
+	// deleting it would show up here.
 	if onlyTheTypeRuleCatchesIt < 2 {
 		t.Fatalf("the sweep found %d columns that only the type rule catches, want at least 2 "+
 			"(type_shapes.raw and type_shapes.blobs) -- the oracle is matching nothing",
@@ -389,11 +373,11 @@ func TestEveryColumnTheCatalogueCallsSecretIsRedacted(t *testing.T) {
 		t.Error("type_shapes.note is redacted, and nothing about it is secret")
 	}
 
-	// The same two columns through the other path. Tables() reads its columns
-	// with allColumns and Rows() reads them with columnsOf, and only a check
-	// on both keeps the two from drifting -- it is columnsOf that decides
-	// what the SELECT list withholds, so it is the one whose mistake would
-	// put real bytes on a screen.
+	// The same two columns through the other path: Tables() reads columns
+	// with allColumns, Rows() with columnsOf, and only checking both keeps
+	// them from drifting. columnsOf is the one that decides what the SELECT
+	// list withholds, so it is the one whose mistake would put real bytes on
+	// a screen.
 	page, err := f.repo.Rows(ctx, "type_shapes", 10, 0)
 	if err != nil {
 		t.Fatalf("Rows(type_shapes): %v", err)
@@ -409,12 +393,12 @@ func TestEveryColumnTheCatalogueCallsSecretIsRedacted(t *testing.T) {
 	}
 }
 
-// Decision 6, tested rather than asserted in prose. Validating the table name
-// through the read-only pool is supposed to answer a stronger question than
-// "does this name exist" -- it answers "and may this connection read it".
-// Without this test, TestRowsRefusesAnythingThatIsNotATable proves only that
-// six names which exist nowhere are refused, which is trivially true whatever
-// pool the lookup runs on.
+// Validating the table name through the read-only pool is supposed to
+// answer a stronger question than "does this name exist": "and may this
+// connection read it". This test proves that in code rather than in prose
+// -- without it, TestRowsRefusesAnythingThatIsNotATable only proves that
+// six names which exist nowhere are refused, true whatever pool the lookup
+// runs on.
 func TestATableThisRoleCannotReadIsNotFound(t *testing.T) {
 	f := newBrowseFixture(t)
 	ctx := context.Background()
@@ -423,9 +407,8 @@ func TestATableThisRoleCannotReadIsNotFound(t *testing.T) {
 		`CREATE TABLE secret_stuff (id bigint primary key)`); err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	// ALTER DEFAULT PRIVILEGES will have granted SELECT on it already, which
-	// is decision 2 working; take it away again to make this table stand for
-	// one the grants never reached.
+	// ALTER DEFAULT PRIVILEGES will have granted SELECT on it already; revoke
+	// it again so this table stands for one the grants never reached.
 	if _, err := f.admin.Pool().Exec(ctx,
 		`REVOKE SELECT ON secret_stuff FROM hearth_readonly`); err != nil {
 		t.Fatalf("revoke: %v", err)
@@ -446,9 +429,9 @@ func TestATableThisRoleCannotReadIsNotFound(t *testing.T) {
 	}
 }
 
-// Decision 2, tested directly rather than trusted. A table created after the
-// role script ran is the shape of every future migration, and without ALTER
-// DEFAULT PRIVILEGES it is invisible here with nothing reporting it.
+// ALTER DEFAULT PRIVILEGES, tested directly rather than trusted: a table
+// created after the role script ran is the shape of every future
+// migration, invisible here without it.
 func TestTablesSeesATableCreatedAfterTheRole(t *testing.T) {
 	f := newBrowseFixture(t)
 	ctx := context.Background()
@@ -470,10 +453,10 @@ func TestTablesSeesATableCreatedAfterTheRole(t *testing.T) {
 	t.Fatal("a table created after the role is invisible to the browse: ALTER DEFAULT PRIVILEGES is missing")
 }
 
-// seedSession inserts one session, with the household and the user its two
-// foreign keys require. Every insert here asserts that it wrote a row: a seed
-// helper that silently writes nothing turns a test that reads an empty table
-// green for the wrong reason.
+// seedSession inserts one session, with the household and user its two
+// foreign keys require. Every insert here asserts it wrote a row: a seed
+// helper that silently writes nothing turns a read of an empty table green
+// for the wrong reason.
 func seedSession(t *testing.T, db *postgres.DB, tokenHash []byte) {
 	t.Helper()
 	ctx := context.Background()
@@ -516,16 +499,15 @@ func seedUserWithoutAPassword(t *testing.T, db *postgres.DB) {
 	}
 }
 
-// seedTypeShapes creates the table the schema sweep needs the migrations not
-// to have: bytea in the two wrappings information_schema cannot name, under
-// column names no name rule matches.
+// seedTypeShapes creates the table the schema sweep needs and the migrations
+// don't have: bytea under a column name no name rule matches, in both a
+// plain and an array shape.
 //
-// raw is the plain case with an innocent name -- every bytea the migrations
-// declare is also called *_hash, so without this one the name rule alone
-// would carry the whole sweep. blobs is bytea[], the shape a careful author
-// reaches for when a row holds several hashes, and the one data_type reports
-// only as "ARRAY". note is the control: nothing about it is secret and it
-// must come back visible.
+// raw is bytea with an innocent name -- every migration's bytea column is
+// also named *_hash, so without it the name rule alone would carry the
+// whole sweep. blobs is bytea[], the shape data_type can only report as
+// "ARRAY". note is the control: nothing about it is secret, and it must
+// come back visible.
 func seedTypeShapes(t *testing.T, db *postgres.DB, raw, blob []byte) {
 	t.Helper()
 	ctx := context.Background()
@@ -561,17 +543,17 @@ type catalogueColumn struct {
 	nameSaysSecret bool
 }
 
-// secretColumnsFromCatalogue reads every column of every table in public and
-// answers, for each, the two questions the redaction rule is supposed to
-// answer -- read on the admin connection, so it is a statement about the
-// database rather than about the pool under test.
+// secretColumnsFromCatalogue answers, for every column of every table in
+// public, the two questions the redaction rule answers -- on the admin
+// connection, so it is a statement about the database, not the pool under
+// test.
 //
-// The recursive term is the whole point. A column's declared type may wrap
-// the interesting one: an array wraps its element (typelem), a domain wraps
-// its base (typbasetype), and either can wrap the other. Walking that chain
-// and asking whether pg_catalog.bytea appears anywhere in it is a different
-// question from "what does data_type say", and it is the question decision 8
-// meant.
+// The recursive term is the whole point: a column's type may wrap the
+// interesting one (an array wraps its element via typelem, a domain wraps
+// its base via typbasetype, either can wrap the other), and asking whether
+// pg_catalog.bytea appears anywhere in that chain is a different question
+// from "what does data_type say" -- the one ColumnIsRedacted's type rule is
+// meant to answer.
 //
 // typcategory = 'A' guards the array step because typelem is non-zero on
 // several types that are not arrays at all (name, point, int2vector), and
@@ -670,11 +652,10 @@ func seedFeatureFlags(t *testing.T, db *postgres.DB, keys ...string) {
 	}
 }
 
-// assertEveryRowIsPagedOnce reads a table two rows at a time and fails unless
-// each row shows up on exactly one page, identified by the named column. It
-// returns those identifiers in the order the pages handed them over, so a
-// caller that cares about the ordering itself -- and not only about rows not
-// repeating -- can assert on it.
+// assertEveryRowIsPagedOnce reads a table two rows at a time and fails
+// unless each row shows up on exactly one page, identified by the named
+// column. It returns the identifiers in page order, so a caller that cares
+// about ordering (not just no repeats) can assert on it too.
 func assertEveryRowIsPagedOnce(t *testing.T, repo *postgres.BrowseRepo, table, idColumn string, want int) []string {
 	t.Helper()
 	seen := map[string]bool{}
@@ -699,9 +680,9 @@ func assertEveryRowIsPagedOnce(t *testing.T, repo *postgres.BrowseRepo, table, i
 	return order
 }
 
-// rewriteAccount updates one account in place, the way the product does while
-// an operator is paging. What it writes does not matter; that the row's live
-// version moves to the end of the heap does, because that is the row order an
+// rewriteAccount updates one account in place, the way the product does
+// while an operator is paging. What it writes doesn't matter -- that the
+// row moves to the end of the heap does, since that is the order an
 // unordered LIMIT/OFFSET reads.
 func rewriteAccount(t *testing.T, db *postgres.DB, id string) {
 	t.Helper()
@@ -752,15 +733,13 @@ func cellByName(t *testing.T, page usecase.RowPage, row []string, column string)
 	return ""
 }
 
-// The Columns pane's type label is the one user-visible behaviour on this
-// screen that no other test touches: it is a label, so nothing about
-// redaction, ordering or paging asserts on it, and neutering displayType to
-// `return dataType` leaves every other test in this package green. It shipped
-// verified only in a browser; this is what makes it verified by the suite.
+// displayType's label is the one user-visible behaviour no other test
+// touches: neutering it to `return dataType` would leave every other test
+// in this package green.
 //
-// The schema supplies both branches without any seeding, which is the point:
-// information_schema reports a category rather than a type name for arrays
-// and for citext, so an operator browsing users would otherwise read
+// Both branches come from the existing schema, with no extra seeding:
+// information_schema reports a category, not a type name, for arrays and
+// for citext, so without this an operator browsing users would read
 // "USER-DEFINED" on the one screen whose whole job is showing the schema.
 func TestColumnTypesAreShownAsTheSchemaSpellsThem(t *testing.T) {
 	f := newBrowseFixture(t)

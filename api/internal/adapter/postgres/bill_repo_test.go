@@ -11,11 +11,10 @@ import (
 	"github.com/andreasoentoro/hearth/api/internal/usecase"
 )
 
-// day parses a plain "2026-08-08" date into UTC midnight, the same shape
-// every other date fixture in this package uses (july, august above). It
-// panics rather than taking a *testing.T, matching those two: the strings
-// below are fixed test literals, so a parse failure can only mean a typo in
-// this file, not a real runtime condition to report through *testing.T.
+// day parses a plain "2026-08-08" date into UTC midnight, the shape every
+// date fixture in this package uses. It panics rather than taking a
+// *testing.T: the strings below are fixed literals, so a parse failure can
+// only mean a typo in this file, not a real runtime condition to report.
 func day(s string) time.Time {
 	t, err := time.Parse("2006-01-02", s)
 	if err != nil {
@@ -46,16 +45,16 @@ func createBill(t *testing.T, ctx context.Context, repo *postgres.BillRepo, hous
 }
 
 // payBillDirectly writes a bill_payments row AND advances the bill's own
-// next_due, both by raw SQL. RecordPayment -- the real, single-transaction
-// way this happens -- is Task 5's job and is stubbed in bill_repo.go today
-// ("not implemented: Task 5"). MonthTotals only reads bill_payments and
-// bills.next_due; it does not care which code path wrote them, and
-// schema_test.go's own "one occurrence can be paid only once" subtest already
-// inserts into bill_payments the same direct way. Advancing next_due here too
-// is what a real RecordPayment would also do in the same transaction --
-// skipping it would leave the paid bill still reading as "due this month" and
-// double count it in BillMonthUnpaidTotals, which is exactly the wrong-number
-// failure MonthTotals exists to avoid.
+// next_due, both by raw SQL, bypassing RecordPayment: MonthTotals only
+// reads bill_payments and bills.next_due, not RecordPayment's other
+// writes, so a test can set up that state directly. schema_test.go's own
+// "one occurrence can be paid only once" subtest already inserts into
+// bill_payments the same direct way.
+//
+// Advancing next_due here is what a real RecordPayment also does in the
+// same transaction -- skipping it would leave the paid bill still reading
+// as "due this month" and double count it in BillMonthUnpaidTotals, which
+// is exactly the wrong-number failure MonthTotals exists to avoid.
 func payBillDirectly(t *testing.T, ctx context.Context, db *postgres.DB, householdID, billID string,
 	dueOn, paidOn time.Time, amountMinor int64, nextDue time.Time) {
 	t.Helper()
@@ -71,10 +70,10 @@ func payBillDirectly(t *testing.T, ctx context.Context, db *postgres.DB, househo
 	}
 }
 
-// TestMonthTotalsCountsABillAlreadyPaidThisMonth is BillRepository.MonthTotals'
-// own contract test: the naive "bills whose next_due is in this month" query
-// returns a wrong number here, because paying the bill already advanced it
-// into next month.
+// TestMonthTotalsCountsABillAlreadyPaidThisMonth is
+// BillRepository.MonthTotals' own contract test: the naive "bills whose
+// next_due is in this month" query gives a wrong number here, since paying
+// the bill already advanced it into next month.
 func TestMonthTotalsCountsABillAlreadyPaidThisMonth(t *testing.T) {
 	ctx := context.Background()
 	db := openTestDB(t)
@@ -105,10 +104,10 @@ func TestMonthTotalsCountsABillAlreadyPaidThisMonth(t *testing.T) {
 
 // TestMonthTotalsPaidHalfIncludesAnArchivedBill pins the asymmetry
 // queries/bill.sql documents on BillMonthDueTotals: the paid half has no
-// archived_at filter, unlike the unpaid half, because the money already left
-// the household -- archiving the bill afterwards must not retroactively empty
-// the month it was paid in. The unpaid half of the same archived bill must
-// NOT reappear, or a re-archived bill would look like it is still owed.
+// archived_at filter (the money already left the household), so archiving
+// afterwards must not retroactively empty the month it was paid in -- but
+// the unpaid half of the same bill must NOT reappear, or a re-archived bill
+// would look still owed.
 func TestMonthTotalsPaidHalfIncludesAnArchivedBill(t *testing.T) {
 	ctx := context.Background()
 	db := openTestDB(t)
@@ -186,15 +185,12 @@ func TestRecordPaymentIsAtomic(t *testing.T) {
 
 // TestRecordPaymentLeavesNoOrphanExpenseWhenTheSecondWriteFails is
 // TestRecordPaymentIsAtomic's sibling for the one failure mode that test
-// cannot reach. TestRecordPaymentIsAtomic's bad category fails on
-// CreateTransaction -- the FIRST of the three writes -- so nothing before it
-// has ever been written, and it stays green whether or not the transaction
-// actually protects anything (it even passes vacuously against the
-// not-implemented stub). This test instead fails on CreateBillPayment, the
-// SECOND write, via UNIQUE (bill_id, due_on): the first write (the expense)
-// has already gone through by the time the second one is rejected, so this
-// is the only one of the two tests that can catch an orphan expense left
-// behind by a payment that never landed.
+// can't reach: its bad category fails on CreateTransaction, the FIRST
+// write, so nothing is written before it fails -- it stays green whether
+// or not the writes actually share a transaction. This test instead fails
+// on CreateBillPayment, the SECOND write, via UNIQUE (bill_id, due_on): the
+// expense has already landed by the time the payment is rejected, so only
+// this test can catch an orphan expense left behind.
 func TestRecordPaymentLeavesNoOrphanExpenseWhenTheSecondWriteFails(t *testing.T) {
 	ctx := context.Background()
 	db := openTestDB(t)
@@ -230,17 +226,14 @@ func TestRecordPaymentLeavesNoOrphanExpenseWhenTheSecondWriteFails(t *testing.T)
 }
 
 // TestRecordPaymentRefusesAHouseholdBillMismatchInsteadOfLeavingNextDueBehind
-// pins a review finding: neither bill_payments nor transactions carries a
-// database constraint tying its household_id to the bill's own (this file's
-// header comment on UndoPayment repeats why), so writes 1 and 2 succeed
-// regardless of whether the household actually owns the bill -- only
-// SetBillNextDue's own WHERE clause on bills can catch the mismatch, and
-// only if it is written to fail loud on a zero-row match. Before the fix,
-// SetBillNextDue was a bare :exec; a zero-row UPDATE returns success with no
-// error in Postgres, so RecordPayment would have committed the expense and
-// the payment row while silently leaving next_due untouched -- exactly the
-// partial state this transaction exists to make impossible, arriving
-// through a silent no-op instead of a caught error.
+// pins that neither bill_payments nor transactions ties its household_id to
+// the bill's own (bill_repo.go's UndoPayment comment repeats why), so
+// writes 1 and 2 succeed regardless of whether the household owns the
+// bill. Only SetBillNextDue's WHERE clause can catch the mismatch, and
+// only if it fails loud on a zero-row match. Don't make it a bare :exec: a
+// zero-row UPDATE returns success with no error in Postgres, so
+// RecordPayment would commit the expense and payment while silently
+// leaving next_due untouched.
 func TestRecordPaymentRefusesAHouseholdBillMismatchInsteadOfLeavingNextDueBehind(t *testing.T) {
 	ctx := context.Background()
 	db := openTestDB(t)
@@ -317,10 +310,10 @@ func TestUndoRefusesAnythingButTheMostRecentPayment(t *testing.T) {
 	if !errors.Is(err, domain.ErrForbidden) {
 		t.Fatalf("UndoPayment(older) = %v, want ErrForbidden", err)
 	}
-	// The HTTP layer's own "409, naming which payment is undoable" (Task
-	// 10) reaches for this richer type via errors.As -- pinning that it
-	// carries the August due date, not just the bare sentinel, is what
-	// proves that path has real data to name, not just a status code.
+	// The HTTP layer's "409, naming which payment is undoable" response
+	// reaches for this richer type via errors.As -- pinning that it carries
+	// the August due date, not just the bare sentinel, proves that path has
+	// real data to name, not just a status code.
 	var notLatest *domain.BillPaymentNotLatestError
 	if !errors.As(err, &notLatest) {
 		t.Fatalf("UndoPayment(older) = %v, want a *domain.BillPaymentNotLatestError", err)
@@ -380,13 +373,13 @@ func TestUndoReversesAllThreeWrites(t *testing.T) {
 	}
 }
 
-// TestUndoDoesNotDestroyTheDueAnchorDay is the sibling of Task 2's clamp
-// test: that one proves the arithmetic, this proves the anchor is not
-// quietly overwritten by the one write that has no business touching it.
-// SetBillNextDue runs on both the advance (RecordPayment) and the rewind
-// (UndoPayment) paths and must never write due_anchor_day on either --
-// bill_repo.go's own comment on RecordPayment/UndoPayment works the 31 Jan
-// -> 28 Feb -> 31 Mar -> undo -> 28 Feb example this test pins.
+// TestUndoDoesNotDestroyTheDueAnchorDay is the sibling of
+// domain.TestNextDueClampsToTheLastDayOfAShortMonth: that one proves the
+// clamp arithmetic, this proves due_anchor_day survives it. SetBillNextDue
+// must never write due_anchor_day on either the advance (RecordPayment) or
+// the rewind (UndoPayment) path -- SetBillNextDue's doc comment in
+// queries/bill.sql works the 31 Jan -> 28 Feb -> 31 Mar -> undo -> 28 Feb
+// example this test pins.
 func TestUndoDoesNotDestroyTheDueAnchorDay(t *testing.T) {
 	ctx := context.Background()
 	db := openTestDB(t)
@@ -433,30 +426,31 @@ func TestUndoDoesNotDestroyTheDueAnchorDay(t *testing.T) {
 }
 
 // TestUndoPaymentIsAtomic is TestRecordPaymentIsAtomic's missing other
-// direction. The design requires atomicity BOTH ways, and until this test
-// existed, deleting `defer tx.Rollback(ctx)` from UndoPayment left the whole
-// suite green: every other undo test drives the happy path, which commits.
+// direction: the design requires atomicity both ways, and without this
+// test, deleting `defer tx.Rollback(ctx)` from UndoPayment leaves the
+// suite green, since every other undo test drives the happy path, which
+// commits.
 //
-// The lever is the same one TestRecordPaymentRefusesAHouseholdBillMismatch...
-// uses, applied one write later. bill_payments carries no constraint tying
-// its household_id to its bill's, so moving the bill to another household
-// leaves the payment and its expense perfectly findable under the ORIGINAL
-// household while the final rewind -- the only statement that touches
-// `bills` -- matches zero rows and fails. That puts the failure AFTER both
-// deletions, which is the only place a missing rollback could do damage.
+// The lever is the same one
+// TestRecordPaymentRefusesAHouseholdBillMismatchInsteadOfLeavingNextDueBehind
+// uses, one write later: bill_payments has no constraint tying its
+// household_id to its bill's, so moving the bill to another household
+// leaves the payment and expense findable under the ORIGINAL household
+// while the final rewind -- the only statement touching `bills` -- matches
+// zero rows and fails. That puts the failure AFTER both deletions, the
+// only place a missing rollback could do damage.
 //
-// Two things are asserted, because a missing rollback and a mistaken commit
+// Two things are asserted, since a missing rollback and a mistaken commit
 // break differently:
 //
-//  1. The payment row and its expense are still there. This is what fails if
-//     the deferred call is ever changed to Commit -- the two deletions would
-//     land despite the error.
-//  2. The pool has no connection still checked out. This is what fails if the
-//     deferred call is simply DELETED: the writes stay invisible either way
-//     (nothing commits them), but the transaction is never ended, so its
-//     connection never returns to the pool and its row locks are never
-//     released -- every later write to those rows blocks forever, and
-//     db.Close() at teardown blocks with them.
+//  1. The payment row and its expense are still there -- fails if the
+//     deferred call is ever changed to Commit, since the two deletions
+//     would land despite the error.
+//  2. The pool has no connection still checked out -- fails if the
+//     deferred call is simply DELETED: the writes stay invisible either
+//     way, but the transaction is never ended, so its connection and row
+//     locks are never released and every later write to those rows blocks
+//     forever.
 func TestUndoPaymentIsAtomic(t *testing.T) {
 	ctx := context.Background()
 	db := openTestDB(t)
@@ -512,16 +506,15 @@ func TestUndoPaymentIsAtomic(t *testing.T) {
 		t.Fatalf("next_due = %s, want it still advanced at 2026-09-08", nextDue.Format("2006-01-02"))
 	}
 
-	// See this test's own comment: a connection still checked out here means
-	// the failed call left its transaction open rather than rolling it back.
-	// The queries above each acquired and released their own connection
-	// synchronously, so anything still held is UndoPayment's.
+	// A connection still checked out here means the failed call left its
+	// transaction open: the queries above each acquired and released their
+	// own connection synchronously, so anything still held is UndoPayment's.
 	//
-	// Polled rather than read once: pgxpool runs a background health check on
-	// a 500ms timer that acquires idle connections briefly, so a single
-	// sample can catch an unrelated blip. A LEAKED connection never returns,
-	// so requiring the count to reach zero within a second distinguishes the
-	// two without weakening what is being asserted.
+	// Polled rather than read once: pgxpool's background health check
+	// briefly acquires idle connections on a timer, so a single sample could
+	// catch that instead of a real leak. A LEAKED connection never returns,
+	// so requiring the count to reach zero within a second tells the two
+	// apart without weakening the assertion.
 	var held int32
 	deadline := time.Now().Add(time.Second)
 	for {
@@ -537,12 +530,12 @@ func TestUndoPaymentIsAtomic(t *testing.T) {
 }
 
 // TestUndoMostRecentIsScopedToTheBillNotTheHousehold pins which set the
-// "only the most recent payment" guard compares against.
-// MostRecentBillPaymentDueOn filters on bill_id as well as household_id;
-// with that filter dropped, undoing a legitimately-latest
-// payment on one bill is refused because a DIFFERENT bill happens to carry a
-// later one. Every other undo test uses a household with a single paying
-// bill, which is exactly why none of them can see it.
+// "only the most recent payment" guard compares against:
+// MostRecentBillPaymentDueOn filters on bill_id as well as household_id.
+// Drop that filter and undoing a legitimately-latest payment on one bill
+// is refused because a DIFFERENT bill happens to carry a later one. Every
+// other undo test uses a household with a single paying bill, which is
+// exactly why none of them can see it.
 func TestUndoMostRecentIsScopedToTheBillNotTheHousehold(t *testing.T) {
 	ctx := context.Background()
 	db := openTestDB(t)
@@ -613,8 +606,8 @@ func TestGetHidesABillFromAnotherHousehold(t *testing.T) {
 
 // TestListIncludesArchivedBillsAsAUnionWhenRequested pins
 // BillRepository.List's own doc comment: includeArchived is a UNION, not a
-// filter swap. false must return only the live bill; true must return BOTH
-// the live one AND the archived one together, not the archived one instead.
+// filter swap. false returns only the live bill; true must return BOTH
+// live and archived together, not archived instead.
 func TestListIncludesArchivedBillsAsAUnionWhenRequested(t *testing.T) {
 	ctx := context.Background()
 	db := openTestDB(t)
@@ -675,11 +668,11 @@ func TestCreateDuplicateNameIsErrBillNameTakenEvenArchived(t *testing.T) {
 }
 
 // TestUpdateWritesEveryMutableColumn pins UpdateBill's own contract: an
-// unconditional full-row SET, every mutable column including due_anchor_day
-// (which must move together with a changed NextDue, per the brief's own
-// prose). Every field below is changed to a value that disagrees with what
-// Create wrote, so a SET list silently missing one column -- is_subscription
-// or paid_by_membership_id, say -- cannot pass by accident agreeing with the
+// unconditional full-row SET of every mutable column, including
+// due_anchor_day, which must move together with a changed NextDue. Every
+// field below is changed to a value that disagrees with what Create wrote,
+// so a SET list silently missing one column -- is_subscription or
+// paid_by_membership_id, say -- can't pass by accident agreeing with the
 // original.
 func TestUpdateWritesEveryMutableColumn(t *testing.T) {
 	ctx := context.Background()

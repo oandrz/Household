@@ -181,12 +181,11 @@ func TestInviteAcceptIsSingleUse(t *testing.T) {
 	}
 }
 
-// TestInviteAcceptRollsBackOnMembershipConstraintViolation is the test that
-// proves the whole point of putting Accept in one transaction: a failure
-// partway through -- forced here by a role/capability combination the
-// owners_hold_all_capabilities check constraint rejects -- must leave no
-// trace, not an orphaned user occupying the unique email index that a retry
-// could never get past.
+// TestInviteAcceptRollsBackOnMembershipConstraintViolation proves the whole
+// point of running Accept in one transaction: a failure partway through --
+// forced here by a role/capability combination
+// owners_hold_all_capabilities rejects -- must leave no trace, not an
+// orphaned user occupying the unique email index a retry could never pass.
 func TestInviteAcceptRollsBackOnMembershipConstraintViolation(t *testing.T) {
 	db := openTestDB(t)
 	ctx := context.Background()
@@ -474,10 +473,9 @@ func TestDeleteInvite(t *testing.T) {
 	}
 }
 
-// inviteTestHousehold is a household and its owner, built once so the
-// tests that only need somewhere to point household_id and invited_by at
-// do not each repeat households.Create/users.Create inline. Tasks 7 and 9
-// reuse this helper rather than inventing their own.
+// inviteTestHousehold is a household and its owner, built once so tests
+// that only need somewhere to point household_id and invited_by at don't
+// each repeat households.Create/users.Create inline.
 type inviteTestHousehold struct{ ID, OwnerUserID string }
 
 func newInviteTestHousehold(t *testing.T) (*postgres.DB, inviteTestHousehold) {
@@ -582,19 +580,17 @@ func TestTwoSimultaneousKnocksProduceExactlyOneWinner(t *testing.T) {
 	}
 }
 
-// --- Task 8: ReplaceToken -------------------------------------------------
+// --- ReplaceToken ----------------------------------------------------------
 
-// TestReplaceInviteTokenReturnsThePreviousKnockChatID is the empirical
-// proof task-8-brief.md asked for before anything is built on top of it:
-// ReplaceInviteToken's RETURNING clause is
+// TestReplaceInviteTokenReturnsThePreviousKnockChatID proves, against a
+// real database, that ReplaceInviteToken's RETURNING clause --
 // "COALESCE((SELECT prior.knock_chat_id FROM invites prior WHERE prior.id
-// = $1), 0)" -- a subquery against the very table the UPDATE is writing to,
-// in the same statement. The claim is that under READ COMMITTED this
-// subquery sees the row as it stood when the statement began, so it
-// returns the chat that had knocked (4242) rather than the NULL the
-// UPDATE's own SET clause just wrote. If that claim were wrong, this test
-// would observe 0 here, and nothing else in the suite would catch it -- the
-// knocked chat would simply never be told its link died, silently.
+// = $1), 0)", a subquery against the very row the same UPDATE is writing
+// -- sees that row as it stood when the statement began, under READ
+// COMMITTED. It should return the chat that had knocked (4242), not the
+// NULL the UPDATE's own SET clause just wrote. If that claim were wrong,
+// this test would observe 0, and nothing else in the suite would catch it
+// -- the knocked chat would simply never be told its link died.
 func TestReplaceInviteTokenReturnsThePreviousKnockChatID(t *testing.T) {
 	ctx := context.Background()
 	db, h := newInviteTestHousehold(t)
@@ -665,13 +661,13 @@ func TestReplaceInviteTokenReturnsThePreviousKnockChatID(t *testing.T) {
 
 // TestReplaceTokenRefusesEverythingButALiveTelegramInviteInThisHousehold
 // covers ReplaceToken's whole error surface in one database: another
-// household's invite (whatever its channel) is domain.ErrNotFound -- the
-// household check must win over the channel check, not merely happen to
-// agree with it -- this household's own email invite is
-// domain.ErrInviteNotTelegram, and an already-accepted Telegram invite in
-// this household is domain.ErrNotFound too: "get a new link" is not
-// something an accepted invite offers, the same two-way split
-// DeleteUnacceptedInvite's own fallback read makes for Withdraw.
+// household's invite (any channel) is domain.ErrNotFound, proving the
+// household check wins over the channel check rather than merely agreeing
+// with it; this household's own email invite is
+// domain.ErrInviteNotTelegram; and an already-accepted Telegram invite
+// here is domain.ErrNotFound too, since "get a new link" is not something
+// an accepted invite offers -- the same fallback-read shape InviteRepo.Delete
+// uses for Withdraw.
 func TestReplaceTokenRefusesEverythingButALiveTelegramInviteInThisHousehold(t *testing.T) {
 	ctx := context.Background()
 	db, h := newInviteTestHousehold(t)
@@ -730,10 +726,11 @@ func TestReplaceTokenRefusesEverythingButALiveTelegramInviteInThisHousehold(t *t
 	}
 }
 
-// --- Task 9: Admit -- Let in, the transaction the whole milestone exists
-// for. One repository call creates the user, the membership and the
-// telegram_accounts row and stamps the invite accepted; either all four
-// happen or none do.
+// --- Admit -------------------------------------------------------------
+//
+// Admit is "Let in": one repository call creates the user, the membership
+// and the telegram_accounts row and stamps the invite accepted; either
+// all four happen or none do.
 
 // TestAdmitCreatesUserMembershipAndTelegramAccountAtomically is the happy
 // path against real Postgres, proving all four writes land together: a
@@ -797,10 +794,10 @@ func TestAdmitCreatesUserMembershipAndTelegramAccountAtomically(t *testing.T) {
 	}
 }
 
-// TestAdmitRefusesAnInviteNobodyHasKnockedOn proves the fallback read
-// invite_repo.go's Admit runs after ClaimKnockedInvite's guarded UPDATE
-// matches nothing: a live Telegram invite that nobody has tapped answers
-// domain.ErrInviteNotKnocked, and nothing is written.
+// TestAdmitRefusesAnInviteNobodyHasKnockedOn proves Admit's fallback read
+// (after ClaimKnockedInvite's guarded UPDATE matches nothing): a live
+// Telegram invite nobody has tapped answers domain.ErrInviteNotKnocked,
+// and nothing is written.
 func TestAdmitRefusesAnInviteNobodyHasKnockedOn(t *testing.T) {
 	ctx := context.Background()
 	db, h := newInviteTestHousehold(t)
@@ -877,8 +874,8 @@ func TestAdmitLeavesNothingBehindWhenTheChatIsAlreadyBound(t *testing.T) {
 	if err := invites.RecordKnock(ctx, tokenHash, 4242, "christine_t", "4812", time.Now()); err != nil {
 		t.Fatalf("RecordKnock: %v", err)
 	}
-	// The chat signs up somewhere else between the knock and the click --
-	// spec decision 15's race, forced rather than waited for.
+	// The chat signs up somewhere else between the knock and the click, a
+	// race forced here rather than waited for.
 	if err := accounts.Create(ctx, usecase.TelegramBinding{
 		UserID: h.OwnerUserID, ChatID: 4242, ChatUsername: "christine_t",
 	}); err != nil {

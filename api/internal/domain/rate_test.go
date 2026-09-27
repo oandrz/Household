@@ -60,10 +60,8 @@ func TestRateApplyRefusesAnAnswerTooBigForInt64(t *testing.T) {
 	}
 }
 
-// The old usecase.Rate.Apply multiplied in 64 bits and refused whenever the
-// intermediate product overflowed, even when the answer fitted. The product
-// is now taken in 128 bits, so only the answer can be refused. This is the one
-// deliberate behaviour change in the move.
+// The product is taken in 128 bits, so only an answer that does not fit is
+// refused -- never an intermediate product that overflows on its own.
 func TestRateApplyAcceptsAnAmountWhoseAnswerFitsEvenWhenTheProductDoesNot(t *testing.T) {
 	rate := domain.Rate{Numerator: 3, Denominator: 2}
 	in := int64(math.MaxInt64 / 2) // 4_611_686_018_427_387_903; times 3 overflows int64
@@ -72,14 +70,16 @@ func TestRateApplyAcceptsAnAmountWhoseAnswerFitsEvenWhenTheProductDoesNot(t *tes
 	if err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
-	// 4_611_686_018_427_387_903 * 3 / 2 = 6_917_529_027_641_081_854.5, rounded away from zero.
+	// 4_611_686_018_427_387_903 * 3 / 2 = 6_917_529_027_641_081_854.5,
+	// rounded away from zero.
 	if want := int64(6_917_529_027_641_081_855); got != want {
 		t.Fatalf("Apply = %d, want %d", got, want)
 	}
 }
 
 // A rate arrives from a provider this code did not construct, so it fails
-// closed. A zero denominator used to divide by zero and panic.
+// closed. Don't drop the positivity check: a zero denominator divides by
+// zero and panics.
 func TestRateApplyRefusesARateThatIsNotPositive(t *testing.T) {
 	for _, r := range []domain.Rate{
 		{Numerator: 0, Denominator: 1},

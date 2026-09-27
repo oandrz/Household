@@ -7,13 +7,11 @@ import (
 	"github.com/andreasoentoro/hearth/api/internal/domain"
 )
 
-// Income is the third component of the PRD's profit, and the one that does not
-// go through the fold: a dividend changes neither what is held nor what it
-// cost, so folding it would corrupt the average cost of everything sold after
-// it. It sits beside the position instead, summed over the reporting period.
-//
-// A fee is the same shape with the opposite sign, which is why the two share a
-// type rather than a second table.
+// Income is the third, fold-skipping component of the PRD's profit: a dividend
+// changes neither what's held nor its cost, so folding it would corrupt the
+// average cost of everything sold after. It sits beside the position instead,
+// summed over the period. A fee is the same shape with the opposite sign,
+// hence one type, not a second table.
 
 func income(t *testing.T, kind domain.IncomeKind, minor int64, currency string) domain.HoldingIncome {
 	t.Helper()
@@ -74,10 +72,9 @@ func TestIncomeRefusesAKindItDoesNotKnow(t *testing.T) {
 	}
 }
 
-// Income obeys the same cross-currency rule as an event and a valuation, and
-// obeys it through the SAME function -- a dividend paid in USD to a household
-// keeping its books in SGD is worth what actually landed in the bank, not what
-// a rate says it was worth.
+// Income obeys the same cross-currency rule as an event and a valuation,
+// through the SAME function -- a USD dividend to an SGD household is worth
+// what actually landed in the bank, not what a rate says it was worth.
 func TestIncomeCarriesTheSameCrossCurrencyRuleAsAnEvent(t *testing.T) {
 	bare := income(t, domain.IncomeReceived, 500, "USD")
 	if err := bare.Validate("USD", "SGD"); !errors.Is(err, domain.ErrHoldingPrimaryAmountRequired) {

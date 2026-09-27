@@ -1,29 +1,25 @@
--- ListAccounts and ListAccountsIncludingArchived are two queries rather than
--- one with a boolean parameter, because the live-only form is what the
--- partial index accounts_household_idx covers and a `WHERE archived_at IS
--- NULL OR $2` predicate would not use it.
+-- ListAccounts and ListAccountsIncludingArchived are two queries, not one
+-- with a boolean parameter, because a `WHERE archived_at IS NULL OR $2`
+-- predicate would not use the partial index accounts_household_idx that the
+-- live-only form does.
 --
--- The LEFT JOIN is what makes a shared account (owner_membership_id IS NULL)
--- come back as a row with a NULL owner name rather than vanishing.
+-- The LEFT JOIN lets a shared account (owner_membership_id IS NULL) come
+-- back as a row with a NULL owner name rather than vanishing.
 
 -- name: ListAccounts :many
 SELECT sqlc.embed(a), u.display_name AS owner_name,
-       -- balance_minor is the opening balance plus every transaction dated
-       -- ON OR AFTER opening_balance_as_of. The opening balance means the
-       -- figure at the START of that day (spec 2026-07-30-hearth-finance-
-       -- fixes, decision 1), so a transaction dated that same day counts —
-       -- the day-one flow (create an account today, log today's dinner)
-       -- must move the balance. A transaction dated strictly before stays
-       -- out: that history is already inside the figure someone asserted.
+       -- balance_minor is opening balance plus every transaction dated ON OR
+       -- AFTER opening_balance_as_of (spec 2026-07-30-hearth-finance-fixes):
+       -- the opening balance is the figure at the START of that day, so a
+       -- same-day transaction still moves it, while an earlier one is
+       -- already baked into that figure.
        --
-       -- Two filtered sums rather than one, because an account can be the
-       -- source of one transfer and the destination of another. The incoming
-       -- side takes received_amount_minor when there is one: that is what
-       -- actually landed, in this account's own currency. Using amount_minor
-       -- there would add the sending account's currency to this one's.
-       --
-       -- No conversion happens here and none can: every figure in this
-       -- expression is already in this account's own currency.
+       -- Two filtered sums, not one, because an account can be both a
+       -- transfer's source and another transfer's destination. The incoming
+       -- side prefers received_amount_minor -- what actually landed, in this
+       -- account's currency -- over amount_minor, which is in the sender's
+       -- currency; no conversion happens here or can, since everything above
+       -- is already in this account's own currency.
        (a.opening_balance_minor
         - COALESCE((SELECT SUM(t.amount_minor) FROM transactions t
                     WHERE t.from_account_id = a.id
@@ -58,10 +54,9 @@ LEFT JOIN users u ON u.id = m.user_id
 WHERE a.household_id = $1
 ORDER BY a.archived_at NULLS FIRST, a.created_at;
 
--- GetAccount is scoped by household_id as well as id. Every account query in
--- this file is: an id alone would let a caller in one household read a row in
--- another by guessing a uuid, and the HTTP layer's session gives us the
--- household for free.
+-- GetAccount scopes by household_id as well as id, like every query in this
+-- file: id alone would let a caller in one household read another's row by
+-- guessing a uuid, and the HTTP session already supplies the household id.
 -- name: GetAccount :one
 SELECT sqlc.embed(a), u.display_name AS owner_name,
        -- See ListAccounts above for why this is two filtered sums with
@@ -103,9 +98,9 @@ SET nickname                   = $3,
 WHERE household_id = $1 AND id = $2
 RETURNING id, household_id, nickname, type, owner_membership_id, opening_balance_minor, opening_balance_currency, opening_balance_as_of, count_toward_net_worth, visible_to_limited_members, archived_at, created_at;
 
--- SetAccountArchived stamps or clears archived_at. There is no DELETE query in
--- this file, deliberately: transactions will reference these rows next slice,
--- and destroying an account would take its history with it.
+-- SetAccountArchived stamps or clears archived_at. There is no DELETE query
+-- in this file: transactions reference these rows, and deleting an account
+-- would erase their history along with it.
 -- name: SetAccountArchived :one
 UPDATE accounts
 SET archived_at = $3
@@ -119,20 +114,17 @@ SELECT EXISTS (
     SELECT 1 FROM memberships WHERE id = $1 AND household_id = $2
 );
 
--- ListAccountMonthlyMovements is the twelve-month trend's only new read. One
--- row per account per calendar month that has any movement, summed in that
--- account's own currency -- no conversion happens here and none can, because
--- the FX provider lives in the usecase layer (MonthTotalsQuery says the same).
+-- ListAccountMonthlyMovements backs the twelve-month trend: one row per
+-- account per calendar month with any movement, in that account's own
+-- currency. No conversion happens here and none can: the FX provider lives
+-- in the usecase layer (MonthTotalsQuery says the same).
 --
--- The filter is ListAccounts's balance expression split by month, and must
--- stay identical to it: the trend walks backwards from AccountView.Balance by
--- subtracting these deltas, so one row's difference makes the older bars
--- disagree with the headline figure while still looking plausible.
---
--- There is deliberately no upper bound on occurred_on, for the same reason
--- ListAccounts has none: a future-dated transaction is already inside the
--- balance the walk anchors on, so it must be inside these rows too. The
--- service buckets any month later than the current one into the current one.
+-- The filter mirrors ListAccounts's balance expression, including the
+-- missing upper bound on occurred_on (a future-dated transaction is already
+-- inside the anchor balance). It must stay identical: the trend walks
+-- backwards from AccountView.Balance by subtracting these deltas, so any
+-- mismatch makes older bars disagree with the headline figure. The service
+-- buckets any later month into the current one.
 -- name: ListAccountMonthlyMovements :many
 SELECT account_id,
        month,

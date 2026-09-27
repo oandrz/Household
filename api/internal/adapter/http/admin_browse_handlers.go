@@ -10,16 +10,15 @@ import (
 	"github.com/andreasoentoro/hearth/api/internal/usecase"
 )
 
-// The operator's database browse: the table list and one page of one table.
-// Both are reads inside the /admin granted group, so requirePlatformAdmin,
+// The operator's database browse: the table list and one page of one
+// table. Both sit inside the /admin granted group, so requirePlatformAdmin,
 // auditAdmin, requireCSRF and requireAdminGrant apply by construction --
 // nothing here checks who is asking.
 //
-// This is the one surface in Hearth that can read a household's money, which
-// is why it costs a re-authentication and why every request through it is an
-// audit row. The table name is a path segment and the offset is a query
-// parameter, so auditAdmin -- which runs before chi matches the route --
-// already records both without this file doing anything.
+// This is the one surface in Hearth that can read a household's money, so
+// it costs a re-authentication and every request is an audit row.
+// auditAdmin runs before chi matches the route, so it already records the
+// table name (a path segment) and offset (a query parameter) here.
 
 type browseColumnDTO struct {
 	Name     string `json:"name"`
@@ -64,12 +63,11 @@ func browseColumns(columns []usecase.ColumnInfo) []browseColumnDTO {
 
 // parseBrowseRange reads limit and offset from the query string.
 //
-// Absent is not an error -- the service has a default, and the operator typed
-// a URL rather than filling in a form. Present and unusable is refused before
-// any query runs: limit=0 and offset=-1 are not questions the browse can
-// answer, and silently reading them as "the default" would answer a different
-// question from the one asked. A limit above the cap is neither -- it is
-// clamped by the service, not refused here.
+// Absent is not an error: the service has a default. Present and unusable
+// is refused before any query runs -- limit=0 or offset=-1 aren't questions
+// the browse can answer, and silently defaulting them would answer a
+// different question. Above the cap is neither: the service clamps it,
+// this does not refuse it.
 func parseBrowseRange(q url.Values) (limit, offset int, ok bool) {
 	if raw := q.Get("limit"); raw != "" {
 		n, err := strconv.Atoi(raw)
@@ -122,11 +120,10 @@ func handleAdminDatabaseRows(deps Deps) http.HandlerFunc {
 			return
 		}
 
-		// The table name is not validated here, and that is deliberate:
-		// the only honest check is "does the browse's own role see a table
-		// with this name", which lives in the adapter and answers
-		// domain.ErrNotFound. A regexp here would be a second, weaker rule
-		// that could drift from the real one.
+		// The table name is not validated here, on purpose: the only honest
+		// check is "does the browse's own role see a table with this name",
+		// which lives in the adapter and answers domain.ErrNotFound. A
+		// regexp here would be a second, weaker rule that could drift.
 		table := chi.URLParam(r, "table")
 
 		page, err := deps.AdminBrowse.Rows(r.Context(), table, limit, offset)

@@ -125,11 +125,11 @@ func TestConfirmRefusesWhenTheMemberAlreadyHasAChat(t *testing.T) {
 }
 
 // TestConfirmRacingItsOwnEarlierConfirmReturnsTheSameBinding covers the
-// double-click / two-tabs-polling-one-link race: this call's own pre-checks
-// see nothing bound, but by the time its own Create reaches the database,
-// its own earlier request already committed the identical row. The loser
-// must not be told the chat "belongs to another account" -- that would be
-// false, since it is the same account.
+// double-click / two-tabs-polling-one-link race: pre-checks see nothing
+// bound, but by the time Create reaches the database, the same user's
+// earlier Confirm of this link (the double-click, or the other tab) already
+// committed the identical row. The loser must not be told the chat "belongs
+// to another account" -- that would be false, since it is the same account.
 func TestConfirmRacingItsOwnEarlierConfirmReturnsTheSameBinding(t *testing.T) {
 	svc, doubles := newTelegramLinkService(t)
 	start, _ := svc.Start(context.Background(), "user-1")
@@ -152,7 +152,7 @@ func TestConfirmRacingItsOwnEarlierConfirmReturnsTheSameBinding(t *testing.T) {
 // covers the other race: two pending links for the same user confirmed
 // concurrently. By the time this Create reaches the database, the user is
 // already bound to a *different* chat, so the chat side was never the
-// problem -- the user-side UNIQUE is the one that fired.
+// problem -- the user-side UNIQUE constraint is what fired.
 func TestConfirmRacingASecondPendingLinkForTheSameUserReportsAlreadyLinked(t *testing.T) {
 	svc, doubles := newTelegramLinkService(t)
 	start, _ := svc.Start(context.Background(), "user-1")
@@ -226,10 +226,9 @@ func TestStatusRefusesWhenTheMemberAlreadyHasADifferentChat(t *testing.T) {
 	}
 }
 
-// TestStatusCarriesNoReasonForWaitingPendingOrConnected complements the two
-// refused-branch tests above: Reason exists to give the panel a code for
-// the one status that needs one, so this proves the other statuses don't
-// carry a stale one forward.
+// TestStatusCarriesNoReasonForWaitingPendingOrConnected complements the
+// refused-branch tests above: Reason exists only for the one status that
+// needs a code, and this proves the others don't carry a stale one forward.
 func TestStatusCarriesNoReasonForWaitingPendingOrConnected(t *testing.T) {
 	svc, doubles := newTelegramLinkService(t)
 	start, _ := svc.Start(context.Background(), "user-1")

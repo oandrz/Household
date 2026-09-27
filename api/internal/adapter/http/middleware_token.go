@@ -15,17 +15,15 @@ import (
 // the same reason (middleware_session.go's sessionTouchInterval).
 const tokenTouchInterval = time.Hour
 
-// requireToken is requireSession's other half: the request carried an
-// Authorization header, so this resolves it to a live personal API token and
-// builds the same Scope a session would get, with AuthVia set to token.
-//
-// Every failure -- wrong scheme, wrong prefix, unknown, expired, revoked,
-// membership gone -- answers the one 401 requireSession answers, so a probe
-// learns nothing from the difference. No admin grant and no session hash is
-// placed on the context. That is NOT what keeps a token out of /admin --
-// POST /admin/session needs no grant, since it is how one is obtained.
-// requirePlatformAdmin refusing every AuthVia but session is the guard; see
-// its doc comment.
+// requireToken is requireSession's other half: it resolves an Authorization
+// header to a live personal API token and builds the same Scope a session
+// would get, with AuthVia set to token. Every failure -- wrong scheme, wrong
+// prefix, unknown, expired, revoked, membership gone -- answers the same 401
+// requireSession answers, so a probe learns nothing from the difference. Not
+// placing an admin grant or session hash on the context is NOT what keeps a
+// token out of /admin -- POST /admin/session needs no grant, since it is how
+// one is obtained. requirePlatformAdmin refusing every AuthVia but session
+// is the actual guard; see its doc comment.
 func requireToken(deps Deps, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		raw, ok := strings.CutPrefix(r.Header.Get("Authorization"), bearerPrefix)
@@ -68,9 +66,9 @@ func requireToken(deps Deps, next http.Handler) http.Handler {
 
 // requireCookieSession refuses a request that authenticated with a token.
 // It protects two things a leaked token must never be able to do: make
-// itself permanent, and change who can get into the household (partner-
-// invite spec decision 12, the reason behind ADR 7 rule 2). The refusing
-// default is the point -- an unset AuthVia is not a session.
+// itself permanent, and change who can get into the household (ADR 7 rule
+// 2). The refusing default is the point -- an unset AuthVia is not a
+// session.
 func requireCookieSession(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		scope, ok := RequestScope(r)

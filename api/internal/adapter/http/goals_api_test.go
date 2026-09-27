@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-// --- Task 8: goal routes ----------------------------------------------------
+// --- goal routes -------------------------------------------------------------
 
 // goalDTO mirrors goal_handlers.go's wire shape for one goal card.
 type goalDTOBody struct {
@@ -97,22 +97,19 @@ func (env *testEnv) mustCreateGoal(t *testing.T, session, csrf *http.Cookie, bod
 
 // --- route-walk matrix ------------------------------------------------------
 
-// TestGoalRoutesRequireMoneyAndOwner is TestBudgetRoutesRequireMoneyAndOwner's
-// and TestCategoryWriteRoutesRequireMoneyAndOwner's shape applied to all eight
-// goal routes: reads and writes alike sit behind CapMoney AND requireOwner,
-// the same as transactions, categories and budgets -- goals are as much "the
-// household's money" as a ledger row.
+// TestGoalRoutesRequireMoneyAndOwner applies
+// TestBudgetRoutesRequireMoneyAndOwner's shape to all eight goal routes:
+// every one sits behind CapMoney AND requireOwner, same as transactions,
+// categories and budgets.
 //
-// wantOwner pins the exact status an owner receives, not merely "not
-// 401/403": a route wired with a nil deps.Goals would pass both guards and
-// panic into a 500, which a bare non-401/403 check would let slide by
-// unnoticed (the same reasoning transactions_api_test.go's comment gives).
+// wantOwner pins the exact status an owner gets, not just "not 401/403": a
+// route wired with a nil deps.Goals would panic into a 500, which a bare
+// non-401/403 check would miss.
 //
-// zeroUUID stands in for "a member of another household": this suite has no
-// second-household fixture to build a real cross-household id from
-// (budget_api_test.go's TestBudgetSaveValidationErrors makes the same call),
-// and GoalRepository.Get's own contract makes the two indistinguishable --
-// both simply match no row scoped to this household.
+// zeroUUID stands in for a member of another household: this suite has no
+// real cross-household fixture, and GoalRepository.Get treats an unknown id
+// and a cross-household id identically -- neither matches a row scoped to
+// this household.
 func TestGoalRoutesRequireMoneyAndOwner(t *testing.T) {
 	env := newTestEnv(t)
 	zeroUUID := "00000000-0000-0000-0000-000000000000"
@@ -123,12 +120,10 @@ func TestGoalRoutesRequireMoneyAndOwner(t *testing.T) {
 	}{
 		{http.MethodGet, "/api/v1/goals", http.StatusOK},
 		// GET .../contributions performs no existence check on the goal id
-		// (GoalService.Contributions' own contract -- see
-		// TestGoalContributionsListForUnknownGoalIsEmpty below for why that
-		// is deliberate, not a gap this test should paper over), so an
-		// owner reaching it with a made-up id still gets 200 with an empty
-		// list -- which still proves the guards passed and the handler is
-		// wired, the same role wantOwner plays on every other row here.
+		// (GoalService.Contributions' contract -- see
+		// TestGoalContributionsListForUnknownGoalIsEmpty for why), so an
+		// owner with a made-up id still gets 200 with an empty list,
+		// proving the guards passed and the handler is wired.
 		{http.MethodGet, "/api/v1/goals/" + zeroUUID + "/contributions", http.StatusOK},
 		{http.MethodPost, "/api/v1/goals", http.StatusBadRequest},
 		{http.MethodPatch, "/api/v1/goals/" + zeroUUID, http.StatusBadRequest},
@@ -167,10 +162,9 @@ func TestGoalRoutesRequireMoneyAndOwner(t *testing.T) {
 }
 
 // TestGoalWriteRoutesRequireCSRF mirrors TestCategoryWriteRoutesRequireCSRF
-// for the six mutating goal routes: no token at all, and a token that does
-// not match the cookie, both refused by CSRF_INVALID specifically -- not
-// merely a 403, which requireOwner above it in the guard stack would also
-// produce.
+// for the six mutating goal routes: no token, and a token that doesn't match
+// the cookie, are both refused by CSRF_INVALID specifically -- not merely
+// 403, which requireOwner (above it in the guard stack) would also produce.
 func TestGoalWriteRoutesRequireCSRF(t *testing.T) {
 	env := newTestEnv(t)
 	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
@@ -207,7 +201,7 @@ func TestGoalWriteRoutesRequireCSRF(t *testing.T) {
 
 // --- behaviour ---------------------------------------------------------
 
-// TestGoalListEmptyState pins the brief's "never 204, never 404" contract: a
+// TestGoalListEmptyState pins the "never 204, never 404" contract: a
 // household with no goals still answers 200 with an empty (not null) goals
 // array and a fully-populated, all-zero summary.
 func TestGoalListEmptyState(t *testing.T) {
@@ -239,9 +233,8 @@ func TestGoalListEmptyState(t *testing.T) {
 	}
 
 	// Confirm the raw wire shape too: "goals": [] literally, not omitted or
-	// null, which decodeGoalsList's nil check above cannot itself prove --
-	// json.Unmarshal happily leaves a Go nil slice for both `[]` and a
-	// missing key.
+	// null. The nil check above can't prove that alone -- json.Unmarshal
+	// leaves a nil Go slice for both `[]` and a missing key.
 	var raw map[string]json.RawMessage
 	if err := json.Unmarshal(rec.Body.Bytes(), &raw); err != nil {
 		t.Fatalf("decode raw: %v", err)
@@ -252,32 +245,26 @@ func TestGoalListEmptyState(t *testing.T) {
 }
 
 // TestGoalListReflectsRealDerivedFigures proves toGoalDTO and
-// toGoalsResponse carry real, non-zero derived figures through the wire --
-// not merely their zero-value shape, which every other test in this file
-// happens to exercise (either an error path, or a goal nobody has
-// contributed to yet). GoalService.List computes contributedMinor, percent,
-// status, requiredMonthlyMinor and the summary's two totals; a mapping bug
-// here -- swapping PlannedMonthlyTotal and ActualThisMonth, or wiring
-// Percent to the wrong field -- would leave every other test in this file
-// green. It is also the only test that proves writeGoal's re-read (the
-// whole reason it exists instead of answering with the write call's own
-// return value) actually fetches something other than zeros.
+// toGoalsResponse carry real, non-zero derived figures -- not just their
+// zero-value shape, which every other test in this file exercises. A mapping
+// bug in GoalService.List (e.g. swapping PlannedMonthlyTotal and
+// ActualThisMonth, or wiring Percent to the wrong field) would leave every
+// other test green. It's also the only test proving writeGoal's re-read
+// fetches something other than zeros.
 //
-// The target month and the contribution's date are both computed relative
-// to time.Now() rather than hardcoded: the harness runs against the real
-// wall clock (clock.System{}), so a literal future month would eventually
-// stop being future, and MonthContributionTotals filters strictly to the
-// current calendar month, so a hardcoded date would eventually land outside
-// it and read back actualThisMonthMinor as 0.
+// The target month and contribution date are computed relative to
+// time.Now(), not hardcoded: the harness runs on the real wall clock, so a
+// hardcoded future month would eventually become past, and
+// MonthContributionTotals filters strictly to the current calendar month, so
+// a hardcoded date would eventually read actualThisMonthMinor back as 0.
 func TestGoalListReflectsRealDerivedFigures(t *testing.T) {
 	env := newTestEnv(t)
 	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
 
 	now := time.Now().UTC()
 	// Six calendar months out from the first of the current month -- day-of-
-	// month neutral, the same normalize-then-AddDate shape
-	// TestBudgetHistoryMonthsIsClamped's own "base" local uses, so this does
-	// not misbehave on a day (like the 31st) a later month does not have.
+	// month neutral (same shape as TestBudgetHistoryMonthsIsClamped's "base"),
+	// so this doesn't misbehave on a day like the 31st a later month lacks.
 	targetMonth := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC).AddDate(0, 6, 0)
 	occurredOn := time.Date(now.Year(), now.Month(), 14, 0, 0, 0, 0, time.UTC).Format("2006-01-02")
 
@@ -316,11 +303,10 @@ func TestGoalListReflectsRealDerivedFigures(t *testing.T) {
 	if got.Percent != 50 {
 		t.Fatalf("percent = %d, want 50", got.Percent)
 	}
-	// Status: 300000 remaining over 7 months-left (6 full months out, plus
-	// the current one, MonthsLeftInclusive's own counting rule) needs
+	// Status: 300000 remaining over 7 months-left (6 full months out plus the
+	// current one, MonthsLeftInclusive's counting rule) needs
 	// ceil(300000/7) = 42858/month, comfortably under the 100000 planned --
-	// on_track, deterministically, regardless of which day of the month this
-	// test happens to run on.
+	// on_track regardless of which day of the month this test runs on.
 	if got.Status != "on_track" {
 		t.Fatalf("status = %q, want on_track", got.Status)
 	}
@@ -345,8 +331,8 @@ func TestGoalListReflectsRealDerivedFigures(t *testing.T) {
 	}
 }
 
-// TestGoalCreateDefaultsCurrencyToHouseholdPrimary is the brief's "POST
-// /goals without currency stores the household's primary" case.
+// TestGoalCreateDefaultsCurrencyToHouseholdPrimary: POST /goals without a
+// currency stores the household's primary.
 func TestGoalCreateDefaultsCurrencyToHouseholdPrimary(t *testing.T) {
 	env := newTestEnv(t)
 	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
@@ -360,10 +346,9 @@ func TestGoalCreateDefaultsCurrencyToHouseholdPrimary(t *testing.T) {
 	}
 }
 
-// TestGoalCreateInvalidCurrencyIs422 is the brief's "ZZZ -> 422" case:
-// domain.ParseCurrency refuses an unknown code, and MapDomainError's existing
-// ErrInvalidMoney case (shared with accounts and households) answers
-// INVALID_CURRENCY.
+// TestGoalCreateInvalidCurrencyIs422 pins domain.ParseCurrency refusing an
+// unknown code: MapDomainError's ErrInvalidMoney case (shared with accounts
+// and households) answers INVALID_CURRENCY.
 func TestGoalCreateInvalidCurrencyIs422(t *testing.T) {
 	env := newTestEnv(t)
 	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
@@ -375,9 +360,9 @@ func TestGoalCreateInvalidCurrencyIs422(t *testing.T) {
 	assertErrorResponse(t, rec, http.StatusUnprocessableEntity, "INVALID_CURRENCY")
 }
 
-// TestGoalCreateInvalidTargetMonthIs400 pins the brief's INVALID_MONTH/400
-// shape -- the same status budget_api_test.go's TestBudgetMalformedMonthIs400
-// pins for the {month} path segment, here for a body field instead.
+// TestGoalCreateInvalidTargetMonthIs400 pins the INVALID_MONTH/400 shape --
+// the same status budget_api_test.go's TestBudgetMalformedMonthIs400 pins
+// for the {month} path segment, here for a body field instead.
 func TestGoalCreateInvalidTargetMonthIs400(t *testing.T) {
 	env := newTestEnv(t)
 	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
@@ -389,9 +374,9 @@ func TestGoalCreateInvalidTargetMonthIs400(t *testing.T) {
 	assertErrorResponse(t, rec, http.StatusBadRequest, "INVALID_MONTH")
 }
 
-// TestGoalCreateNullTargetMonthIsDateless is the brief's "targetMonth: null
-// on create is accepted" case: a goal with no target date is a real, valid
-// state (status "none"), not an error.
+// TestGoalCreateNullTargetMonthIsDateless: targetMonth null on create is
+// accepted -- a goal with no target date is a real, valid state (status
+// "none"), not an error.
 func TestGoalCreateNullTargetMonthIsDateless(t *testing.T) {
 	env := newTestEnv(t)
 	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
@@ -408,9 +393,9 @@ func TestGoalCreateNullTargetMonthIsDateless(t *testing.T) {
 	}
 }
 
-// TestGoalCreateDuplicateNameIs409 is the brief's "duplicate name -> 409
-// GOAL_NAME_TAKEN" case against another LIVE goal: the details object carries
-// no archived-goal hint, because there is no archived goal to restore.
+// TestGoalCreateDuplicateNameIs409: a duplicate of another LIVE goal is 409
+// GOAL_NAME_TAKEN, and the details object carries no archived-goal hint,
+// because there is no archived goal to restore.
 func TestGoalCreateDuplicateNameIs409(t *testing.T) {
 	env := newTestEnv(t)
 	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
@@ -428,11 +413,10 @@ func TestGoalCreateDuplicateNameIs409(t *testing.T) {
 	}
 }
 
-// TestGoalCreateNameHeldByArchivedGoalIs409WithRestoreHint is the brief's
-// harder case: a name held by an ARCHIVED goal still 409s (an archived row
-// still occupies its name, GoalRepository.Create's own contract), but the
-// body names the archived goal's id so the New Goal modal can offer Restore
-// instead of a dead end -- the categories gotcha this task's brief calls out.
+// TestGoalCreateNameHeldByArchivedGoalIs409WithRestoreHint: a name held by an
+// archived goal still 409s (an archived row still occupies its name,
+// GoalRepository.Create's contract), but the body names the archived goal's
+// id so the New Goal modal can offer Restore instead of a dead end.
 func TestGoalCreateNameHeldByArchivedGoalIs409WithRestoreHint(t *testing.T) {
 	env := newTestEnv(t)
 	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
@@ -458,9 +442,9 @@ func TestGoalCreateNameHeldByArchivedGoalIs409WithRestoreHint(t *testing.T) {
 	}
 }
 
-// TestGoalPatchClearTargetMonth is the brief's PATCH clearTargetMonth case:
-// a dated goal loses its date, and a follow-up GET shows both the null date
-// and the resulting "none" status.
+// TestGoalPatchClearTargetMonth: PATCH clearTargetMonth -- a dated goal
+// loses its date, and a follow-up GET shows both the null date and the
+// resulting "none" status.
 func TestGoalPatchClearTargetMonth(t *testing.T) {
 	env := newTestEnv(t)
 	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
@@ -503,12 +487,10 @@ func TestGoalPatchClearTargetMonth(t *testing.T) {
 	}
 }
 
-// TestGoalUpdateCurrencyFieldMismatchIs422 closes the brief's first
-// ErrGoalCurrencyImmutable path: GoalUpdate carries no currency field at all
-// (type-enforced immutability inside the service), so the wire is the only
-// place a caller could even attempt this, and this handler must refuse it
-// rather than silently drop it. A matching currency (a defensive client
-// that always echoes what it displayed) is not an error at all.
+// TestGoalUpdateCurrencyFieldMismatchIs422: GoalUpdate has no currency field
+// (immutability enforced in the service), so the wire is the only place a
+// caller could attempt this, and the handler must refuse it, not silently
+// drop it. A matching currency (an echoing client) is not an error.
 func TestGoalUpdateCurrencyFieldMismatchIs422(t *testing.T) {
 	env := newTestEnv(t)
 	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
@@ -533,11 +515,10 @@ func TestGoalUpdateCurrencyFieldMismatchIs422(t *testing.T) {
 	}
 }
 
-// TestGoalArchiveOmitsFromListRestoreUndoesUnion is the brief's archive/
-// restore case, applied to goals: the default list omits an archived goal,
-// ?include_archived=true returns it ALONGSIDE the live ones (a union, not a
-// filter swap -- the same AccountRepository.List contract), restore undoes
-// it, and the summary counts live goals only in BOTH responses.
+// TestGoalArchiveOmitsFromListRestoreUndoesUnion: the default list omits an
+// archived goal; ?include_archived=true returns it alongside the live ones
+// (a union, not a filter swap -- same AccountRepository.List contract);
+// restore undoes it, and the summary counts live goals only in both cases.
 func TestGoalArchiveOmitsFromListRestoreUndoesUnion(t *testing.T) {
 	env := newTestEnv(t)
 	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
@@ -613,11 +594,10 @@ func assertGoalAbsent(t *testing.T, goals []goalDTOBody, id string) {
 	}
 }
 
-// TestGoalContributionValidationErrors is the brief's contribution-write
-// validation table: a zero amount, an archived goal, and a currency that
-// does not match the goal's own -- the second ErrGoalCurrencyImmutable path,
-// this time on POST .../contributions rather than PATCH. A matching currency
-// and an absent one both succeed, proving the check does not over-refuse.
+// TestGoalContributionValidationErrors covers a zero amount, an archived
+// goal, and a mismatched currency -- the second ErrGoalCurrencyImmutable
+// path, here on POST .../contributions rather than PATCH. A matching or
+// absent currency both succeed, proving the check doesn't over-refuse.
 func TestGoalContributionValidationErrors(t *testing.T) {
 	env := newTestEnv(t)
 	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
@@ -679,14 +659,13 @@ func TestGoalContributionValidationErrors(t *testing.T) {
 	})
 }
 
-// TestGoalContributionsListForUnknownGoalIsEmpty pins GoalService.
-// Contributions' real, documented contract: it performs no existence check
-// on the goal id (unlike AddContribution, which calls Get first) --
-// ListContributions simply filters by household_id AND goal_id together and
-// returns whatever matches, zero rows included. A made-up id and a real but
-// contribution-less goal are answered identically, and neither leaks
-// anything about the other: this is deliberate, not a gap Task 8 is meant to
-// close.
+// TestGoalContributionsListForUnknownGoalIsEmpty pins
+// GoalService.Contributions' contract: unlike AddContribution (which calls
+// Get first), it performs no existence check on the goal id --
+// ListContributions filters by household_id AND goal_id and returns whatever
+// matches, zero rows included. A made-up id and a real, contribution-less
+// goal are answered identically, deliberately: neither leaks anything about
+// the other.
 func TestGoalContributionsListForUnknownGoalIsEmpty(t *testing.T) {
 	env := newTestEnv(t)
 	session, _ := env.signIn(t, env.ownerEmail, env.ownerPassword)
@@ -705,9 +684,9 @@ func TestGoalContributionsListForUnknownGoalIsEmpty(t *testing.T) {
 	}
 }
 
-// TestGoalDeleteContributionTwiceIsNotFound is the brief's "deleting it
-// twice -> the not-found shape" case: the first delete succeeds with 204 and
-// no body, the second finds nothing left to remove.
+// TestGoalDeleteContributionTwiceIsNotFound: deleting a contribution twice
+// gives the not-found shape -- the first delete succeeds with 204 and no
+// body, the second finds nothing left to remove.
 func TestGoalDeleteContributionTwiceIsNotFound(t *testing.T) {
 	env := newTestEnv(t)
 	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
@@ -738,12 +717,10 @@ func TestGoalDeleteContributionTwiceIsNotFound(t *testing.T) {
 	assertErrorResponse(t, delRec2, http.StatusNotFound, "NOT_FOUND")
 }
 
-// TestGoalDeleteContributionCrossGoalIsNotFound is the brief's "a
-// contribution belonging to a different goal of the same household -> the
-// not-found shape" case: it proves DeleteContribution checks the (goalID,
-// contributionID) PAIR, not the contribution id alone -- a bug here would
-// let a caller delete any contribution in the household by guessing its id
-// against the wrong goal's URL.
+// TestGoalDeleteContributionCrossGoalIsNotFound proves DeleteContribution
+// checks the (goalID, contributionID) pair, not the contribution id alone --
+// a bug here would let a caller delete any contribution in the household by
+// guessing its id against the wrong goal's URL.
 func TestGoalDeleteContributionCrossGoalIsNotFound(t *testing.T) {
 	env := newTestEnv(t)
 	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)

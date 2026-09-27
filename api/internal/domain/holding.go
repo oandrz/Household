@@ -6,14 +6,10 @@ import (
 	"time"
 )
 
-// InstrumentKind is what sort of thing a holding is. It decides nothing about
-// the arithmetic -- gold and a share are folded identically -- and exists so a
-// screen can group and label, and so "other" has a name rather than being the
-// absence of one.
-//
-// A holding the household cannot express as a quantity at a unit price is
-// recorded as "other" with a quantity of one, so that there is a single
-// arithmetic path through this package rather than a second one for lump sums.
+// InstrumentKind labels a holding for display only; it decides no arithmetic,
+// since gold and a share fold identically. A holding that can't be priced as a
+// quantity at a unit price is recorded as "other" at a quantity of one,
+// keeping a single arithmetic path rather than a second for lump sums.
 type InstrumentKind string
 
 const (
@@ -22,10 +18,9 @@ const (
 	InstrumentOther InstrumentKind = "other"
 )
 
-// ParseInstrumentKind refuses anything it does not recognise. The default is
-// the point: this value arrives from a database column or a request body, so
-// an unrecognised one is refused rather than carried further -- the same rule
-// ParseContributionSource and ParseTransactionKind follow.
+// ParseInstrumentKind refuses anything it does not recognise -- a value from a
+// database column or a request body is refused, not carried further, the same
+// rule ParseContributionSource and ParseTransactionKind follow.
 func ParseInstrumentKind(s string) (InstrumentKind, error) {
 	switch InstrumentKind(s) {
 	case InstrumentStock:
@@ -39,10 +34,9 @@ func ParseInstrumentKind(s string) (InstrumentKind, error) {
 	}
 }
 
-// HoldingEventKind is which direction a holding event moved. There are exactly
-// two, and income (a dividend) is deliberately not among them: income does not
-// change what is held or what it cost, so folding it here would corrupt the
-// average. It arrives with the period report, on its own footing.
+// HoldingEventKind is which direction a holding event moved (exactly two
+// values). Income (a dividend) is deliberately not among them: folding it in
+// would corrupt the average, so it arrives separately with the period report.
 type HoldingEventKind string
 
 const (
@@ -62,16 +56,11 @@ func ParseHoldingEventKind(s string) (HoldingEventKind, error) {
 }
 
 // Holding is one thing a household owns some of, inside one investment
-// account.
-//
-// Currency is the holding's own, not the household's, for the reason goals
-// carry theirs (00007_goals.sql): a holding accumulates for years, and letting
-// a primary-currency change restate its cost would restate every event behind
-// it. A US stock inside a Singapore brokerage is the ordinary case, not the
-// exotic one.
-//
-// Unit is what one of it is called -- "share", "gram", "unit". It is a label
-// for a screen and nothing computes with it.
+// account. Currency is the holding's own, not the household's, the same reason
+// goals carry theirs: a primary-currency change restating a holding's cost
+// would restate every event behind it, and a US stock in a Singapore brokerage
+// is the ordinary case. Unit is a display label only ("share", "gram", "unit")
+// that nothing computes with.
 type Holding struct {
 	ID          string
 	HouseholdID string
@@ -85,17 +74,12 @@ type Holding struct {
 
 func (h Holding) IsArchived() bool { return h.ArchivedAt != nil }
 
-// HoldingEvent is one acquisition or one disposal.
-//
-// Amount is the whole event, not a unit price: what the lot cost, or what the
-// sale brought in. That is the figure the owner's bank statement shows, and a
-// unit price divided out of it would round before anything else got the chance.
-//
-// PrimaryAmount is the same event in the household's primary currency. It is
-// nil when the holding is already in that currency, and required when it is
-// not -- exactly the contract Transaction.ReceivedAmount carries, including the
-// reason: storing it in the same-currency case invites the two figures to
-// disagree later with nothing to say which is true.
+// HoldingEvent is one acquisition or one disposal. Amount is the whole event,
+// not a unit price -- the figure on the owner's bank statement; dividing a
+// unit price out of it would round early. PrimaryAmount is the same event in
+// the household's currency: nil when the holding is already in that currency,
+// required otherwise, so the two figures can't disagree -- the same contract
+// Transaction.ReceivedAmount carries.
 type HoldingEvent struct {
 	ID            string
 	HoldingID     string
@@ -130,15 +114,12 @@ func (e HoldingEvent) Validate(holdingCurrency, primaryCurrency string) error {
 	return validatePrimaryAmount(e.PrimaryAmount, holdingCurrency, primaryCurrency)
 }
 
-// validatePrimaryAmount is the cross-currency rule both a holding event and a
-// valuation obey, in one place so the two cannot drift apart. It is the same
-// contract Transaction.ReceivedAmount carries: the primary-currency figure is
-// required exactly when it is a different number from the native one, and
-// refused when it would merely duplicate it.
-//
-// The figure is stored rather than a rate because this product has no dated
-// rate source -- and because what the owner actually knows is the amount that
-// left their bank, not the ratio behind it.
+// validatePrimaryAmount is the cross-currency rule an event and a valuation
+// both obey, one place so they can't drift -- required when the primary figure
+// differs from the native one, refused when it would just duplicate it
+// (Transaction.ReceivedAmount's contract). Stored as a figure, not a rate: no
+// dated rate source exists, and the owner knows the amount that left their
+// bank, not the ratio.
 func validatePrimaryAmount(primary *Money, holdingCurrency, primaryCurrency string) error {
 	if holdingCurrency == primaryCurrency {
 		if primary != nil {
@@ -159,16 +140,12 @@ func validatePrimaryAmount(primary *Money, holdingCurrency, primaryCurrency stri
 	return nil
 }
 
-// Valuation is what one unit of a holding was worth on a given day. It is the
-// other half of what a portfolio screen needs: Position says how much is held
-// and what it cost, a Valuation says what it is worth now.
-//
-// UnitPrice is per unit, unlike HoldingEvent.Amount which is the whole event.
-// A price is genuinely per-unit -- it is what the owner reads off a screen --
-// whereas a lot's cost is the total that left their account.
-//
-// AsOf is the day the price was true, not the day it was typed. The two differ
-// whenever someone backfills a quarter, and the report needs the former.
+// Valuation is what one unit of a holding was worth on a given day -- the
+// other half a portfolio screen needs alongside Position. UnitPrice is per
+// unit, unlike HoldingEvent.Amount which is the whole event: it's what the
+// owner reads off a screen, not the account total. AsOf is the day the price
+// was true, not typed -- they differ when someone backfills a quarter, and the
+// report needs the former.
 type Valuation struct {
 	ID               string
 	HoldingID        string
@@ -197,13 +174,11 @@ func (v Valuation) MarketValue(held Quantity) (Money, error) {
 	return held.Value(v.UnitPrice)
 }
 
-// PrimaryMarketValue is the same figure in the household's own currency, from
-// the price the owner recorded in that currency -- never from the native price
-// with a rate applied, because this product has no dated rate source.
-//
-// A nil PrimaryUnitPrice means the holding is already in the household's
-// currency, the contract validatePrimaryAmount enforces on the way in, so the
-// native price is the primary one.
+// PrimaryMarketValue is the household-currency figure the owner actually
+// recorded, never the native price with a rate applied -- this product has no
+// dated rate source. A nil PrimaryUnitPrice means the holding is already in
+// the household's currency (validatePrimaryAmount's contract), so the native
+// price serves as the primary one.
 func (v Valuation) PrimaryMarketValue(held Quantity) (Money, error) {
 	if v.PrimaryUnitPrice != nil {
 		return held.Value(*v.PrimaryUnitPrice)
@@ -212,18 +187,14 @@ func (v Valuation) PrimaryMarketValue(held Quantity) (Money, error) {
 }
 
 // Position is what a holding's events add up to: how much is still held, what
-// that remainder cost, and what selling has already realised. Each of those
-// costs is carried TWICE -- once in the holding's own currency, once in the
-// household's -- because the second cannot be derived from the first
-// afterwards. Two lots bought at the same USD price under different exchange
-// rates blend to an SGD cost per unit that is neither rate, and no single rate
-// applied to the USD figure reproduces it.
-//
-// Cost is the cost of what is STILL held, not of everything ever bought -- the
-// part belonging to sold units has already moved into Realised. That is what
-// makes Cost divided by Held the average cost at any moment. CostPrimary and
-// RealisedPrimary say the same thing about the household's own money, which is
-// the figure that answers "did this make us richer".
+// that cost, and what's already been realised by selling. Cost is carried
+// TWICE -- native and household currency -- since the second can't be derived
+// from the first afterwards (two lots at the same USD price under different
+// exchange rates blend to an SGD cost per unit matching neither rate). Cost is
+// only what is STILL held; the sold share has moved into Realised, so
+// Cost/Held is the average cost at any moment. CostPrimary and RealisedPrimary
+// say the same thing in the household's own money -- the figure answering "did
+// this make us richer".
 type Position struct {
 	Held     Quantity
 	Cost     Money
@@ -233,10 +204,9 @@ type Position struct {
 	RealisedPrimary Money
 }
 
-// costPool is one currency's side of the fold. The fold keeps two and runs
-// identical arithmetic on each, so this is a type rather than the same eight
-// lines written out twice -- the disposal branch in particular is where the
-// average-cost basis lives, and two copies of it is two places to drift.
+// costPool is one currency's side of the fold, kept as a type rather than
+// duplicated eight-line arithmetic -- the disposal branch holds the
+// average-cost basis, and two copies would be two places to drift.
 type costPool struct {
 	cost     Money
 	realised Money
@@ -251,10 +221,10 @@ func (p costPool) acquire(amount Money) (costPool, error) {
 	return p, nil
 }
 
-// dispose moves the share of the pool belonging to the units leaving it out of
-// cost and into realised. part and whole are the quantity sold and the
-// quantity held BEFORE the sale, so the average cost of what remains is
-// unchanged -- the asymmetry average-cost basis depends on.
+// dispose moves the sold units' share of the pool from cost into realised.
+// part and whole are the quantity sold and held BEFORE the sale, so what
+// remains keeps the same average cost -- the asymmetry average-cost basis
+// depends on.
 func (p costPool) dispose(proceeds Money, part, whole Quantity) (costPool, error) {
 	costOut, err := p.cost.Prorate(part, whole)
 	if err != nil {
@@ -277,14 +247,11 @@ func (p costPool) dispose(proceeds Money, part, whole Quantity) (costPool, error
 }
 
 // inPrimary is the event's amount in the household's own currency: the
-// separately recorded one when the holding is in some other currency, and the
-// native amount itself when it is not.
-//
-// A nil PrimaryAmount means "this holding is already in the household's
-// currency" -- the contract validatePrimaryAmount enforces on the way in. If a
-// row ever reaches here with a nil primary amount and a native currency that
-// is NOT the household's, the Add in the pool refuses it rather than silently
-// treating dollars as Singapore dollars.
+// recorded one when the holding is in another currency, the native amount
+// otherwise. A nil PrimaryAmount means the holding is already in the
+// household's currency (validatePrimaryAmount's contract) -- a row reaching
+// here with a nil primary amount and a different native currency is refused by
+// the pool's Add, not silently treated as the household's own.
 func (e HoldingEvent) inPrimary() Money {
 	if e.PrimaryAmount != nil {
 		return *e.PrimaryAmount
@@ -292,18 +259,14 @@ func (e HoldingEvent) inPrimary() Money {
 	return e.Amount
 }
 
-// Position folds the events into what they add up to, on the average-cost basis
-// the PRD pins (not FIFO: "the first gram" is not a thing that exists).
-//
-// primaryCurrency is the household's own, and is what the second pool is
-// denominated in. It is a parameter rather than a field on Holding because a
-// household's primary currency can change while a holding's cannot -- the
-// figures are recomputed under the new one, not restated.
-//
-// It sorts by date itself rather than trusting the caller. A repository
-// returning rows in insertion order, or a caller appending a backdated
-// correction, would otherwise produce a different answer for the same holding,
-// and the difference would be silent.
+// Position folds the events into what they add up to, on the average-cost
+// basis the PRD pins (not FIFO -- "the first gram" isn't a thing).
+// primaryCurrency is a parameter, not a field on Holding, because a
+// household's currency can change while a holding's cannot, so figures are
+// recomputed under the new one, not restated. It sorts by date itself rather
+// than trusting the caller: rows in insertion order, or a caller appending a
+// backdated correction, would otherwise give a different, silently wrong
+// answer for the same holding.
 func (h Holding) Position(events []HoldingEvent, primaryCurrency string) (Position, error) {
 	held, err := NewQuantity(0)
 	if err != nil {

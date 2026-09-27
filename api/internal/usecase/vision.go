@@ -7,13 +7,11 @@ import (
 	"github.com/andreasoentoro/hearth/api/internal/domain"
 )
 
-// MeasureView is one line under a pillar, with every figure the screen shows
-// already decided. HasFigure false is the whole of the broken-link contract:
-// the label renders with a short explanation and NO number, because a zero
-// would be a claim -- the same rule Accounts applies when a primary-currency
-// change leaves net worth uncomputable. Current, Target and Percent must
-// never be read when HasFigure is false; toMeasureView leaves them at their
-// zero value on purpose, not as a placeholder.
+// MeasureView is one line under a pillar, every figure pre-decided.
+// HasFigure false is the whole broken-link contract: label and short
+// explanation, no number -- a zero would be a false claim (the same rule
+// Accounts applies to an uncomputable net worth). Current, Target and
+// Percent then sit at zero on purpose, and must never be read.
 type MeasureView struct {
 	Label     string
 	Kind      domain.MeasureKind
@@ -35,7 +33,7 @@ type PillarView struct {
 // VisionView is the whole screen in one response. Version travels with it
 // because every save must send back the version it read -- 0 for a year
 // that had none, which is what makes the first save a create rather than a
-// blind overwrite (Task 8).
+// blind overwrite.
 type VisionView struct {
 	Year        int
 	Theme       string
@@ -67,13 +65,10 @@ func (s *VisionService) CurrentYear() int {
 func (s *VisionService) Get(ctx context.Context, householdID string, year int) (VisionView, error) {
 	v, err := s.visions.Get(ctx, householdID, year)
 	if errors.Is(err, domain.ErrNotFound) {
-		// A year nobody has saved is not a failure to load one -- the empty
-		// state IS the page (spec decision 9). Version 0 travels with it
-		// deliberately: it is what tells the next save (Task 8) that this
-		// is a create rather than a blind overwrite. Pillars and Milestones
-		// are non-nil empty slices, not nil, so the JSON layer (Task 9)
-		// serialises "[]" and never "null" for a collection the frontend
-		// always expects to range over.
+		// A year nobody has saved is not a failure -- the empty state IS the
+		// page. Version 0 tells the next save this is a create, not an
+		// overwrite. Pillars/Milestones are non-nil empty slices, so JSON
+		// serialises "[]", never "null", for what the frontend ranges over.
 		return VisionView{Year: year, Version: 0, Pillars: []PillarView{}, Milestones: []domain.Milestone{}}, nil
 	}
 	if err != nil {
@@ -110,16 +105,12 @@ func (s *VisionService) compose(ctx context.Context, householdID string, v domai
 	}, nil
 }
 
-// Save validates the draft, then replaces the whole document. The household
-// and year come from the caller (the route), never from the body: a request
-// that names another household must not be able to write into it, and the
-// service is where that is settled rather than in each handler.
+// Save validates the draft, then replaces the whole document. Household
+// and year come from the route, never the body -- so a request naming
+// another household can't write into it, settled here, not per handler.
 func (s *VisionService) Save(ctx context.Context, householdID string, year int, draft domain.Vision) (VisionView, error) {
-	// The route's values win over anything the body claims -- this is the
-	// one line standing between a request and writing into a household it
-	// does not belong to. Set before Validate, so a body naming another
-	// household is judged against ITS OWN year/household constraints, not
-	// smuggled past them.
+	// Set before Validate, so a body naming another household is judged
+	// against ITS OWN constraints, not smuggled past them.
 	draft.HouseholdID = householdID
 	draft.Year = year
 
@@ -149,12 +140,10 @@ func linkedGoalIDs(v domain.Vision) []string {
 	return ids
 }
 
-// toMeasureView decides, once, whether a measure has a figure to show at
-// all. Kind arrives from a database column this layer did not construct, so
-// the switch fails closed: anything it does not recognise -- including
-// domain.MeasureBroken, the shape ON DELETE SET NULL leaves behind -- and
-// any linked measure whose goal ProgressByIDs did not return, renders the
-// label alone rather than guessing a shape for data it cannot vouch for.
+// toMeasureView decides, once, whether a measure has a figure to show.
+// Kind is untrusted (a database column this layer didn't construct), so an
+// unrecognised Kind (domain.MeasureBroken, from ON DELETE SET NULL) or an
+// unresolved linked goal renders the label alone, never a guessed shape.
 func toMeasureView(m domain.Measure, progress map[string]GoalProgress) MeasureView {
 	view := MeasureView{Label: m.Label, Kind: m.Kind}
 	switch m.Kind {
@@ -175,10 +164,8 @@ func toMeasureView(m domain.Measure, progress map[string]GoalProgress) MeasureVi
 		view.GoalName = found.Name
 		view.Met = found.Percent >= 100
 	default:
-		// domain.MeasureBroken, and any Kind this layer has never heard of.
-		// Returning here rather than falling into a typed 0/0 or a linked
-		// 0% is the whole point of failing closed on a value this layer
-		// did not construct.
+		// domain.MeasureBroken and any unknown Kind land here, not a typed
+		// 0/0 or linked 0% -- the whole point of failing closed on this.
 		return view
 	}
 	return view

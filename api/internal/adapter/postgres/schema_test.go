@@ -105,10 +105,9 @@ func TestSignupsSchema(t *testing.T) {
 	})
 }
 
-// The reason avatar_initial was widened: cases.Upper(language.Und) (used by
-// initialOf, not strings.ToUpper -- the standard library applies simple case
-// mapping only and leaves 'ß' unchanged) can grow a rune, and char(1) rejects
-// the result outright.
+// avatar_initial was widened because initialOf uses cases.Upper(language.Und),
+// not strings.ToUpper (which leaves 'ß' unchanged) -- that can grow a rune,
+// and char(1) would reject the result.
 func TestAvatarInitialHoldsAMultiCharacterUppercase(t *testing.T) {
 	db := openTestDB(t)
 	pool := db.Pool()
@@ -120,9 +119,8 @@ func TestAvatarInitialHoldsAMultiCharacterUppercase(t *testing.T) {
 	}
 }
 
-// TestAccountsSchema asserts what the accounts table's constraints promise
-// beyond what TestAccountsRefusesANegativeLiability already covers: that the
-// migration actually ran, and that ownership is optional while household
+// TestAccountsSchema pins what TestAccountsRefusesANegativeLiability doesn't:
+// that the migration ran, and that ownership is optional while household
 // membership is not -- the nullability half of "NULL means shared" in
 // domain.Account's doc comment.
 func TestAccountsSchema(t *testing.T) {
@@ -191,9 +189,8 @@ func TestAccountsRefusesANegativeLiability(t *testing.T) {
 }
 
 // TestTransactionSchemaRefusesNonsenseRows pins the constraints that make a
-// wrong balance unrepresentable. Each insert below is a row the service also
-// refuses; the database is the second line of defence, and a second line
-// nobody tests is decoration.
+// wrong balance unrepresentable: each case below is also refused by the
+// service, but an untested second line of defence is decoration.
 func TestTransactionSchemaRefusesNonsenseRows(t *testing.T) {
 	db := openTestDB(t)
 	ctx := context.Background()
@@ -213,11 +210,10 @@ func TestTransactionSchemaRefusesNonsenseRows(t *testing.T) {
 	}
 	from, to := newAccount("DBS"), newAccount("OCBC")
 
-	// A real category, because the "a transfer carrying a category" case below
-	// needs a non-NULL category_id to exercise transfer_has_no_category at
-	// all. A subselect over an empty table yields NULL, the constraint is
-	// satisfied, the insert succeeds -- and the subtest fails claiming the
-	// database accepted something it never saw.
+	// A real category: the "transfer carrying a category" case needs a
+	// non-NULL category_id to exercise transfer_has_no_category. A subselect
+	// over an empty table would yield NULL, satisfying the constraint
+	// vacuously and making the insert succeed for the wrong reason.
 	var categoryID string
 	if err := db.Pool().QueryRow(ctx,
 		`INSERT INTO categories (household_id, name, kind, sort_order)
@@ -230,10 +226,9 @@ func TestTransactionSchemaRefusesNonsenseRows(t *testing.T) {
 		name string
 		sql  string
 		args []any
-		// constraint is the name the violation must carry, not just the fact
-		// that some insert failed. Later tasks map this exact name to a
-		// domain error (see the brief's Interfaces section); a rename here
-		// would leave every subtest green while breaking that mapping.
+		// constraint is the exact violation name, not just that the insert
+		// failed: a check that only looks for "some error" stays green if this
+		// rule is dropped and a different check happens to refuse the row.
 		constraint string
 	}{
 		{
@@ -301,9 +296,9 @@ func TestTransactionSchemaRefusesNonsenseRows(t *testing.T) {
 			          from_account_id, amount_minor, amount_currency)
 			      VALUES ($1, 'expense', DATE '2026-07-18', 'Free', $2, 0, 'SGD')`,
 			args: []any{householdID, from},
-			// Not one of the named constraints in the brief's Interfaces
-			// section: this is the plain inline CHECK on amount_minor, and
-			// Postgres names an unlabelled column check <table>_<column>_check.
+			// Not a named constraint: this is the plain inline CHECK on
+			// amount_minor, and Postgres names an unlabelled column check
+			// <table>_<column>_check.
 			constraint: "transactions_amount_minor_check",
 		},
 	}
@@ -360,11 +355,10 @@ func TestBudgetsSchema(t *testing.T) {
 	})
 
 	t.Run("expected_income_minor is nullable and has no default", func(t *testing.T) {
-		// A DEFAULT 0 column is just as "nullable" as one with no default --
-		// is_nullable alone can't tell them apart, and the whole point of the
-		// column (see the migration's comment) is that NULL and zero mean
-		// different things. Assert column_default is NULL, then prove it with
-		// a real insert that omits the column and reads NULL back.
+		// A DEFAULT 0 column looks just as "nullable" as one with no default,
+		// but the whole point of this column is that NULL and zero mean
+		// different things. Assert column_default is NULL, then insert a row
+		// that omits the column and confirm NULL comes back.
 		var columnDefault *string
 		if err := pool.QueryRow(ctx,
 			`SELECT column_default FROM information_schema.columns
@@ -426,20 +420,18 @@ func TestBudgetsSchema(t *testing.T) {
 
 // TestBudgetLinesSchema pins budget_lines' shape: one cap per category per
 // budget, a non-negative cap, cascading with its parent budget, and a
-// category reference that refuses to cascade -- categories archive, they
-// don't delete, so a line pointing at one must block the delete instead of
-// silently disappearing.
+// category reference that blocks delete instead of cascading -- categories
+// archive, they never delete.
 func TestBudgetLinesSchema(t *testing.T) {
 	db := openTestDB(t)
 	pool := db.Pool()
 	ctx := context.Background()
 
 	// newBudget and newCategory take the caller's own *testing.T (like
-	// insertTestHousehold does) rather than closing over TestBudgetLinesSchema's
-	// t. A helper that calls t.Fatalf on the parent test, invoked from inside
-	// a t.Run subtest, unwinds the wrong goroutine's test: the subtest never
-	// gets a PASS/FAIL of its own and siblings can be skipped. See the RED
-	// evidence in the task report.
+	// insertTestHousehold does) instead of closing over the outer t. A
+	// helper that calls t.Fatalf on the parent test from inside a t.Run
+	// subtest unwinds the wrong goroutine: the subtest gets no PASS/FAIL of
+	// its own, and siblings can be skipped.
 	newBudget := func(t *testing.T, householdID string, month string) string {
 		t.Helper()
 		var id string
@@ -548,10 +540,10 @@ func TestBudgetLinesSchema(t *testing.T) {
 	})
 }
 
-// TestGoalsSchema pins goals' shape: the table and its columns exist as
-// 00007 declares, a household's goal names are unique so an archived goal's
-// name collision can offer restore instead of a bare 409 (see the
-// migration's comment), and deleting a household cascades to its goals.
+// TestGoalsSchema pins goals' shape: the table and its columns match
+// migration 00007, a household's goal names are unique so a name collision
+// on an archived goal can offer restore instead of a bare 409, and deleting
+// a household cascades to its goals.
 func TestGoalsSchema(t *testing.T) {
 	db := openTestDB(t)
 	pool := db.Pool()
@@ -635,10 +627,10 @@ func TestGoalsSchema(t *testing.T) {
 
 // TestGoalContributionsSchema pins goal_contributions' shape: the table and
 // its columns exist, the three CHECKs that keep a row honest hold, the
-// partial unique index backstopping RollOverToGoal is real (and genuinely
-// partial -- rows that are not rollovers must not collide with each other),
-// and deleting a goal still referenced by a contribution is refused, because
-// a goal is archived, never deleted (see the migration's comment).
+// partial unique index backstopping RollOverToGoal is real and genuinely
+// partial (non-rollover rows must not collide with each other), and
+// deleting a goal still referenced by a contribution is refused -- goals
+// archive, they never delete.
 func TestGoalContributionsSchema(t *testing.T) {
 	db := openTestDB(t)
 	pool := db.Pool()
@@ -755,13 +747,11 @@ func TestGoalContributionsSchema(t *testing.T) {
 			t.Fatalf("same household, different month: %v", err)
 		}
 		// Two manual contributions -- source_budget_month NULL on both --
-		// must not collide. This does not distinguish the index's WHERE
-		// source = 'budget_rollover' clause from a plain UNIQUE over the same
-		// two columns: Postgres treats NULL as distinct from NULL either way,
-		// and budget_month_is_a_rollover_thing already forbids a non-NULL
-		// source_budget_month on a non-rollover row, so the predicate is
-		// unreachable by construction -- belt and braces, per the migration's
-		// comment, not a behaviour this test can isolate.
+		// must not collide. This doesn't isolate the index's WHERE clause
+		// from a plain UNIQUE on the same two columns: Postgres treats NULL
+		// as distinct from NULL either way, and the predicate is unreachable
+		// by construction since budget_month_is_a_rollover_thing already
+		// forbids a non-NULL source_budget_month on a non-rollover row.
 		manual := `INSERT INTO goal_contributions (goal_id, household_id, amount_minor, occurred_on, source)
 		          VALUES ($1, $2, 1000, DATE '2026-07-20', 'manual')`
 		if _, err := pool.Exec(ctx, manual, goalID, householdID); err != nil {
@@ -787,11 +777,11 @@ func TestGoalContributionsSchema(t *testing.T) {
 	})
 }
 
-// TestBudgetsRolloverSchema pins the two columns and the CHECK 00007 added to
-// budgets: the rollover stamp is set whole (both columns or neither -- half a
-// stamp is a budget that claims to be rolled over into no goal, or into a
-// goal it never says), and a rolled-over budget still names a real goal, NO
-// ACTION, because goals are never deleted.
+// TestBudgetsRolloverSchema pins budgets' rollover columns and the CHECK
+// migration 00007 added: the stamp is set whole, both columns or neither --
+// half a stamp would claim a rollover into no goal, or into one it never
+// names -- and a rolled-over budget's goal reference is NO ACTION, since
+// goals are never deleted.
 func TestBudgetsRolloverSchema(t *testing.T) {
 	db := openTestDB(t)
 	pool := db.Pool()
@@ -876,11 +866,10 @@ func TestBudgetsRolloverSchema(t *testing.T) {
 }
 
 // TestBillsSchema pins the two constraints bills and bill_payments enforce
-// beyond plain column shape: a NULL next_due is only legal for a settled
-// one-off (see the migration's comment on only_a_one_off_has_no_next_due),
-// and one occurrence of a bill can be paid only once, the belt-and-braces
-// UNIQUE (bill_id, due_on) that backstops BillService's own check against a
-// double-clicked Mark paid.
+// beyond plain column shape: a NULL next_due is legal only for a settled
+// one-off (only_a_one_off_has_no_next_due), and one occurrence can be paid
+// only once -- UNIQUE (bill_id, due_on) backstops BillService's own check
+// against a double-clicked "Mark paid".
 func TestBillsSchema(t *testing.T) {
 	ctx := context.Background()
 	db := openTestDB(t)
@@ -894,11 +883,10 @@ func TestBillsSchema(t *testing.T) {
 		if err == nil {
 			t.Fatal("expected only_a_one_off_has_no_next_due to refuse a monthly bill with no next date")
 		}
-		// Names the constraint, not just any failure -- see the comment on
-		// the equivalent field in TestTransactionSchemaRefusesNonsenseRows: a
-		// later migration that absorbs this case into some other check (a new
-		// NOT NULL column, say) must not leave this subtest green while
-		// silently losing the rule it pins.
+		// Names the constraint, not just any failure -- see the equivalent
+		// field in TestTransactionSchemaRefusesNonsenseRows. A later migration
+		// that absorbs this case into some other check must not leave this
+		// subtest green while silently losing the rule it pins.
 		if !strings.Contains(err.Error(), "only_a_one_off_has_no_next_due") {
 			t.Fatalf("err = %v, want an only_a_one_off_has_no_next_due violation", err)
 		}
@@ -922,10 +910,10 @@ func TestBillsSchema(t *testing.T) {
 	})
 }
 
-// TestRetroSchema pins the three columns later tasks depend on being NULLable
-// or not. mood and completed_at must be nullable -- a draft with no emoji
-// picked yet has no mood, and a draft has no completion time. version must be
-// NOT NULL with a default, because every update path reads it.
+// TestRetroSchema pins three columns' nullability. mood and completed_at
+// must be nullable -- a draft has no emoji picked yet and no completion
+// time. version must be NOT NULL with a default, since every update path
+// reads it.
 func TestRetroSchema(t *testing.T) {
 	ctx := context.Background()
 	db := openTestDB(t)
@@ -951,9 +939,8 @@ func TestRetroSchema(t *testing.T) {
 }
 
 // seedHouseholdAndAccount inserts the minimum household and account bills'
-// two required foreign keys need (household_id and pay_from_account_id), for
-// tests that only care about valid IDs and have no other requirement on
-// either row.
+// two required foreign keys need (household_id, pay_from_account_id), for
+// tests that only care about valid IDs.
 func seedHouseholdAndAccount(t *testing.T, ctx context.Context, db *postgres.DB) (householdID, accountID string) {
 	t.Helper()
 	householdID = insertTestHousehold(t, db)
@@ -989,9 +976,8 @@ func insertBill(t *testing.T, ctx context.Context, db *postgres.DB, householdID,
 }
 
 // columnNullability maps a table's columns to information_schema's
-// is_nullable ("YES"/"NO"), so a schema test can assert an entire column set
-// -- names and nullability together -- in one query instead of one column at
-// a time.
+// is_nullable ("YES"/"NO"), so a test can assert a whole column set -- names
+// and nullability together -- in one query instead of one at a time.
 func columnNullability(t *testing.T, pool *pgxpool.Pool, table string) map[string]string {
 	t.Helper()
 	ctx := context.Background()

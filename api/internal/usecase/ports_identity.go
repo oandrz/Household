@@ -13,22 +13,15 @@ import (
 
 // StoredUser carries the password hash, which never leaves the usecase layer.
 //
-// users.password_hash is nullable in the database, and sqlc generates *string
-// for it — but PasswordHash here is a plain string by design, not an unwritten
-// gap the Postgres implementation has to paper over. The convention, both
-// directions: SQL NULL maps to "", and "" maps to SQL NULL. A user created
-// without credentials (e.g. an invited member with no password yet) has
-// PasswordHash == "", and AuthService.SignIn already treats that empty string
-// as "cannot sign in" — the repository must not turn a NULL into any other
-// sentinel.
-//
-// The embedded domain.User.Email follows the identical convention, for the
-// identical reason: users.email is also nullable (and citext UNIQUE, so
-// storing "" rather than NULL for two credential-less members would collide
-// on the unique index where two NULLs do not). A member created without an
-// email of their own — the same invited-member-with-no-login case — has
-// Email == "", and the repository must round-trip SQL NULL to "" and "" to
-// SQL NULL there exactly as it does for PasswordHash.
+// PasswordHash and the embedded domain.User.Email follow one convention:
+// their columns (password_hash, email) are nullable, but sqlc's *string is
+// deliberately not used here — SQL NULL maps to "", and "" maps to SQL
+// NULL, in both directions. A repository must never turn a NULL into any
+// other sentinel. AuthService.SignIn already treats PasswordHash == "" as
+// "cannot sign in" for a credential-less member (e.g. an invited member
+// with no password yet); users.email is also citext UNIQUE, so storing ""
+// rather than NULL for two such members would collide where two NULLs
+// would not.
 type StoredUser struct {
 	domain.User
 	PasswordHash string
@@ -37,12 +30,10 @@ type StoredUser struct {
 type UserRepository interface {
 	ByEmail(ctx context.Context, email string) (StoredUser, error)
 	ByID(ctx context.Context, id string) (StoredUser, error)
-	// Create writes email and passwordHash following the same "" <-> NULL
-	// convention as StoredUser.PasswordHash (and, by the same reasoning,
-	// StoredUser's embedded domain.User.Email): passing "" for either stores
-	// SQL NULL, not an empty string in the column. Children (members with no
-	// login of their own) are created this way, with email == "" and
-	// passwordHash == "".
+	// Create writes email and passwordHash following StoredUser's "" <-> NULL
+	// convention: passing "" for either stores SQL NULL, not an empty string
+	// in the column. Children (members with no login of their own) are
+	// created this way, with email == "" and passwordHash == "".
 	Create(ctx context.Context, email, passwordHash, displayName string) (domain.User, error)
 	SetPasswordHash(ctx context.Context, userID, hash string) error
 	// CreateWithMembership creates the user and their membership in one
@@ -54,12 +45,11 @@ type UserRepository interface {
 		m domain.Membership) (domain.User, domain.Membership, error)
 	// FindOrphanedChild returns the credential-less user (no email, no
 	// password) with this exact display name that currently holds no
-	// membership anywhere, if one exists. It reports domain.ErrNotFound when
-	// there is none. This is the state removing a membership leaves behind
-	// without deleting the user row underneath it -- a credential-less
-	// member has no email for a unique constraint to protect the way a real
-	// address does, so nothing else stops a second create under the same
-	// name from silently duplicating one.
+	// membership anywhere, or domain.ErrNotFound if there is none. This is
+	// the state removing a membership leaves behind without deleting the
+	// user row: a credential-less member has no email for a unique
+	// constraint to protect, so nothing else stops a second create under the
+	// same name from silently duplicating one.
 	FindOrphanedChild(ctx context.Context, displayName string) (domain.User, error)
 }
 
@@ -137,12 +127,10 @@ type LoginAttemptRepository interface {
 	FailuresSinceForEmail(ctx context.Context, email string, since time.Time) ([]time.Time, error)
 	ClearFailures(ctx context.Context, householdID string) error
 	// Prune deletes attempts older than before, including the
-	// NULL-household_id rows an unknown-address attempt records -- which
-	// ClearFailures cannot reach, because it is scoped WHERE household_id = $1
-	// and that never matches NULL.
-	//
-	// The caller is responsible for a cutoff well outside
-	// domain.LockoutPolicy.Window. Deleting a row still inside that window
-	// would clear a live lockout: a security regression dressed as a cleanup.
+	// NULL-household_id rows an unknown-address attempt records, which
+	// ClearFailures cannot reach (it is scoped WHERE household_id = $1,
+	// which never matches NULL). The caller must pass a cutoff well outside
+	// domain.LockoutPolicy.Window -- deleting a row still inside that window
+	// would clear a live lockout, a security regression dressed as a cleanup.
 	Prune(ctx context.Context, before time.Time) (int64, error)
 }

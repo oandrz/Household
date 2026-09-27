@@ -22,19 +22,11 @@ type SignInFailedError struct {
 
 func (e *SignInFailedError) Error() string { return "sign in failed" }
 
-// Unwrap distinguishes ErrHouseholdLocked from ErrInvalidCredentials, and
-// that distinction is intentional, not a leak this task's indistinguishability
-// work missed: the design's sign-in screen deliberately shows the household a
-// different message ("we've locked the household for 15 minutes") than it
-// shows a simple wrong password, and the spec assigns 401 to one and 423 to
-// the other on purpose. Whoever is looking at the failed sign-in screen is
-// meant to learn which case they're in — what the indistinguishability work
-// protects against is a caller *guessing at an address* learning whether that
-// address exists or belongs to a locked household, which lives entirely in
-// AttemptsRemaining/Locked/LockedUntil being computed identically across
-// branches, not in collapsing the two errors into one HTTP status. Task 16's
-// handler should map these to 401 and 423 respectively; do not "fix" this
-// into a single status.
+// Unwrap tells ErrHouseholdLocked from ErrInvalidCredentials on purpose: the
+// sign-in screen shows each its own message, so the handler answers 401 and
+// 423. Don't collapse them into one status. What must not leak is whether a
+// guessed address exists or is locked, and that is guarded by computing
+// AttemptsRemaining, Locked and LockedUntil identically on every branch.
 func (e *SignInFailedError) Unwrap() error {
 	if e.Locked {
 		return domain.ErrHouseholdLocked
@@ -64,10 +56,9 @@ type AuthService struct {
 	decoyHash string
 }
 
-// NewAuthService fills in a zero-valued Policy. A LockoutPolicy{} never locks
-// anyone out while reporting AttemptsRemaining as 0 — an inconsistent state
-// that would silently disable the lockout while the UI showed "0 tries left".
-// A struct literal that forgets the field is the obvious way to reach it.
+// NewAuthService fills in a zero-valued Policy -- LockoutPolicy{} never
+// locks while reporting "0 tries left", a silent, inconsistent disable that
+// a forgotten field in a struct literal reaches easily.
 func NewAuthService(d AuthDeps) *AuthService {
 	if d.Policy.MaxAttempts == 0 {
 		d.Policy = domain.DefaultLockoutPolicy()
@@ -75,24 +66,19 @@ func NewAuthService(d AuthDeps) *AuthService {
 	return &AuthService{d: d}
 }
 
-// fallbackDecoyHash is used only if generating a real decoy hash through the
-// configured Hasher ever fails (practically: Hash's entropy source is
-// exhausted). NewAuthService cannot fail and must not silently skip the
-// timing mitigation just because the one-time decoy generation had a bad
-// day, so this constant guarantees decoy() always has *something* to Verify
-// against. It is built once, right here, so it can never itself error.
+// fallbackDecoyHash covers the rare case Hasher.Hash fails (entropy
+// exhausted): NewAuthService can't fail and mustn't silently skip the
+// timing mitigation, so this constant guarantees decoy() always has
+// something to Verify against, and being a literal, can't itself error.
 const fallbackDecoyHash = "decoy-hash-used-only-if-generating-a-real-one-failed"
 
-// decoy returns an encoded hash to run Hasher.Verify against on every SignIn
-// path that would otherwise return without ever calling Verify. Against a
-// real hasher (argon2id in production) a genuine verification costs tens to
-// hundreds of milliseconds; a branch that skips it is trivially
-// distinguishable from one that doesn't by timing alone, which defeats the
-// same indistinguishability the error type and the attempts countdown exist
-// to protect. decoy() is generated lazily against the service's own Hasher
-// the first time it's needed (so it costs the same as the paths it's
-// standing in for) and cached for the life of the service; SignIn always
-// discards the result, since the call exists for its cost, not its answer.
+// decoy returns a hash to run Hasher.Verify against on every SignIn path
+// that would otherwise skip Verify entirely -- a real hasher costs tens to
+// hundreds of milliseconds, and skipping it is a timing tell that defeats
+// the same indistinguishability the error type and attempts countdown
+// protect. Generated lazily against the service's own Hasher (so it costs
+// what the real paths cost) and cached; SignIn always discards the result,
+// since the call exists for its cost, not its answer.
 func (s *AuthService) decoy() string {
 	s.decoyOnce.Do(func() {
 		hash, err := s.d.Hasher.Hash("decoy-password-for-timing-parity")
@@ -105,23 +91,14 @@ func (s *AuthService) decoy() string {
 	return s.decoyHash
 }
 
-// verifyPassword is the one path through which SignIn ever hands a
-// caller-supplied password to the hasher -- decoy or real. It rejects a
-// password over maxPasswordLength (see invite.go) without calling Verify at
-// all: argon2id's cost scales with the size of the string it hashes, so
-// handing an unbounded password to Verify -- even the decoy call, which
-// exists purely for timing parity -- would be exactly the uncapped CPU
-// amplification a length ceiling is meant to close off.
-//
-// This deliberately breaks timing parity for this one case: a too-long
-// password costs nothing to reject, while every other failure costs a real
-// or decoy hash. That is safe rather than a regression of the
-// indistinguishability this file works hard to protect elsewhere, because
-// the asymmetry reveals nothing the caller doesn't already know -- they
-// already know the length of the string they sent. What indistinguishability
-// protects against is a caller *guessing at an address* learning something
-// about the account; nobody learns anything new here that their own input
-// didn't already tell them.
+// verifyPassword is the one path SignIn hands a caller-supplied password
+// to the hasher, decoy or real. It rejects a password over
+// maxPasswordLength before calling Verify at all -- argon2id's cost scales
+// with input size, so an unbounded password would be uncapped CPU
+// amplification. This breaks timing parity for that one case, but safely:
+// the length is something the caller already knows about their own input,
+// and indistinguishability only protects against a caller *guessing an
+// address* learning something new about the account.
 func (s *AuthService) verifyPassword(password, encoded string) bool {
 	if len(password) > maxPasswordLength {
 		return false
@@ -136,20 +113,18 @@ type SignInResult struct {
 	HouseholdID  string
 }
 
-// signInFailedForUnknownAddress is the failure branch shared by an address
-// with no user row at all and a user row with no membership (an ex-member --
-// see SignIn's own comment on the second call site for why that state
-// exists). Both must look identical to a caller probing addresses: the same
-// decoy Hasher.Verify call in the position a real one would occupy, the same
-// address-scoped attempt record and countdown, so neither is distinguishable
-// from the other, or from a real member's wrong password, by timing or by
-// which counter advances.
+// signInFailedForUnknownAddress is the shared failure branch for an
+// address with no user row, and a user row with no membership (an
+// ex-member -- see SignIn's second call site). Both run the same decoy
+// Hasher.Verify, in the position a real one would occupy, and the same
+// address-scoped record/countdown, so neither is distinguishable from the
+// other, or from a real wrong password, by timing or which counter
+// advances.
 func (s *AuthService) signInFailedForUnknownAddress(ctx context.Context, password, email string, now time.Time) (SignInResult, error) {
 	s.verifyPassword(password, s.decoy())
-	// Record the attempt with no household, so guessing at unknown addresses
-	// cannot lock a real household. Then evaluate the same policy over that
-	// address's own failures, so the countdown a stranger sees is
-	// indistinguishable from the one a member sees.
+	// Record with no household, so guessing at unknown addresses can't lock
+	// a real one; evaluate the same policy over that address's own failures
+	// so a stranger's countdown matches a member's.
 	if err := s.d.Attempts.Record(ctx, nil, nil, email, false, now); err != nil {
 		return SignInResult{}, err
 	}
@@ -183,63 +158,49 @@ func (s *AuthService) SignIn(ctx context.Context, email, password string) (SignI
 		}
 		// A users row can outlive its membership: removing a member deletes
 		// its row from memberships, not from users (see
-		// MemberService.Remove and the fix report). An ex-member's address
-		// must fail exactly like a stranger's -- same decoy verify, same
-		// address-scoped countdown -- rather than the raw domain.ErrNotFound
-		// this branch used to propagate, which MapDomainError turned into a
-		// bare 404 the sign-in screen has no copy for, and which told a
-		// caller "this address once existed" where every other failure here
-		// tells them nothing.
+		// MemberService.Remove). An ex-member's address must fail exactly
+		// like a stranger's -- same decoy verify, same address-scoped
+		// countdown. Don't let domain.ErrNotFound propagate from here
+		// instead: MapDomainError turns that into a bare 404 the sign-in
+		// screen has no copy for, and it tells a caller "this address once
+		// existed" where every other failure here tells them nothing.
 		return s.signInFailedForUnknownAddress(ctx, password, email, now)
 	}
 	householdID := membership.HouseholdID
 
 	// This counter is household-scoped, not address-scoped, because the
-	// lockout itself is household-wide by design: the sign-in screen tells
-	// whoever is typing "we've locked the household," not "we've locked
-	// this address." That is a deliberate, accepted disclosure, not an
-	// oversight — a wrong-password guess against one member's address
-	// visibly decrements the countdown a second member's address reports,
-	// so someone who already knows one member's email can use this to
-	// confirm a candidate second address belongs to the same household.
-	// The human partner weighed this against the product: a four-user,
-	// two-adult household where both adults' addresses are already known
-	// to each other, and chose to keep the household-wide lock rather than
-	// scope the counter per address (which would also change the design's
-	// own copy). Anyone changing the lock's scope away from
-	// household-wide should revisit this trade-off, since it's the reason
-	// the scoping is what it is.
+	// lockout itself is household-wide by design: the screen says "we've
+	// locked the household," not "this address." That's an accepted
+	// disclosure, not an oversight -- guessing one member's address visibly
+	// decrements a countdown the other member's address also reports,
+	// letting someone who knows one address confirm a candidate second one
+	// belongs to the same household. The product owner weighed this against
+	// a two-adult household where both addresses are already known to each
+	// other, and chose household-wide over per-address scope, which would
+	// also change the design's copy. Revisit this trade-off before changing
+	// that scope.
 	failures, err := s.d.Attempts.FailuresSince(ctx, householdID, now.Add(-s.d.Policy.Window))
 	if err != nil {
 		return SignInResult{}, err
 	}
 	if state := s.d.Policy.Evaluate(failures, now); state.Locked {
-		// Run the decoy verification here, in the exact position the real
-		// one would have occupied next (see the password check below) had
-		// the household not been locked — otherwise this branch returns
-		// without ever touching the hasher, timing-distinguishable from
-		// every branch that does.
+		// Run the decoy verification in the exact position the real one
+		// would occupy (see the password check below) -- otherwise this
+		// branch never touches the hasher, timing-distinguishable from every
+		// branch that does.
 		s.verifyPassword(password, s.decoy())
 
-		// Record this attempt too, exactly as the wrong-password and
-		// unknown-address branches do, and re-evaluate over the updated
-		// failure set before responding. Without this, a caller hammering an
-		// already-locked household would see a LockedUntil frozen at the
-		// third failure while hammering an unknown address sees one that
-		// keeps advancing — a timing oracle that tells the two cases apart
-		// even though the error type is identical. Recording here means
-		// continued guessing against a locked household extends the lock,
-		// matching the unknown-address behavior deliberately.
-		//
-		// This is itself an accepted trade-off, not an oversight: it means
-		// someone who already knows a member's email can keep the household
-		// locked indefinitely just by continuing to guess, with no cap. The
-		// human partner chose to leave this uncapped rather than let the
-		// lock expire on a fixed schedule while an attacker is still
-		// actively working it — and magic link sign-in is deliberately
-		// never gated by this lock (see domain.LockoutPolicy's doc comment),
-		// so a real member always has a way back into their own household
-		// even while the password lock is being held open this way.
+		// Record and re-evaluate here too, matching the wrong-password and
+		// unknown-address branches -- otherwise a locked household's
+		// LockedUntil would freeze at the third failure while an unknown
+		// address's keeps advancing, an oracle telling a real household from
+		// a stranger's address even though the error type is identical.
+		// This extends the lock on continued guessing, deliberately matching
+		// unknown-address behavior. Accepted trade-off:
+		// with no cap, someone who knows the email can keep the household
+		// locked forever, chosen over a fixed expiry an active attacker
+		// could wait out. Magic-link sign-in isn't gated by this lock (see
+		// domain.LockoutPolicy), so a real member always has a way back in.
 		updated, err := s.recordHouseholdFailure(ctx, householdID, user.ID, email, now)
 		if err != nil {
 			return SignInResult{}, err
@@ -249,12 +210,10 @@ func (s *AuthService) SignIn(ctx context.Context, email, password string) (SignI
 
 	passwordFailed := true
 	if user.PasswordHash == "" {
-		// The empty string is the sentinel for "no password set" (see
-		// StoredUser's doc comment); it must never be handed to Verify as
-		// if it were a real stored hash. Run the decoy verification instead,
-		// in the exact position the real one would have occupied, so a
-		// credential-less member costs exactly what a member with the wrong
-		// password costs.
+		// Empty string is the sentinel for "no password set" (StoredUser's
+		// doc comment); never hand it to Verify as a real hash. Decoy
+		// verification runs instead, in the real one's position, so a
+		// credential-less member costs exactly what a wrong password costs.
 		s.verifyPassword(password, s.decoy())
 	} else {
 		passwordFailed = !s.verifyPassword(password, user.PasswordHash)
@@ -281,13 +240,11 @@ func (s *AuthService) SignIn(ctx context.Context, email, password string) (SignI
 	return s.issueSession(ctx, user.ID, householdID, now)
 }
 
-// recordHouseholdFailure records one failed attempt against a member's
-// household and evaluates the lock over the failure set that now includes it.
-// SignIn's two household-scoped failures -- an already-locked household and a
-// wrong password -- both end this way. It deliberately does not run the
-// password or decoy check: where that call sits relative to each branch is
-// what keeps the branches timing-indistinguishable, so it stays at each call
-// site, before this.
+// recordHouseholdFailure records one failure and evaluates the lock over
+// the updated set -- SignIn's already-locked and wrong-password branches
+// both end this way. It skips the password/decoy check on purpose: that
+// call's position relative to each branch is what keeps them
+// timing-indistinguishable, so it stays at each call site, before this.
 func (s *AuthService) recordHouseholdFailure(ctx context.Context, householdID, userID, email string, now time.Time) (domain.LockState, error) {
 	if err := s.d.Attempts.Record(ctx, &householdID, &userID, email, false, now); err != nil {
 		return domain.LockState{}, err
@@ -303,12 +260,11 @@ func (s *AuthService) issueSession(ctx context.Context, userID, householdID stri
 	return issueSession(ctx, s.d.Sessions, s.d.Tokens, s.d.SessionTTL, userID, householdID, now)
 }
 
-// issueSession is the one place a live session gets minted. It is a
-// package-level function, not a method, so InviteService.Accept can call it
-// too -- the invite flow's session must be indistinguishable from sign-in's,
-// down to how it's issued, not a second implementation that happens to look
-// similar. AuthService.issueSession above is kept as a thin wrapper so its
-// existing call sites don't need to change.
+// issueSession is the one place a live session gets minted -- a
+// package-level function, not a method, so InviteService.Accept can call
+// it too: the invite session must be issued identically to sign-in's, not
+// a look-alike second implementation. AuthService.issueSession stays as a
+// thin wrapper so existing call sites don't change.
 func issueSession(ctx context.Context, sessions SessionRepository, tokens TokenGenerator, sessionTTL time.Duration, userID, householdID string, now time.Time) (SignInResult, error) {
 	raw, hash, err := tokens.NewToken()
 	if err != nil {
@@ -335,15 +291,12 @@ const (
 	magicLinkSendTimeout = 30 * time.Second
 )
 
-// hashPrefix renders the first n hex characters of hash, or the whole thing
-// if hash has fewer than that. It exists because a bare
-// fmt.Sprintf("%x", hash)[:n] panics the instant hash is shorter than n
-// bytes -- TokenGenerator makes no minimum-length promise, so nothing here
-// may assume the real generator's 32 bytes are the only implementation that
-// will ever exist. Every log line in this file that redacts an email or
-// token goes through this rather than slicing directly, including the ones
-// that run inside sendMagicLinkAsync's goroutine, where a panic has no
-// middleware.Recoverer to catch it.
+// hashPrefix renders the first n hex characters of hash, or the whole
+// thing if shorter. It exists because fmt.Sprintf("%x", hash)[:n] panics
+// once hash is shorter than n bytes, and TokenGenerator makes no
+// minimum-length promise. Every log line here that redacts an email or
+// token goes through this, including inside sendMagicLinkAsync's goroutine,
+// where no middleware.Recoverer would catch a panic.
 func hashPrefix(hash []byte, n int) string {
 	encoded := fmt.Sprintf("%x", hash)
 	if len(encoded) < n {
@@ -352,27 +305,20 @@ func hashPrefix(hash []byte, n int) string {
 	return encoded[:n]
 }
 
-// RequestMagicLink is deliberately quiet. Neither an unknown address nor an
-// exhausted rate limit produces an error, because any observable difference
-// between the two would let a caller discover who is a member. Nor does any
-// failure once a known address has been established -- token generation,
-// persistence, or the send itself (see sendMagicLinkAsync) -- because every
-// one of those steps is reachable only from the known-address branch, and a
-// propagated error from any of them would be exactly the same oracle a
-// propagated mailer error would have been.
+// RequestMagicLink is deliberately quiet: neither an unknown address nor
+// an exhausted rate limit produces an error, since any observable
+// difference would tell a caller whether the address belongs to a member.
+// Nor does any later failure (token generation, persistence, the send) --
+// each step is reachable only from the known-address branch, so a
+// propagated error there would be the same oracle.
 func (s *AuthService) RequestMagicLink(ctx context.Context, email string) error {
 	now := s.d.Clock.Now()
 
 	// Both reads below run unconditionally, in this fixed order, for every
-	// call -- a known address, an unknown one, or one that has already hit
-	// the rate limit. Earlier this returned as soon as the rate-limit check
-	// decided the outcome, skipping ByEmail entirely for a rate-limited
-	// address; that made the *number* of repository reads distinguish the
-	// rate-limited case from the other two just as surely as an error would
-	// have. CountSince, in particular, can never report a count >=
-	// magicLinkPerHourLimit for an address with no user behind it (it joins
-	// through users), so "rate limited" was already proof of membership by
-	// itself once ByEmail stopped running alongside it.
+	// call. Don't skip ByEmail for a rate-limited address to save a query:
+	// CountSince can never report a count at or over the limit for an address
+	// with no user behind it (it joins through users), so the *number* of
+	// reads alone would prove membership just as surely as an error would.
 	count, err := s.d.MagicLinks.CountSince(ctx, email, now.Add(-time.Hour))
 	if err != nil {
 		return err
@@ -383,14 +329,12 @@ func (s *AuthService) RequestMagicLink(ctx context.Context, email string) error 
 	}
 	known := err == nil
 
-	// A users row can outlive its membership (removing a member deletes only
-	// the memberships row -- see the fix report and SignIn's identical
-	// check). Minting a token for that address would mail a link that can
-	// never become a session: ConsumeMagicLink resolves the token to a
-	// userID and then calls Members.ByUser itself, which would fail
-	// identically. Treat this exactly like "no such address" -- log it, and
-	// fall through to the same silent return every unknown or rate-limited
-	// address gets below.
+	// A users row can outlive its membership (see MemberService.Remove and
+	// SignIn's identical check). Minting a token here would mail a link
+	// that can never become a session -- ConsumeMagicLink calls
+	// Members.ByUser too, and would fail identically. Log it and fall
+	// through to the same silent return every unknown/rate-limited address
+	// gets below.
 	if known {
 		if _, membErr := s.d.Members.ByUser(ctx, user.ID); membErr != nil {
 			if !errors.Is(membErr, domain.ErrNotFound) {
@@ -406,31 +350,22 @@ func (s *AuthService) RequestMagicLink(ctx context.Context, email string) error 
 
 	if !known || rateLimited {
 		if rateLimited {
-			// known was always true here in practice before the membership
-			// check above existed, per the CountSince note above -- an
-			// address could not be rate-limited without a user behind it.
-			// That still holds (CountRecentMagicLinks' join through users is
-			// unchanged), but known can now also be false here for a
-			// different reason: an ex-member whose past magic-link requests,
-			// made while they still had a membership, are still within the
-			// hour. Either way this log line is accurate -- rate-limited is
-			// rate-limited -- it just can no longer be read as proof that
-			// `known` was true going into this block.
+			// An address can't be rate-limited without a user behind it
+			// (CountSince joins through users) -- but known can be false here
+			// for another reason too: an ex-member whose past magic-link
+			// requests, made while still a member, are still within the hour.
+			// Either way this log line is accurate.
 			slog.Info("magic link rate limit reached", "email_hash", hashPrefix(s.d.Tokens.HashToken(email), 12))
 		}
 		return nil
 	}
 
-	// Everything from here down is reachable only by a known,
-	// under-limit address -- the exact asymmetry that made a propagated
-	// mailer error an oracle (see sendMagicLinkAsync). A token generator
-	// that fails on entropy exhaustion, or an INSERT that fails on a
-	// statement timeout or a connection blip, is just as reachable only
-	// by this branch: no unknown or rate-limited address could ever
-	// produce either error. So the rule is the same as the mailer's: log
-	// at error level with the failure reason and a hashed address, and
-	// return nil rather than propagate. Anyone adding a further step to
-	// this function below this comment must give it the same treatment.
+	// Everything below is reachable only by a known, under-limit address --
+	// the same asymmetry that makes a propagated mailer error an oracle
+	// (see sendMagicLinkAsync). Token-generation and INSERT failures are
+	// just as reachable only here, so they get the same treatment: log at
+	// error level with a hashed address, return nil, never propagate --
+	// and so must any step added below this comment.
 	raw, hash, err := s.d.Tokens.NewToken()
 	if err != nil {
 		slog.Error("magic link token generation failed",
@@ -453,49 +388,35 @@ func (s *AuthService) RequestMagicLink(ctx context.Context, email string) error 
 }
 
 // sendMagicLinkAsync fires the email off the request path and returns
-// immediately, for two reasons that turn out to be the same reason seen from
-// two sides:
+// immediately, for one reason seen from two sides:
 //
-//   - Timing: a synchronous SMTP conversation (dial, EHLO, MAIL, RCPT, DATA,
-//     QUIT) plus the token's DB write made the known-address branch far
-//     slower than the unknown-address and rate-limited branches, which do
-//     only a couple of reads. That gap is wider, and more variable under a
-//     slow or degraded relay, than anything the SignIn decoy machinery
-//     guards against.
-//   - Correctness: RequestMagicLink's contract is "always nil, always
-//     silent." A relay that is down, slow, or rejecting mail must not turn
-//     into a caller-visible error on the known-address branch only --
-//     unknown and rate-limited addresses can never fail this way, so a
-//     propagated mailer error would be a discrete yes/no oracle for
-//     membership, cheaper to exploit than any timing measurement.
+//   - Timing: a synchronous SMTP conversation would make the known-address
+//     branch far slower than the couple-reads-only unknown/rate-limited
+//     branches -- more than the SignIn decoy machinery guards against.
+//   - Correctness: the contract is "always nil, always silent," so a down
+//     or rejecting relay must not surface as an error on the known-address
+//     branch alone -- that would be a discrete membership oracle, cheaper
+//     to exploit than any timing gap.
 //
-// Deliberately swallowing an error is normally a bug smell; it is correct
-// here because no caller is in a position to see it safely. The token row
-// is already committed by the time this goroutine runs, so a send failure
-// only costs a retry (the member asks for another link, or the existing one
-// still works once the relay recovers, until it expires in 15 minutes) --
-// it never costs correctness. The context is derived from
-// context.Background(), not the request's ctx, because the request's
-// context is cancelled the moment the HTTP handler returns a response,
-// which happens before this goroutine would otherwise get to run; sending
-// on an already-cancelled context would silently never deliver anything.
+// Swallowing the error is a smell but correct here: the token row is
+// already committed, so a failure only costs a retry, never correctness
+// (the member re-requests, or the existing link still works until its
+// 15-minute expiry). The context is context.Background(), not the
+// request's, which is cancelled the instant the handler returns -- before
+// this goroutine would run, so sending on it would silently deliver
+// nothing.
 func (s *AuthService) sendMagicLinkAsync(to, name, url string) {
-	// Computed here, on the caller's goroutine, rather than inside the
-	// goroutine below: this line runs on the request path, which chi's
-	// middleware.Recoverer still covers, and it lets the recover() below
-	// reuse the value without calling HashToken a second time from inside
-	// a panic handler.
+	// Computed here, on the caller's goroutine (still covered by chi's
+	// middleware.Recoverer), not inside the goroutine below, so recover()
+	// can reuse the value without calling HashToken from inside a panic
+	// handler.
 	emailHash := hashPrefix(s.d.Tokens.HashToken(to), 12)
 
 	go func() {
-		// middleware.Recoverer guards only the request goroutine. Once the
-		// send moved off the request path (see this function's doc comment
-		// above), nothing supervises this goroutine at all: an
-		// unrecovered panic here would crash the whole process, taking
-		// down every unrelated in-flight request with it, not just this
-		// send. Recovering keeps a bug in the mailer, or in some future
-		// step added to this closure, contained to the one send that
-		// triggered it.
+		// middleware.Recoverer guards only the request goroutine; nothing
+		// supervises this one, so an unrecovered panic here would crash the
+		// whole process, not just this send. Recovering keeps a bug in the
+		// mailer, or a future step added here, contained to this one send.
 		defer func() {
 			if r := recover(); r != nil {
 				slog.Error("magic link send panicked", "panic", r, "email_hash", emailHash)

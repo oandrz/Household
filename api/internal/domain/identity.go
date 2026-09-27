@@ -98,13 +98,10 @@ type Membership struct {
 	Capabilities Capabilities
 }
 
-// NewMembership is the enforcement point for the capability rules: a limited
-// member cannot hold the marriage capability, and an owner must hold every
-// capability. It is not the only gate. Membership's fields are exported, so
-// any caller in this module -- or Task 9 reading a row back from Postgres --
-// can build a Membership struct literal directly and skip this check. The
-// database's CHECK constraints on membership are the second gate, and are
-// what actually makes an invalid row impossible to persist.
+// NewMembership enforces the capability rules: a limited member cannot hold
+// marriage, and an owner must hold every capability. It is not the only
+// gate -- a struct literal (built here or by a repository reading a row)
+// skips it, so the database's CHECK constraints are the real backstop.
 func NewMembership(id, householdID, userID string, role Role, caps Capabilities) (Membership, error) {
 	if err := validateCapabilitiesForRole(role, caps); err != nil {
 		return Membership{}, err
@@ -135,16 +132,13 @@ func validateCapabilitiesForRole(role Role, caps Capabilities) error {
 	return nil
 }
 
-// ValidateMembershipChange checks a proposed role and capability change against
-// the whole household, because the last-owner rule is not a property of one
-// membership in isolation.
-//
-// The last-owner rule is only consulted when it is actually at stake: the
-// target must be found first (an unknown target is ErrNotFound, not silently
-// approved), and the rule applies only when the target currently holds
-// RoleOwner and the change would take that away. A capability-only edit on a
-// member who is already RoleLimited never touches ownership and must not be
-// blocked by a household that happens to have no owners at all.
+// ValidateMembershipChange checks a proposed role and capability change
+// against the whole household, since the last-owner rule is not a property
+// of one membership alone. An unknown target is ErrNotFound. The rule only
+// applies when the target currently holds RoleOwner and the change would
+// take that away -- a capability-only edit on an already-RoleLimited member
+// never touches ownership and must not be blocked by a household with no
+// owners at all.
 func ValidateMembershipChange(all []Membership, targetID string, newRole Role, newCaps Capabilities) error {
 	target, err := findMembership(all, targetID)
 	if err != nil {
@@ -160,9 +154,8 @@ func ValidateMembershipChange(all []Membership, targetID string, newRole Role, n
 }
 
 // ValidateMembershipRemoval refuses to leave a household without an owner.
-// As with ValidateMembershipChange, the target must exist, and the rule only
-// applies when removing it would actually reduce the owner count -- i.e. the
-// target currently holds RoleOwner.
+// As with ValidateMembershipChange, an unknown target is ErrNotFound, and
+// the rule only applies when the target currently holds RoleOwner.
 func ValidateMembershipRemoval(all []Membership, targetID string) error {
 	target, err := findMembership(all, targetID)
 	if err != nil {

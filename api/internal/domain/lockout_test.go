@@ -85,15 +85,13 @@ func TestTheLockExpiresAfterFifteenMinutes(t *testing.T) {
 	}
 }
 
-// TestALockAtTheExactBoundaryOfExpiryGrantsAFreshAllowance pins the design
-// decision documented on Evaluate's expired-lock branch: once a served lock
-// reaches its LockFor deadline, the household gets a full fresh allowance,
-// even though the failures that triggered it are still (at this exact
-// instant) counted as inside the window. Under DefaultLockoutPolicy,
-// Window == LockFor, so the only moment this branch is reachable is the
-// nanosecond the lock's deadline lands exactly on `now` — this test
-// constructs that boundary deliberately so the invariant stays visible to
-// whoever next changes the policy's Window/LockFor relationship.
+// TestALockAtTheExactBoundaryOfExpiryGrantsAFreshAllowance pins the invariant
+// on Evaluate's expired-lock branch: once a served lock reaches its LockFor
+// deadline, the household gets a full fresh allowance even though the
+// triggering failures are still (at this instant) inside the window. Under
+// DefaultLockoutPolicy, Window == LockFor, so this branch is reachable only
+// at the exact nanosecond boundary this test constructs deliberately, so
+// whoever next changes Window or LockFor sees the invariant.
 func TestALockAtTheExactBoundaryOfExpiryGrantsAFreshAllowance(t *testing.T) {
 	policy := domain.DefaultLockoutPolicy()
 	cutoff := lockoutNow.Add(-policy.Window)

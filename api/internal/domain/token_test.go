@@ -17,18 +17,15 @@ func TestTokenLifecycle(t *testing.T) {
 	})
 
 	t.Run("expired at exactly the expiry instant", func(t *testing.T) {
-		// Not After(now) is the rule checkInviteLive already used: a token
-		// whose expiry is exactly now is spent, not live.
+		// The comparison is !expiresAt.After(now): equal counts as expired.
 		if got := TokenLifecycle(now, now, nil); got != TokenExpired {
 			t.Fatalf("got %v, want TokenExpired", got)
 		}
 	})
 
 	t.Run("consumed beats expired", func(t *testing.T) {
-		// This ordering is the whole reason this function exists. An invite
-		// that was accepted and has since passed its expiry must report
-		// accepted -- telling the holder "expired, ask for another" would
-		// send them chasing a second invite for an account they already have.
+		// expiresAt and consumedAt are both "past" on purpose: this pins that
+		// consumed outranks expired.
 		if got := TokenLifecycle(now, past, &past); got != TokenConsumed {
 			t.Fatalf("got %v, want TokenConsumed", got)
 		}

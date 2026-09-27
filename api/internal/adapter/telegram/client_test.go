@@ -57,14 +57,12 @@ func TestSendMessageFailsWhenTelegramAnswersNotOK(t *testing.T) {
 	}
 }
 
-// GetUpdates' timeout is Telegram's own server-side long-poll wait, not this
-// client's HTTP timeout (see GetUpdates' doc comment in client.go). Losing it
-// from the request body silently turns the long-poll into a tight loop
-// against api.telegram.org -- every other test in this package still passes
-// when that happens, because none of them look at the request the client
-// actually sent, only at the response it got back. This test does, and it
-// must actually fail if "timeout" goes missing from the body -- see the
-// mutation proof recorded in the final-fix-wave report.
+// GetUpdates' timeout is Telegram's own server-side long-poll wait, not
+// this client's HTTP timeout (see GetUpdates' doc comment in client.go).
+// Losing it from the request body silently turns the long-poll into a
+// tight loop against api.telegram.org, and no other test here would catch
+// it -- none of them inspect the outgoing request, only the response. This
+// one does, and must fail if "timeout" goes missing from the body.
 func TestGetUpdatesDecodesResults(t *testing.T) {
 	var gotBody map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -93,10 +91,10 @@ func TestGetUpdatesDecodesResults(t *testing.T) {
 
 // A token with a stray control character -- a trailing newline from a
 // copy-pasted secrets file is the realistic case -- makes the request URL
-// itself invalid. http.NewRequestWithContext's error in that case is a
-// url.Error, which embeds the full (rejected) URL and therefore the token;
-// it must never reach the caller unwrapped, on this path any more than on
-// the "telegram answered not ok" path above.
+// invalid. NewRequestWithContext's error then is a url.Error, which embeds
+// the full rejected URL and therefore the token; it must never reach the
+// caller unwrapped, any more than on the "telegram answered not ok" path
+// above.
 func TestSendMessageDoesNotLeakTokenWhenTokenBreaksTheURL(t *testing.T) {
 	token := "secret-token\nwith-a-control-character"
 	c := newClientWithBase(token, "https://api.telegram.org")

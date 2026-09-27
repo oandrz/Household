@@ -11,25 +11,19 @@ import (
 )
 
 // TestTransactionWriteRoutesRequireCSRF drives the three mutating
-// transactions routes with no CSRF token at all, and with one that does not
-// match the cookie.
+// transactions routes with no CSRF token, and with one that doesn't match
+// the cookie.
 //
-// TestCSRFIsRequiredForMutatingRequests (auth_api_test.go) already proves
-// requireCSRF works, using sign-out. It does not prove this route group is
-// behind it: deleting
+// TestCSRFIsRequiredForMutatingRequests (auth_api_test.go) proves requireCSRF
+// works in general, not that this route group is behind it: deleting
 // `w.Use(requireCSRF)` from the transactions group in router.go left the
-// entire suite green, because every other test reaches these routes through
+// whole suite green, since every other test reaches these routes through
 // env.authed, which always supplies the token.
 //
-// Two details are load-bearing:
-//
-//   - The session is an owner's. requireCSRF sits *after*
-//     requireCapability(CapMoney) and requireOwner in that group, so any
-//     lesser caller is refused before it is ever reached -- and would pass
-//     this test with the middleware deleted.
-//   - The assertion is on the CSRF_INVALID code, not on 403 alone. A bare
-//     status check would also stay green if requireOwner were what did the
-//     refusing, which is the failure mode the point above describes.
+// Two details are load-bearing: the session is an owner's, since requireCSRF
+// runs *after* requireCapability(CapMoney) and requireOwner, so a lesser
+// caller is refused before reaching it; and the assertion checks
+// CSRF_INVALID, not bare 403, since requireOwner's refusal looks the same.
 func TestTransactionWriteRoutesRequireCSRF(t *testing.T) {
 	env := newTestEnv(t)
 	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
@@ -63,13 +57,12 @@ func TestTransactionWriteRoutesRequireCSRF(t *testing.T) {
 	}
 }
 
-// --- Task 51: transactions and categories routes ---------------------------
+// --- transactions and categories routes --------------------------------------
 
-// requestRouteAs issues route as the caller identified by session/csrf, using
-// authedGet for reads (which carry no CSRF cookie or header at all -- GET is
-// exempt) and authed for everything else. A single helper keeps the four
-// caller shapes below hitting the guard chain the same way a browser would,
-// rather than each caller shape improvising its own request construction.
+// requestRouteAs issues route as the caller identified by session/csrf: GET
+// uses authedGet (no CSRF cookie or header -- GET is exempt), everything
+// else uses authed. One helper keeps the caller shapes below hitting the
+// guard chain the same way a browser would, rather than each improvising.
 func requestRouteAs(t *testing.T, env *testEnv, method, path string, session, csrf *http.Cookie) *httptest.ResponseRecorder {
 	t.Helper()
 	if method == http.MethodGet {
@@ -78,60 +71,45 @@ func requestRouteAs(t *testing.T, env *testEnv, method, path string, session, cs
 	return env.authed(t, method, path, nil, session, csrf)
 }
 
-// TestTransactionRoutesRequireMoneyAndOwner is the test that proves decision
-// 5 rather than assuming it: every transactions and categories route
-// requires money AND owner, reads included -- unlike accounts, whose read is
-// open to any money holder.
+// TestTransactionRoutesRequireMoneyAndOwner proves that every transactions
+// and categories route requires money AND owner, reads included -- unlike
+// accounts, whose read is open to any money holder.
 //
-// A limited member's accounts view shows names with no amounts (accounts
-// decision 5). Applied to a ledger, that is a table whose every figure is
-// blank next to a "Spent this month" that must be absent rather than zero --
-// a page that reads as broken. So for a limited member the money capability
-// means "see which accounts this household has" and nothing further. The
-// obvious "fix" is to make the two route groups consistent, which is why
-// this test names the difference explicitly.
+// A limited member's accounts view shows names with no amounts. Applied to
+// a ledger, that would leave every figure blank next to a "Spent this
+// month" that must be absent, not zero -- a page that reads as broken. So
+// for a limited member the money capability means "see which accounts
+// exist" and nothing further; this test names that difference on purpose
+// rather than letting it look like an inconsistency to "fix".
 //
-// The third caller shape -- env.moneyLimitedEmail, a limited member who DOES
-// hold money -- is the one that actually separates this test from
-// TestAccountsListRequiresTheMoneyCapability. env.limitedEmail alone would
-// never exercise requireOwner at all: it fails at requireCapability first,
-// and the walk would pass even if requireOwner were deleted from the group
-// entirely.
+// The third caller shape, env.moneyLimitedEmail (a limited member who DOES
+// hold money), is what separates this test from
+// TestAccountsListRequiresTheMoneyCapability: env.limitedEmail alone fails
+// at requireCapability first and would never exercise requireOwner even if
+// it were deleted.
 //
-// Known gap, checked and not fixable: this matrix cannot independently prove
-// requireCapability(domain.CapMoney) is present on this route group. Doing
-// that needs a caller who passes requireOwner but fails requireCapability --
-// an owner without money -- and that state cannot be built at all, in this
-// system, by any caller of this test. domain.ValidateMembershipChange's
-// validateCapabilitiesForRole refuses it at the service layer, and the
-// database's own owners_hold_all_capabilities CHECK constraint
-// (migrations/00002_identity.sql) refuses it even for a raw
-// MembershipRepo.Create that bypasses that service entirely -- confirmed
-// empirically while writing this test: constructing that fixture failed
-// with "violates check constraint owners_hold_all_capabilities" straight out
-// of Postgres. Every caller shape this file can construct is therefore
-// either an owner (who always holds money, so requireCapability never has
-// anything to refuse) or a non-owner (who requireOwner already refuses
-// regardless of requireCapability). Removing requireCapability from the
-// transactions group was tried by hand and, as this reasoning predicts, left
-// every case in this test green. This is the same "must not lean on an
-// invariant enforced in another layer" risk router.go's comment names for
-// requireOwner, just one layer further down: the guard is unfalsifiable
-// today because the invariant holds in two independent places, not because
-// the guard does nothing.
+// Known gap, not fixable: this matrix can't independently prove
+// requireCapability(domain.CapMoney) is present -- that needs an owner
+// without money, and no caller here can build that state.
+// domain.ValidateMembershipChange and the owners_hold_all_capabilities CHECK
+// constraint both refuse it (confirmed empirically against a raw
+// MembershipRepo.Create). So every caller shape is either an owner (nothing
+// for requireCapability to refuse) or a non-owner (already refused by
+// requireOwner); removing requireCapability left this test green, as
+// predicted. The same "must not lean on an invariant enforced elsewhere"
+// risk router.go names above txn.Use(requireOwner): unfalsifiable today
+// because the invariant holds in two places, not because the guard does
+// nothing.
 func TestTransactionRoutesRequireMoneyAndOwner(t *testing.T) {
 	env := newTestEnv(t)
 
 	zeroUUID := "00000000-0000-0000-0000-000000000000"
-	// wantOwner is the exact status the owner must receive on each route, not
-	// merely "not 401/403". A route wired with a nil-Deps service still fails
-	// at neither guard and panics into a 500 inside the handler -- "not
-	// 401/403" would let that slide by unnoticed, which is exactly how this
-	// test's first draft passed while deps.Transactions and deps.Categories
-	// were both nil in the test harness. Pinning the real value (200 for a
-	// read against an empty ledger, 400 for a handler that rejects this nil
-	// body before ever touching a service, 404 for an update/delete against
-	// an id that does not exist) makes that failure mode loud instead of
+	// wantOwner pins the exact status per route, not merely "not 401/403":
+	// that looser check let this test pass while deps.Transactions and
+	// deps.Categories were both nil in the harness, because a nil-wired
+	// service panics into a 500 past both guards. The real values (200 for
+	// an empty-ledger read, 400 for a rejected nil body, 404 for an
+	// update/delete against a missing id) make that failure loud instead of
 	// silent.
 	routes := []struct {
 		method, path string
@@ -167,10 +145,9 @@ func TestTransactionRoutesRequireMoneyAndOwner(t *testing.T) {
 				t.Fatalf("limited member holding money = %d, want 403 (body = %s)", rec.Code, rec.Body.String())
 			}
 
-			// An owner reaches the handler. The exact status pins that the
-			// guards let them through AND that the service behind the
-			// handler is actually wired -- see wantOwner's doc comment above
-			// for the failure this catches that "not 401/403" would not.
+			// An owner reaches the handler: the exact status pins both that the
+			// guards let them through and that the service is actually wired
+			// (see wantOwner above).
 			session, csrf = env.signIn(t, env.ownerEmail, env.ownerPassword)
 			rec = requestRouteAs(t, env, route.method, route.path, session, csrf)
 			if rec.Code != route.wantOwner {
@@ -181,18 +158,17 @@ func TestTransactionRoutesRequireMoneyAndOwner(t *testing.T) {
 }
 
 // TestListTransactionsDefaultsListAndSummaryToTheSameMonth drives the ledger
-// with no month parameter at all -- the state the screen opens in.
+// with no month parameter -- the state the screen opens in.
 //
-// handleListTransactions's own doc comment states the contract: it "serves the
-// ledger and the two figures above it together, because they are one screen
-// and must describe the same month." parseTransactionFilter broke it by
-// defaulting the summary's month unconditionally while leaving filter.Month
-// zero, which TransactionFilter documents as "every month". The screen read
-// "0 in August 2026" above ten July rows.
+// It pins handleListTransactions's contract that the list and the two
+// figures above it describe the same month. Don't default only the
+// summary's month and leave filter.Month zero ("every month" per
+// TransactionFilter): the screen read "0 in August 2026" above ten July
+// rows.
 //
-// The assertion is on the listed transactions' own dates against
-// summary.month, not on the count alone: a count check stays green if both
-// halves are wrong in the same direction.
+// The assertion checks the listed dates against summary.month, not the
+// count alone: a count check stays green if both halves are wrong in the
+// same direction.
 func TestListTransactionsDefaultsListAndSummaryToTheSameMonth(t *testing.T) {
 	env := newTestEnv(t)
 	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
@@ -222,17 +198,12 @@ func TestListTransactionsDefaultsListAndSummaryToTheSameMonth(t *testing.T) {
 	}
 }
 
-// TestListTransactionsWidensToEveryMonthOnMonthAll pins the one deliberate way
-// out of the default: month=all lists every month.
+// TestListTransactionsWidensToEveryMonthOnMonthAll pins the one deliberate
+// way out of the default: month=all lists every month.
 //
-// The summary deliberately stays on the current month, and this test says so
-// rather than leaving it to be discovered. MonthSummary answers for exactly
-// one calendar month by construction -- TransactionRepository.MonthTotals
-// returns that month's rows so the usecase layer can convert currencies before
-// summing, and the single-month bound is the stated reason it may return rows
-// at all. "Spent ever" is a different question from "spent this month", so a
-// widened list keeps a month-labelled figure rather than inventing an all-time
-// one here. The frontend names the month beside the figure.
+// The summary deliberately stays on the current month, and this test says
+// so rather than leaving it to be discovered -- see parseTransactionFilter
+// for why it stays single-month.
 func TestListTransactionsWidensToEveryMonthOnMonthAll(t *testing.T) {
 	env := newTestEnv(t)
 	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
@@ -256,9 +227,9 @@ func TestListTransactionsWidensToEveryMonthOnMonthAll(t *testing.T) {
 }
 
 // TestListTransactionsRefusesAnUnreadableMonth keeps the widening on the one
-// spelled word. An unparseable month must still be refused rather than
-// silently widening the ledger, which is what treating any unrecognised value
-// as "all" would do.
+// spelled word: an unparseable month is refused rather than silently
+// widening the ledger, which is what treating any unrecognised value as
+// "all" would do.
 func TestListTransactionsRefusesAnUnreadableMonth(t *testing.T) {
 	env := newTestEnv(t)
 	session, _ := env.signIn(t, env.ownerEmail, env.ownerPassword)
@@ -270,15 +241,14 @@ func TestListTransactionsRefusesAnUnreadableMonth(t *testing.T) {
 // dayLayout is the wire format POST /transactions takes for occurredOn.
 const dayLayout = "2006-01-02"
 
-// thisMonthAndLast returns one day inside the current month and one inside the
-// previous one.
+// thisMonthAndLast returns one day inside the current month and one inside
+// the previous one.
 //
-// The previous month is derived from the first of this month rather than by
-// subtracting a month from today, because AddDate normalises an overflowing
-// day forward: time.Now().AddDate(0, -1, 0) on the 31st of a month lands back
-// inside the current month, and a test whose "row outside this month" is
-// silently inside it passes for the wrong reason. The day before the 1st is
-// the previous month in every month of every year.
+// The previous month comes from the day before the 1st of this month, not
+// from subtracting a month via AddDate: AddDate normalises an overflowing
+// day forward, so time.Now().AddDate(0, -1, 0) on the 31st can land back
+// inside the current month, silently passing a test whose "row outside this
+// month" isn't.
 func thisMonthAndLast() (thisMonth, lastMonth time.Time) {
 	now := time.Now().UTC()
 	thisMonth = time.Date(now.Year(), now.Month(), 1, 12, 0, 0, 0, time.UTC)

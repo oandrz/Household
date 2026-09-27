@@ -35,13 +35,12 @@ func (h *handlerSpy) seen() []StartCommand {
 	return append([]StartCommand(nil), h.calls...)
 }
 
-// The mock delivers its two updates exactly once and then answers with an
-// empty result, the same way TestPollerAdvancesTheOffsetPastIgnoredUpdates's
-// mock does. A mock that redelivers the same updates on every request (as
-// real Telegram never does once the offset has moved past them) would make
-// the poller's tight retry loop dispatch far faster than a 5ms-granularity
-// wait can ever catch at exactly one call -- that shape was tried and failed
-// deterministically, not flakily, three runs in a row.
+// The mock delivers its two updates exactly once and then answers empty,
+// the same way TestPollerAdvancesTheOffsetPastIgnoredUpdates's mock does.
+// A mock that keeps redelivering (real Telegram never does once the offset
+// has moved past them) makes the poller's tight retry loop dispatch faster
+// than a 5ms wait can catch at exactly one call -- tried and failed
+// deterministically three runs in a row.
 func TestPollerDispatchesStartCommands(t *testing.T) {
 	var mu sync.Mutex
 	delivered := false
@@ -79,8 +78,8 @@ func TestPollerDispatchesStartCommands(t *testing.T) {
 }
 
 // The sender's name has to survive the trip from Telegram's JSON through
-// ParseStart and dispatch to the handler -- it is what a future confirm
-// screen (Task 5) will show the person approving the link.
+// ParseStart and dispatch to the handler -- it is what the confirm screen
+// shows the person approving the link.
 func TestPollerDispatchesTheSendersUsername(t *testing.T) {
 	var mu sync.Mutex
 	delivered := false
@@ -156,18 +155,17 @@ func TestPollerAdvancesTheOffsetPastIgnoredUpdates(t *testing.T) {
 // in the handler must not take the process down.
 //
 // The mock delivers once and then answers empty (see
-// TestPollerDispatchesStartCommands for why): otherwise the panicking handler
-// fires dozens of times before cancel takes effect, which is noisy and proves
-// nothing beyond what one dispatch already proves.
+// TestPollerDispatchesStartCommands): otherwise the panicking handler fires
+// dozens of times before cancel takes effect, proving nothing beyond what
+// one dispatch already proves.
 //
-// The first batch carries two /start updates, and the assertion is == 2, not
-// >= 1, on purpose: with a single update, moving the recover up to wrap the
-// whole update loop -- or the whole Run body -- would still let that one
-// dispatch happen before the panic unwinds, so the test would keep passing
-// even though the poller is now dead. handlerSpy.HandleStart appends the
-// call before it panics, and its deferred unlock (line 24 above) releases
-// the mutex during the unwind, so a second dispatch only happens if recovery
-// genuinely occurs per update rather than per batch or per Run.
+// The first batch carries two /start updates; the assertion is == 2, not
+// >= 1, on purpose. With a single update, a recover placed per-batch or
+// per-Run instead of per-update would still let that one dispatch happen
+// before the panic unwinds, so the test would pass even over a dead poller.
+// handlerSpy.HandleStart records the call before panicking; its deferred
+// Unlock releases the mutex mid-unwind, so two dispatches only happen if
+// recovery is genuinely per update.
 func TestPollerSurvivesAPanickingHandler(t *testing.T) {
 	var mu sync.Mutex
 	delivered := false
@@ -195,13 +193,12 @@ func TestPollerSurvivesAPanickingHandler(t *testing.T) {
 	waitFor(t, func() bool { return len(spy.seen()) == 2 })
 }
 
-// calls >= 2 alone proves the loop keeps going after an error, but says
-// nothing about how soon it retries -- deleting the backoff select entirely,
-// or the backoff reset, or the doubling and cap, would all still leave the
-// loop "going". So this records a timestamp per request and checks the gap
-// between the failed call and the retry is at least baseBackoff: that is the
-// one measurement an un-backed-off retry (or Run's own tight loop against an
-// unreachable Telegram) cannot pass.
+// calls >= 2 alone proves the loop keeps going after an error, but not how
+// soon it retries -- deleting the backoff select, the backoff reset, or the
+// doubling and cap would all still leave the loop "going". So this measures
+// the gap between the failed call and the retry against baseBackoff: the
+// one check an un-backed-off retry, or Run's own tight loop against an
+// unreachable Telegram, cannot pass.
 func TestPollerBacksOffAndKeepsGoingAfterAnError(t *testing.T) {
 	var mu sync.Mutex
 	var times []time.Time

@@ -1,15 +1,13 @@
 // Command hearthctl is Hearth's command-line client: the way a script, a
 // cron job or an AI agent drives the product without a browser.
 //
-// It is a plain HTTP client of the same API the frontend uses. It signs in
-// the way the browser does, keeps the two cookies the server issues, and
-// sends the CSRF cookie back as a header on every write. It deliberately
-// imports nothing from internal/: going around the HTTP layer would go
-// around the only place authorisation lives (see CLAUDE.md), and coupling a
-// client binary to server internals defeats the point of having an API.
+// It is a plain HTTP client of the same API the frontend uses -- same
+// sign-in, same two cookies, same CSRF header on writes. It imports nothing
+// from internal/ on purpose: going around the HTTP layer would go around
+// the only place authorisation lives (CLAUDE.md), and coupling a client to
+// server internals defeats the point of having an API.
 //
-// See docs/CLI.md for how to use it and docs/adr/0006 for why it is shaped
-// this way.
+// See docs/CLI.md for usage, docs/adr/0006 for why it is shaped this way.
 package main
 
 import (

@@ -3,7 +3,7 @@ SHELL := /bin/bash
 COMPOSE := docker compose
 
 .PHONY: help dev dev-local up down restart logs ps urls migrate migrate-down migrate-new \
-        test test-api test-web lint lint-arch lint-web lint-dead typecheck fmt psql shell-api build sqlc \
+        test test-api test-web lint lint-arch lint-web lint-dead lint-comments typecheck fmt psql shell-api build sqlc \
         seed reset-password unlock-household
 
 help: ## Show this help
@@ -78,7 +78,7 @@ test-api: ## Run the Go tests (needs Docker for testcontainers)
 test-web: ## Run the frontend tests
 	cd web && npx vitest run
 
-lint: lint-arch typecheck lint-web lint-dead ## Run every linter
+lint: lint-arch typecheck lint-web lint-dead lint-comments ## Run every linter
 	cd api && go vet ./...
 
 lint-arch: ## Check the clean-architecture dependency rule
@@ -105,6 +105,19 @@ lint-dead: ## Report unreachable Go code, staticcheck findings, and unused front
 	 if [ -n "$$out" ]; then echo "$$out"; echo "staticcheck: findings"; exit 1; fi; \
 	 echo "staticcheck passed"
 	cd web && npx --yes knip@5.88.1 --no-progress
+
+# A comment states the rule itself. A plan number ("decision 7", "Task 12",
+# "milestone 2") sends the reader to a document to understand one line, and a
+# line number ("bill.go:202") is wrong after the next edit above it. Only
+# comments are searched: // in Go, and -- in the SQL queries and in sqlcgen,
+# which copies those into its query strings, whether the comment has the
+# whole line to itself or trails code on the same line (a struct field's
+# `// ... (decision 21)` is the shape these references most often took). A
+# reference split across two comment lines ("decision" / "// 7") escapes a
+# per-line grep, so scripts/lint-comments.sh joins each comment block before
+# matching. A product word in a string or a name is not history.
+lint-comments: ## Fail on plan numbers and line numbers in backend comments
+	@scripts/lint-comments.sh
 
 typecheck: ## Type-check the frontend, tests included
 	cd web && npx tsc --noEmit

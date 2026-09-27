@@ -31,13 +31,10 @@ func handleSignUp(deps Deps) http.HandlerFunc {
 // handleSignUpPreview reads no body -- the token is in the path -- so it does
 // not call decodeJSONBody, exactly as handleInvitePreview does not.
 //
-// CONTROLLER RULING R3: the body carries channel alongside email, mirroring
-// usecase.SignupPreview -- see that type's own doc comment for why the
-// create-household screen needs to know which identity the token proved. A
-// plain map, not a struct with `json:"email,omitempty"`, is deliberate: a
-// Telegram sign-up's Email is "", and omitempty on a struct field would drop
-// the key entirely rather than send it empty. json.Marshal of a map never
-// omits a key for an empty value, so this shape cannot make that mistake.
+// The response carries channel alongside email, mirroring usecase.SignupPreview
+// (see its doc comment for why). It answers with a plain map rather than a
+// struct with `json:"email,omitempty"`: a Telegram sign-up's Email is "", and
+// omitempty would drop that key entirely instead of sending it empty.
 func handleSignUpPreview(deps Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		preview, err := deps.Signups.Preview(r.Context(), chi.URLParam(r, "token"))
@@ -57,9 +54,8 @@ type completeSignUpRequest struct {
 }
 
 // handleCompleteSignUp provisions the household and signs the new owner in
-// through completeSignIn -- the same tail sign-in, magic-link consumption and
-// invite acceptance use, so all four answer with the identical me bundle and
-// the identical pair of cookies.
+// through completeSignIn -- the same tail as sign-in, magic-link consumption
+// and invite acceptance, so all four return the same body and cookie pair.
 func handleCompleteSignUp(deps Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var req completeSignUpRequest

@@ -34,16 +34,16 @@ func movement(accountID string, on time.Time, minor int64, currency string) usec
 	}
 }
 
-// TestTheNewestBarIsTheHeadlineFigure is this feature's discriminating test.
-// The chart is the third place net worth is computed, and the one place a
-// disagreement is visible to the eye: the newest bar sits directly under the
+// TestTheNewestBarIsTheHeadlineFigure is this feature's discriminating test:
+// the chart is the third place net worth is computed, and the only one
+// where a disagreement is visible -- the newest bar sits directly under the
 // figure it must equal.
 //
-// The future-dated movement is the trap. AccountView.Balance has no upper
-// bound on the transaction date, so a transaction dated next month is already
-// inside it. Bucket that movement into its own month and it is never
-// subtracted on the way back, so every older bar is wrong by 500 -- while the
-// newest bar still matches and the numbers still look reasonable.
+// The future-dated movement is the trap: AccountView.Balance has no upper
+// bound on the transaction date, so a next-month transaction is already
+// inside it. Bucket that movement into its own month, and it is never
+// subtracted going back -- every older bar is wrong by 500 while the newest
+// bar still matches and looks reasonable.
 func TestTheNewestBarIsTheHeadlineFigure(t *testing.T) {
 	svc, repo := newAccountService(t)
 	sgd := account(t, domain.AccountCash, 824_055, "SGD", withBalance(830_055))
@@ -114,18 +114,16 @@ func TestAMonthBeforeAnAccountWasTrackedIsAGap(t *testing.T) {
 }
 
 // TestAnAccountOpenedNextMonthByClockSkewIsInTheNewestBar is the tracked-from
-// counterpart of TestTheNewestBarIsTheHeadlineFigure's future-dated movement.
-//
-// account.go:177 gives OpeningBalanceAsOf a day of slack so a household in
-// UTC+8 can enter their own "today" while the server's UTC clock is still on
-// the previous day (account_test.go:116-117 documents why). At a month
-// boundary that slack can store an opening date in the month AFTER `current`
-// -- entered "1 August" from Singapore while the server is still on 31 July
-// UTC. Summary has already put this account in the headline regardless of
-// that date -- it counts every non-archived, counted, convertible view -- so
-// it must be in the newest bar too, the same reason deltasByAccountMonth
-// clamps a future-dated movement into the current month rather than losing it
-// in a month the walk never visits.
+// counterpart of TestTheNewestBarIsTheHeadlineFigure's future-dated
+// movement: AccountService.validate gives OpeningBalanceAsOf a day of slack
+// for timezone reasons (TestCreateAcceptsTodayFromAnyTimezone), which at a
+// month boundary can store an opening date in the month after `current` --
+// e.g. "1 August" entered from Singapore while the server is still on 31
+// July UTC. Summary already counts this account in the headline regardless
+// of that date -- it counts every non-archived, counted, convertible view --
+// so it must be in the newest bar too, the same reason deltasByAccountMonth
+// clamps a future-dated movement into the current month rather than losing
+// it.
 func TestAnAccountOpenedNextMonthByClockSkewIsInTheNewestBar(t *testing.T) {
 	svc, _ := newAccountService(t)
 	sinceTheStart := account(t, domain.AccountCash, 400_000, "SGD", openedOn(month(2025, time.August)))
@@ -149,10 +147,10 @@ func TestAnAccountOpenedNextMonthByClockSkewIsInTheNewestBar(t *testing.T) {
 	}
 }
 
-// TestAMonthMissingOneAccountIsMarkedIncomplete is the middle state, and the
-// reason the chart is drawable at all for a household that adds an account.
-// The bar is real; it is missing an account the newest bar has, and the
-// screen has to be able to say so rather than let the step up read as growth.
+// TestAMonthMissingOneAccountIsMarkedIncomplete is the middle state that
+// lets the chart work for a household that adds an account: the bar is
+// real, just missing an account the newest bar has, and the screen must say
+// so rather than let the step up read as growth.
 func TestAMonthMissingOneAccountIsMarkedIncomplete(t *testing.T) {
 	svc, _ := newAccountService(t)
 	old := account(t, domain.AccountCash, 100_000, "SGD", openedOn(month(2025, time.August)))
@@ -176,16 +174,16 @@ func TestAMonthMissingOneAccountIsMarkedIncomplete(t *testing.T) {
 	}
 }
 
-// TestArchivedAndUncountedAccountsAreInNoBar: whatever is out of the headline
-// is out of every bar. An account excluded from the total but drawn into the
-// history would make the chart's last bar the only one that agrees with it.
+// TestArchivedAndUncountedAccountsAreInNoBar: whatever is out of the
+// headline is out of every bar, or the chart's last bar would be the only
+// one agreeing with the total.
 //
 // MonthlyMovements includes archived accounts by contract (its own doc
-// comment says so, deliberately -- the caller decides what counts). So both
-// excluded accounts here get a movement too, dated in an older month, not
-// just a balance: without one, deltasByAccountMonth's "not in counted, drop
-// it" branch never runs in this test, and a regression that let an excluded
-// account's movement through would go unnoticed.
+// comment says so -- the caller decides what counts), so both excluded
+// accounts here get a movement, not just a balance: without one,
+// deltasByAccountMonth's "not in counted, drop it" branch never runs, and a
+// regression that let an excluded account's movement through would go
+// unnoticed.
 func TestArchivedAndUncountedAccountsAreInNoBar(t *testing.T) {
 	svc, repo := newAccountService(t)
 	counted := account(t, domain.AccountCash, 100_000, "SGD")
@@ -218,11 +216,11 @@ func TestALiabilityPullsTheBarDown(t *testing.T) {
 	cash.Account.ID = "cash"
 	loan := account(t, domain.AccountLoan, 200_000, "SGD", withBalance(200_000))
 	loan.Account.ID = "loan"
-	// A delta is a movement of the account's own BALANCE, and a liability's
-	// balance is the sum owed: +50000 in July means the household borrowed
-	// 50000 more that month, so June's debt was smaller and June's net worth
-	// was HIGHER. The direction is the whole test -- get the sign backwards
-	// and SignedNetWorthAmount can be missing entirely without anyone noticing.
+	// A delta moves the account's own BALANCE, and a liability's balance is
+	// the sum owed: +50000 in July means the household borrowed more that
+	// month, so June's debt was smaller and net worth HIGHER. Direction is
+	// the whole test -- get the sign backwards and SignedNetWorthAmount can
+	// go missing without anyone noticing.
 	repo.addMovement(movement("loan", month(2026, time.July), 50_000, "SGD"))
 
 	got, err := svc.Summary(context.Background(), "h-1", []usecase.AccountView{cash, loan}, fixedNow)
@@ -241,8 +239,8 @@ func TestALiabilityPullsTheBarDown(t *testing.T) {
 
 // TestNoCountedAccountsMeansNoTrend: a household whose only accounts are
 // excluded has a computable, genuinely zero net worth and nothing to chart.
-// Nil, rather than twelve nil-valued points, so the wire carries no trend at
-// all and the screen has one absence to branch on rather than two.
+// Trend is nil rather than twelve nil-valued points, so the screen has one
+// absence to branch on, not two.
 func TestNoCountedAccountsMeansNoTrend(t *testing.T) {
 	svc, _ := newAccountService(t)
 	excluded := account(t, domain.AccountCash, 900_000, "SGD", notCounted)
@@ -323,19 +321,18 @@ func TestTheChangeIsSuppressedOnANonPositiveBase(t *testing.T) {
 	}
 }
 
-// TestTheChangeIsSuppressedOnAZeroBase is the half of "base <= 0" a negative
-// base cannot exercise: at base == 0 none of changeBasisPoints's overflow
-// guards wrap the way they do at a negative base (math.MinInt64+base does
-// not underflow when base is 0), so the only thing standing between this
-// state and "points := scaled / base" -- an integer divide by zero, which
-// panics -- is the base <= 0 check itself.
+// TestTheChangeIsSuppressedOnAZeroBase covers the half of "base <= 0" a
+// negative base cannot exercise: at base == 0 changeBasisPoints's overflow
+// guards don't wrap the way they do at a negative base (math.MinInt64+base
+// does not underflow when base is 0), so the base <= 0 check is the only
+// thing stopping "points := scaled / base" from an integer divide by zero
+// panic.
 func TestTheChangeIsSuppressedOnAZeroBase(t *testing.T) {
 	svc, repo := newAccountService(t)
 	// Cash and a loan of the same size cancel exactly in June: the household
-	// owns 5000 and owes 5000, for a genuine zero net worth, not a household
-	// with no accounts. In July the loan is paid down by 1000 and net worth
-	// becomes a real 1000 -- the ordinary way a household passes through
-	// zero on the way up.
+	// owns 5000 and owes 5000, a genuine zero net worth, not a household with
+	// no accounts. In July the loan is paid down by 1000, giving a real 1000
+	// -- the ordinary way a household passes through zero on the way up.
 	cash := account(t, domain.AccountCash, 5_000, "SGD", openedOn(month(2025, time.August)))
 	loan := account(t, domain.AccountLoan, 5_000, "SGD",
 		openedOn(month(2025, time.August)), withBalance(4_000))
@@ -373,10 +370,10 @@ func TestTheChangeRoundsHalfAwayFromZero(t *testing.T) {
 	}
 }
 
-// TestTheChangeRoundsHalfAwayFromZeroWhenNegative is the mirror of
-// TestTheChangeRoundsHalfAwayFromZero: the scaled < 0 branch runs on any
-// month net worth falls while the base stays positive, and none of the
-// other fixtures in this file reach it.
+// TestTheChangeRoundsHalfAwayFromZeroWhenNegative mirrors
+// TestTheChangeRoundsHalfAwayFromZero: it runs the scaled < 0 branch, which
+// fires when net worth falls but the base stays positive -- no other
+// fixture in this file reaches it.
 func TestTheChangeRoundsHalfAwayFromZeroWhenNegative(t *testing.T) {
 	svc, repo := newAccountService(t)
 	// -15 on 20000 is -0.075% -- -7.5 basis points, which must round away

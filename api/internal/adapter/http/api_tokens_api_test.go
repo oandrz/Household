@@ -164,11 +164,11 @@ func TestATokenCannotReachAdmin(t *testing.T) {
 }
 
 // TestAPlatformAdminsTokenCannotReachAdmin is ADR 7 rule 3 for the case the
-// test above cannot see: a token that belongs to a platform admin. The admin
-// guard asks who the caller is, and for this caller the honest answer is
-// "an admin" -- so the guard must also ask how they authenticated. A token
-// gets exactly what a non-admin gets: the same 404 body, and no side effect
-// anywhere behind the guard (no re-auth attempt recorded, no audit row).
+// test above can't see: a token belonging to a platform admin. The admin
+// guard asks who the caller is, and the honest answer here is "an admin" --
+// so it must also ask how they authenticated. A token gets exactly what a
+// non-admin gets: the same 404 body and no side effect behind the guard (no
+// re-auth attempt recorded, no audit row).
 func TestAPlatformAdminsTokenCannotReachAdmin(t *testing.T) {
 	env := newTestEnv(t)
 	env.makePlatformAdmin(t, env.ownerEmail)
@@ -205,11 +205,11 @@ func TestAPlatformAdminsTokenCannotReachAdmin(t *testing.T) {
 	}
 }
 
-// TestAnAdminsTokenBesideALiveSessionCookieGetsNoGrant covers the request the
-// test above cannot send: an admin's token AND a live session cookie, with
-// the right password. The token is the only credential requireSession
-// considers, so this request is a token request -- and it must not open the
-// admin surface for the session whose cookie happened to ride along.
+// TestAnAdminsTokenBesideALiveSessionCookieGetsNoGrant covers what the test
+// above can't: an admin's token AND a live session cookie, with the right
+// password. The token is the only credential requireSession considers, so
+// this is a token request and must not open the admin surface for the
+// session cookie that rode along.
 func TestAnAdminsTokenBesideALiveSessionCookieGetsNoGrant(t *testing.T) {
 	env := newTestEnv(t)
 	env.makePlatformAdmin(t, env.ownerEmail)

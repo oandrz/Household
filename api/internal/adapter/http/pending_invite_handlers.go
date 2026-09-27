@@ -7,17 +7,14 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
-// An owner's view of the invites their household has sent and nobody has
-// accepted yet (partner-invite spec, milestone 1). Before this an invite was
-// written and never read back: the modal closed and Settings showed no trace,
-// so an owner could not tell a sent invite from a lost one. The public,
-// pre-sign-in invite routes live in invite_handlers.go.
+// An owner's view of the invites their household has sent and not yet
+// accepted. The public, pre-sign-in invite routes live in
+// invite_handlers.go.
 
 // inviteKnockDTO is the knock half of a row. Username is a pointer because
-// Telegram legitimately sends none, and the frontend renders the two cases
-// with different words -- "@jane_t tapped the link" against "Someone with
-// no Telegram username tapped the link" -- so "" and absent must not
-// collapse into each other.
+// Telegram legitimately sends none: no username goes out as null, never "",
+// and the frontend words the two cases differently ("@jane_t tapped the
+// link" vs "Someone with no Telegram username tapped the link").
 type inviteKnockDTO struct {
 	Username  *string   `json:"username"`
 	Code      string    `json:"code"`
@@ -25,13 +22,12 @@ type inviteKnockDTO struct {
 }
 
 // inviteSummaryDTO is one row of GET /household/invites, wrapping
-// usecase.InviteSummary. Named for that type rather than "pendingInviteDTO"
-// because admin_directory_handlers.go already declares a pendingInviteDTO for
-// the operator directory's own, differently-shaped view of an invite (no ID,
-// no Capabilities) -- the same collision the usecase layer resolves the same
-// way (InviteSummary vs PendingInvite; see InviteSummary's doc comment). Email
-// is always the real address: the route is owner-only, the same rule that lets
-// only an owner see members' addresses (handleListMembers).
+// usecase.InviteSummary. Named to avoid colliding with
+// admin_directory_handlers.go's differently-shaped pendingInviteDTO (no ID,
+// no Capabilities) -- see InviteSummary's doc comment for the same naming
+// split one layer down. Email is always the real address: the route is
+// owner-only, the same rule that lets only an owner see members' addresses
+// (handleListMembers).
 type inviteSummaryDTO struct {
 	ID           string          `json:"id"`
 	Name         string          `json:"name"`

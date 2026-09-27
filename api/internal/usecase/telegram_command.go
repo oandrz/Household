@@ -12,12 +12,12 @@ import (
 )
 
 // Telegram commands: the household's chat as a second way to write and read
-// money, beside the browser and hearthctl. This file is the "what is valid"
-// half. The "who is asking" half -- chat → user → membership, then owner and
+// money, beside the browser and hearthctl. This file is the "what is
+// valid" half; "who is asking" -- chat → user → membership, then owner and
 // the money capability -- lives at the channel's edge in
-// adapter/telegram/commands.go, exactly where requireSession/requireOwner
-// live for HTTP (ADR 8). Nothing here takes an actor; it takes a household
-// and a membership the edge already vouched for.
+// adapter/telegram/commands.go, the same split HTTP makes via
+// requireSession/requireOwner (ADR 8). Nothing here takes an actor; it
+// takes a household and membership the edge already vouched for.
 
 // TelegramCallerService resolves a chat to the membership behind it. It
 // decides nothing: the adapter's guard reads Role and Capabilities off the
@@ -28,9 +28,8 @@ type TelegramCallerService struct {
 }
 
 // Resolve reports domain.ErrNotFound for a chat bound to no user, or a user
-// with no membership -- the two are one case to the bot ("link your account
-// from the app"), and telling them apart would let a chat probe which
-// accounts exist.
+// with no membership: telling the two apart would let a chat probe which
+// accounts exist, so the bot treats both as one case.
 func (s *TelegramCallerService) Resolve(ctx context.Context, chatID int64) (domain.Membership, error) {
 	userID, err := s.Accounts.ByChatID(ctx, chatID)
 	if err != nil {
@@ -59,9 +58,8 @@ func NewTelegramCommandService(d TelegramCommandDeps) *TelegramCommandService {
 }
 
 // TelegramSpend is one /spend or /income as parsed by the adapter: text
-// fields, not ids, because a person types names. UpdateID is Telegram's own
-// id for the message; it becomes the idempotency key, so an update Telegram
-// redelivers after a restart is a replay rather than a second row.
+// fields, not ids, since a person types names. UpdateID becomes the
+// idempotency key, so a redelivered update is a replay, not a second row.
 type TelegramSpend struct {
 	HouseholdID  string
 	MembershipID string
@@ -169,10 +167,9 @@ func (s *TelegramCommandService) Recent(ctx context.Context, householdID string,
 	return views, nil
 }
 
-// Names is what an IntentParser may choose from: live account nicknames
-// and unarchived category names, both kinds. Names rather than ids so the
-// parser echoes something the person recognises; resolution to an id is
-// LogSpend's job, by the same rule /spend uses.
+// Names is what an IntentParser may choose from: live account nicknames and
+// unarchived category names of both kinds. Names, not ids, so the parser
+// echoes something recognisable; resolving to an id is LogSpend's job.
 func (s *TelegramCommandService) Names(ctx context.Context, householdID string) (accounts, categories []string, err error) {
 	views, err := s.d.Accounts.List(ctx, householdID, false)
 	if err != nil {
@@ -195,10 +192,10 @@ func (s *TelegramCommandService) Names(ctx context.Context, householdID string) 
 	return accounts, categories, nil
 }
 
-// resolveAccount is the same rule hearthctl's import uses -- an exact,
-// case-insensitive name, unambiguous -- plus one convenience a chat needs:
-// no name means the household's only cash account, if there is exactly
-// one. Anything else is refused with the list, never guessed.
+// resolveAccount follows hearthctl import's rule -- an exact,
+// case-insensitive, unambiguous name -- plus one convenience: no name means
+// the only cash account, if exactly one exists. Anything else is refused
+// with the list, never guessed.
 func (s *TelegramCommandService) resolveAccount(ctx context.Context, householdID, name string) (domain.Account, error) {
 	views, err := s.d.Accounts.List(ctx, householdID, false)
 	if err != nil {

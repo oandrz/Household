@@ -7,16 +7,15 @@ import (
 )
 
 // The type rule is the one that survives: every token in this schema is
-// stored as bytea, so a bytea column -- or an array of them -- added by a
-// migration years from now is redacted before its author has heard of this
-// file. It is not a total guarantee, and the two rows at the bottom of the
-// table below say exactly where it stops. The name rules exist because the
-// type rule is not complete even today -- users.password_hash is text.
+// bytea, so a future bytea column or array is redacted before its author has
+// heard of this file. It's not a total guarantee -- the two rows at the
+// bottom show where it stops -- and the name rules exist because the type
+// rule isn't complete even today: users.password_hash is text.
 //
 // The pairs matter: information_schema reports the CATEGORY in data_type for
 // arrays ("ARRAY") and for domains and extension types ("USER-DEFINED"), so
-// half these rows carry a data_type that is not a type name at all. That is
-// the whole reason udt_name is an argument.
+// half these rows carry a data_type that isn't a type name at all -- the
+// whole reason udt_name is an argument.
 func TestColumnIsRedacted(t *testing.T) {
 	cases := []struct {
 		name     string
@@ -40,13 +39,12 @@ func TestColumnIsRedacted(t *testing.T) {
 		{"an id", "household_id", "uuid", "uuid", false},
 		{"an array of something ordinary is still ordinary", "capabilities", "ARRAY", "_text", false},
 		{"an extension type data_type cannot name", "email", "USER-DEFINED", "citext", false},
-		// The gap, pinned rather than described. A domain reports its own
-		// name in udt_name, and resolving that back to bytea needs
-		// pg_type.typbasetype, which this stdlib-only package cannot read.
-		// What catches this column instead is adapter/postgres's schema
-		// sweep, which resolves base types through the catalogue. If someone
-		// ever teaches this function to resolve domains, this row is the one
-		// that goes red and should then be flipped to true.
+		// The gap, pinned rather than described: a domain reports its own name
+		// in udt_name, and resolving that back to bytea needs
+		// pg_type.typbasetype, which this stdlib-only package can't read.
+		// adapter/postgres's schema sweep catches this column instead, by
+		// resolving base types through the catalogue. If this function ever
+		// learns to resolve domains, flip this row to true.
 		{"a domain over bytea, which this rule cannot reach", "token", "USER-DEFINED", "hearth_token", false},
 	}
 

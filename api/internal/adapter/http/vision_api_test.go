@@ -9,13 +9,13 @@ import (
 	"time"
 )
 
-// --- Task 9: vision routes and the guard -----------------------------------
+// --- vision routes and the guard -------------------------------------------
 
 // visionMeasureBody, visionPillarBody, visionMilestoneBody, visionBody and
 // visionResponseBody mirror vision_handlers.go's unexported DTOs field for
-// field, the same "local body struct in the _test package" shape
-// retroDetailBody (marriage_api_test.go) already uses -- this file cannot
-// import the unexported types directly.
+// field -- the same "local body struct in the _test package" shape
+// retroDetailBody uses, since this file cannot import the unexported types
+// directly.
 type visionMeasureBody struct {
 	Label     string `json:"label"`
 	Kind      string `json:"kind"`
@@ -62,10 +62,9 @@ func decodeVision(t *testing.T, rec *httptest.ResponseRecorder) visionResponseBo
 	return body
 }
 
-// TestGetVisionReturnsAnEmptyDocumentForAYearNeverSet pins the empty-state
-// design decision VisionService.Get's own doc comment describes: a year
-// nobody has saved is the page's empty state, not a 404, and its version
-// travels as 0 so the following save is read as a create.
+// TestGetVisionReturnsAnEmptyDocumentForAYearNeverSet pins
+// VisionService.Get's own empty-state contract: never a 404, and version 0
+// so the next save is read as a create.
 func TestGetVisionReturnsAnEmptyDocumentForAYearNeverSet(t *testing.T) {
 	env := newTestEnv(t)
 	session, _ := env.signIn(t, env.ownerEmail, env.ownerPassword)
@@ -82,8 +81,8 @@ func TestGetVisionReturnsAnEmptyDocumentForAYearNeverSet(t *testing.T) {
 
 // TestGetVisionAsALimitedMemberIsRefused pins the read guard on its own
 // merits, the counterpart to TestPutVisionAsALimitedMemberIsRefused below --
-// without this, step 7's mutation check (moving the GET route out of the
-// marriage group) would have nothing to break.
+// without it, a mutation moving the GET route out of the marriage guard
+// group would go undetected.
 func TestGetVisionAsALimitedMemberIsRefused(t *testing.T) {
 	env := newTestEnv(t)
 	session, _ := env.signIn(t, env.limitedEmail, env.limitedPassword)
@@ -94,12 +93,11 @@ func TestGetVisionAsALimitedMemberIsRefused(t *testing.T) {
 	}
 }
 
-// TestGetVisionWithAYearOutOfRangeIs422 pins the range check carried over
-// from Task 4: the repository does int16(year), so a bare strconv.Atoi
-// would let 65538 wrap to year 2 and silently read the wrong row (a 200
-// with someone else's data, not an error). Only an explicit bounds check
-// against domain.MinVisionYear/MaxVisionYear -- run before the service is
-// ever called -- refuses this with 422 instead.
+// TestGetVisionWithAYearOutOfRangeIs422 pins the bounds check
+// parseVisionYear's own doc comment explains: a bare strconv.Atoi would let
+// 65538 wrap to year 2 at the repository's int16 cast and silently read the
+// wrong row, so the explicit range check runs first and refuses this with
+// 422 instead.
 func TestGetVisionWithAYearOutOfRangeIs422(t *testing.T) {
 	env := newTestEnv(t)
 	session, _ := env.signIn(t, env.ownerEmail, env.ownerPassword)
@@ -109,12 +107,10 @@ func TestGetVisionWithAYearOutOfRangeIs422(t *testing.T) {
 }
 
 // TestGetVisionForANeverSetYearCarriesLiteralEmptyArrays reads the raw wire
-// bytes, not the decoded struct: len(pillars) != 0 is equally true of a nil
-// slice once encoding/json has decoded it, because Go's decoder turns a
-// JSON "null" into a nil slice of length 0 exactly like "[]" does. Only
-// checking the bytes actually on the wire proves the empty-vision branch
-// serialises "[]" and never "null" -- what the frontend's apiFetch and zod
-// schemas (Task 10) both assume for every collection.
+// bytes, not the decoded struct: encoding/json turns both "null" and "[]"
+// into a nil slice of length 0, so only the raw bytes can prove the
+// empty-vision branch serialises "[]" and never "null" -- what the
+// frontend's apiFetch and zod schemas assume for every collection.
 func TestGetVisionForANeverSetYearCarriesLiteralEmptyArrays(t *testing.T) {
 	env := newTestEnv(t)
 	session, _ := env.signIn(t, env.ownerEmail, env.ownerPassword)
@@ -132,11 +128,11 @@ func TestGetVisionForANeverSetYearCarriesLiteralEmptyArrays(t *testing.T) {
 	}
 }
 
-// TestPutVisionWithoutACSRFTokenIsRefused is TestMarriageWriteRoutesRequireCSRF's
-// own shape (marriage_api_test.go), applied to the vision write route: the
-// session and csrf cookies are both present, but no X-CSRF-Token header is
-// sent, so requireCSRF -- ahead of requireOwner and the handler -- must be
-// the one refusing this, not a missing-body 400 or a stale-version 409.
+// TestPutVisionWithoutACSRFTokenIsRefused applies
+// TestMarriageWriteRoutesRequireCSRF's shape to the vision write route:
+// session and csrf cookies are present but no X-CSRF-Token header is sent,
+// so requireCSRF -- ahead of requireOwner and the handler -- must be what
+// refuses this, not a missing-body 400 or a stale-version 409.
 func TestPutVisionWithoutACSRFTokenIsRefused(t *testing.T) {
 	env := newTestEnv(t)
 	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
@@ -153,11 +149,10 @@ func TestPutVisionWithoutACSRFTokenIsRefused(t *testing.T) {
 }
 
 // TestPutVisionAsALimitedMemberIsRefused proves the marriage capability
-// gate on the write route: env.limitedEmail holds calendar and chores only,
-// and no real membership can ever hold marriage without also being an owner
-// (domain.ErrLimitedCannotHoldMarriage) -- the same reasoning
-// TestMarriageRoutesRequireMarriageAndOwner's own doc comment gives for why
-// no third caller shape is needed here.
+// gate: env.limitedEmail holds calendar and chores only, and no membership
+// can hold marriage without also being an owner
+// (domain.ErrLimitedCannotHoldMarriage) -- the same reason
+// TestMarriageRoutesRequireMarriageAndOwner needs no third caller shape.
 func TestPutVisionAsALimitedMemberIsRefused(t *testing.T) {
 	env := newTestEnv(t)
 	session, csrf := env.signIn(t, env.limitedEmail, env.limitedPassword)
@@ -171,11 +166,10 @@ func TestPutVisionAsALimitedMemberIsRefused(t *testing.T) {
 }
 
 // TestPutVisionWithAYearOutOfRangeIs422 is the save-path counterpart of
-// TestGetVisionWithAYearOutOfRangeIs422: VisionService.Save does validate
-// its own year via domain.Vision.Validate, but the handler must not depend
-// on that downstream layer to catch a malformed URL segment -- so this
-// pins that the handler's own check runs first, answering INVALID_YEAR
-// rather than falling through to the service's VISION_INVALID.
+// TestGetVisionWithAYearOutOfRangeIs422: VisionService.Save validates its
+// own year too, but the handler must not depend on that downstream check to
+// catch a malformed URL segment, so this pins that the handler's own check
+// runs first -- INVALID_YEAR, not the service's VISION_INVALID.
 func TestPutVisionWithAYearOutOfRangeIs422(t *testing.T) {
 	env := newTestEnv(t)
 	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
@@ -205,19 +199,18 @@ func TestPutVisionWithAStaleVersionIsAConflict(t *testing.T) {
 	assertErrorResponse(t, second, http.StatusConflict, "VISION_CHANGED")
 }
 
-// TestPutVisionWithALinkedMeasureMissingAGoalIs422 pins errors.go's own
-// split of the domain's two measure-shape sentinels into two different
-// codes and messages (the final whole-branch review's own A3 finding): a
+// TestPutVisionWithALinkedMeasureMissingAGoalIs422 pins errors.go's split of
+// the domain's two measure-shape sentinels into two codes and messages: a
 // household that switches a measure to "A savings goal" and saves without
-// picking one has picked NEITHER, so it must never be told VISION_MEASURE_
-// INVALID's "not both" copy -- that message is actively wrong for this
-// shape. VisionModal.tsx's own client-side check (added alongside this
-// fix) stops this request from ever leaving the browser, which is exactly
-// why this HTTP-layer test exists: with that guard in place, nothing else
-// in this codebase reaches MapDomainError's ErrVisionMeasureGoalRequired
-// case, so only a test that calls the handler directly -- bypassing the
-// client guard the way a stale frontend build or a non-browser caller
-// would -- can prove that case, and its own code, is wired correctly.
+// picking one has picked NEITHER, so it must never get
+// VISION_MEASURE_INVALID's "not both" copy, which is wrong for this shape.
+//
+// VisionModal.tsx's own client-side check normally stops this request from
+// leaving the browser, so nothing else in this codebase reaches
+// MapDomainError's ErrVisionMeasureGoalRequired case -- only a test that
+// calls the handler directly, bypassing that guard the way a stale
+// frontend build or a non-browser caller would, can prove it is wired
+// correctly.
 func TestPutVisionWithALinkedMeasureMissingAGoalIs422(t *testing.T) {
 	env := newTestEnv(t)
 	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
@@ -241,11 +234,11 @@ func TestPutVisionWithALinkedMeasureMissingAGoalIs422(t *testing.T) {
 	assertErrorResponse(t, rec, http.StatusUnprocessableEntity, "VISION_MEASURE_GOAL_REQUIRED")
 }
 
-// TestPutVisionRoundTripsPillarsAndMilestones is a wire-level pin that a
-// save's response actually carries back what was sent, composed with the
-// service's own arithmetic (a 2-of-2 typed measure comes back Met) --
-// VisionService's own compose logic is tested in usecase/vision_test.go;
-// this is what proves the HTTP layer moves that shape onto the wire intact.
+// TestPutVisionRoundTripsPillarsAndMilestones pins that a save's response
+// carries back what was sent, composed with the service's own arithmetic (a
+// 2-of-2 typed measure comes back Met). VisionService's compose logic is
+// tested in usecase/vision_test.go; this proves the HTTP layer moves that
+// shape onto the wire intact.
 func TestPutVisionRoundTripsPillarsAndMilestones(t *testing.T) {
 	env := newTestEnv(t)
 	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
@@ -287,11 +280,10 @@ func TestPutVisionRoundTripsPillarsAndMilestones(t *testing.T) {
 }
 
 // TestGetVisionWithNoYearDefaultsToTheCurrentYear pins the branch
-// handleGetVision takes when the caller names no year at all --
-// VisionService.CurrentYear()'s own contract -- and is plausibly the first
-// request Task 10's page makes on load, which nothing above this test
-// exercises: every other test in this file always sends an explicit
-// ?year=.
+// handleGetVision takes when the caller names no year at all
+// (VisionService.CurrentYear()'s own contract) -- the shape of a page's
+// first request on load, which no test above this one exercises: every
+// other test in this file sends an explicit ?year=.
 func TestGetVisionWithNoYearDefaultsToTheCurrentYear(t *testing.T) {
 	env := newTestEnv(t)
 	session, _ := env.signIn(t, env.ownerEmail, env.ownerPassword)
@@ -307,12 +299,10 @@ func TestGetVisionWithNoYearDefaultsToTheCurrentYear(t *testing.T) {
 	}
 }
 
-// TestPutVisionRoundTripsALinkedMeasure closes a coverage gap Task 8's own
-// report named explicitly for whoever wrote the next Vision task that
-// exercises goal-linking through Save (task-8-report.md's Concerns
-// section): no test above links a measure to a real goal, so four fields
-// Task 10's zod schema mirrors -- hasFigure, percent, goalId, goalName --
-// have never been observed populated on the wire.
+// TestPutVisionRoundTripsALinkedMeasure closes a coverage gap: no test
+// above links a measure to a real goal, so four wire fields the frontend's
+// zod schema mirrors -- hasFigure, percent, goalId, goalName -- have never
+// been observed populated.
 //
 // The goal is given one contribution bringing it to a distinctive 50%,
 // deliberately not 0: Current is always 0 for a linked measure

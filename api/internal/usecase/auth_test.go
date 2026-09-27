@@ -47,22 +47,16 @@ func TestSignInWithAWrongPasswordReportsTwoTriesLeft(t *testing.T) {
 }
 
 // TestSignInRejectsAPasswordOverTheLengthCeilingWithoutHashing proves the
-// fix for the uncapped-password DoS: argon2id's cost scales with the size
-// of the string it hashes, so a caller who submits a multi-megabyte
-// password must never reach the hasher at all, decoy or real. The
-// resulting failure must still look exactly like a wrong password (see
-// TestSignInWithATooLongPasswordFailsIdenticallyToAWrongPassword below for
-// the side-by-side comparison); this test's extra job is confirming no
-// Verify call happened.
+// uncapped-password DoS fix: argon2id's cost scales with input size, so an
+// oversized password must never reach the hasher, decoy or real. The
+// failure must still look like an ordinary wrong password (see
+// TestSignInWithATooLongPasswordFailsIdenticallyToAWrongPassword); this
+// test's own job is confirming Verify was never called.
 //
-// It checks this for both a known address (Andreas) and an unknown one
-// (stranger@example.com), not just the former. The unknown-address branch's
-// entire reason to call Verify at all is timing parity with the known
-// branches (see the decoy doc comment in auth.go) — if the length guard
-// were ever narrowed to cover only the real-verify path and not every decoy
-// call site, the known-address half of this test would still pass while
-// unknown-vs-known timing quietly diverged again for oversized passwords.
-// Asserting both branches skip the hasher is what actually pins that down.
+// It checks both a known and an unknown address, because the unknown
+// branch's only reason to call Verify is timing parity -- a guard narrowed
+// to the real-verify path alone would pass the known-address half while
+// letting known-vs-unknown timing diverge again for oversized passwords.
 func TestSignInRejectsAPasswordOverTheLengthCeilingWithoutHashing(t *testing.T) {
 	f := newFixture(t)
 	tooLong := strings.Repeat("a", 257)
@@ -95,11 +89,10 @@ func TestSignInRejectsAPasswordOverTheLengthCeilingWithoutHashing(t *testing.T) 
 	}
 }
 
-// TestSignInWithATooLongPasswordFailsIdenticallyToAWrongPassword is the
-// indistinguishability check the coordinator asked for: a too-long password
-// against a known user must produce the identical SignInFailedError shape a
-// wrong password of ordinary length would, using two independent fixtures
-// so neither call's recorded attempt affects the other's countdown.
+// TestSignInWithATooLongPasswordFailsIdenticallyToAWrongPassword: a too-long
+// password against a known user must produce the identical SignInFailedError
+// shape a wrong password of ordinary length would. Two independent fixtures
+// keep one call's recorded attempt from affecting the other's countdown.
 func TestSignInWithATooLongPasswordFailsIdenticallyToAWrongPassword(t *testing.T) {
 	fTooLong := newFixture(t)
 	fWrong := newFixture(t)
@@ -242,14 +235,11 @@ func TestAnUnknownEmailNeverLocksARealHousehold(t *testing.T) {
 
 // TestSignInForARemovedMemberFailsIdenticallyToAnUnknownAddress pins the fix
 // for the 404 an ex-member used to get at sign-in: removing a member deletes
-// only its memberships row, not the users row underneath it (see
-// MemberService.Remove and the fix report), so Members.ByUser(ctx, user.ID)
-// returns domain.ErrNotFound for a real, still-existing user. SignIn used to
-// propagate that bare, and MapDomainError turned it into 404 -- a status no
-// other sign-in failure ever produces, and one a stranger's guess never
-// gets, which is itself a tell that the address once belonged to someone.
-// This must fail exactly like a stranger's guess instead: the same
-// *SignInFailedError shape, the same countdown.
+// only its memberships row, not the users row, so Members.ByUser returns
+// domain.ErrNotFound for a real, still-existing user -- and SignIn used to
+// propagate that bare into a 404 no other sign-in failure produces, a tell
+// the address once belonged to someone. This must fail like a stranger's
+// guess instead: the same *SignInFailedError shape, the same countdown.
 func TestSignInForARemovedMemberFailsIdenticallyToAnUnknownAddress(t *testing.T) {
 	f := newFixture(t)
 	ctx := context.Background()
@@ -297,14 +287,13 @@ func TestUsersWithoutAPasswordCannotSignIn(t *testing.T) {
 	if !errors.As(err, &failure) {
 		t.Fatalf("err = %v, want *SignInFailedError — a credential-less member must not sign in", err)
 	}
-	// Pin the guard's actual purpose: the hasher must never be asked to
-	// verify a password against Ethan's own (empty) stored hash. Without
-	// this assertion the test would pass even with the guard deleted,
-	// because fakeHasher happens to reject an empty encoded hash for every
-	// input. SignIn does run a decoy verification for this branch now (see
-	// TestACredentialLessMemberRunsADecoyVerification below), against a
-	// different encoded hash entirely — that call is expected and doesn't
-	// count here.
+	// Pins the guard's actual purpose: the hasher must never be asked to
+	// verify against Ethan's own (empty) stored hash. Without this
+	// assertion the test would pass even with the guard deleted, since
+	// fakeHasher happens to reject an empty encoded hash regardless. SignIn
+	// does run a decoy verification now
+	// (TestACredentialLessMemberRunsADecoyVerification), but against a
+	// different hash entirely, so it doesn't count here.
 	if n := f.hasher.verifyCallsWithEncoded(""); n != 0 {
 		t.Fatalf("Verify was called %d times against the member's own empty hash; "+
 			"a credential-less member must be rejected before any real password comparison", n)
@@ -312,14 +301,13 @@ func TestUsersWithoutAPasswordCannotSignIn(t *testing.T) {
 }
 
 // TestUnknownAddressRunsADecoyVerification, TestALockedHouseholdRunsADecoyVerification
-// and TestACredentialLessMemberRunsADecoyVerification pin the timing-parity
-// fix: every branch of SignIn that returns without a real password
-// comparison must still call Hasher.Verify exactly once, against a decoy
-// hash, so that branch costs the same (against a real hasher) as one that
-// does compare a real password. Without the decoy call, these branches would
+// and TestACredentialLessMemberRunsADecoyVerification pin timing parity:
+// every SignIn branch that returns without a real password comparison must
+// still call Hasher.Verify once, against a decoy hash, so it costs the same
+// as a branch that does compare. Skip the decoy call and these branches
 // return near-instantly while a wrong-password guess pays argon2id's real
-// cost — a timing side channel that defeats the same indistinguishability
-// the error type and the attempts countdown exist to protect.
+// cost -- a timing side channel defeating what the error type and countdown
+// protect.
 func TestUnknownAddressRunsADecoyVerification(t *testing.T) {
 	f := newFixture(t)
 
@@ -358,11 +346,9 @@ func TestACredentialLessMemberRunsADecoyVerification(t *testing.T) {
 }
 
 // TestLockedUntilAdvancesWhileALockedHouseholdIsGuessed and its companion
-// below pin the fix for a timing oracle: a caller hammering an
-// already-locked household must see LockedUntil advance exactly like a
-// caller hammering an unknown address does. If the locked branch ever stops
-// recording the attempt, LockedUntil freezes here while the unknown-address
-// companion keeps moving, and the two paths become distinguishable again.
+// below pin a timing-oracle fix: hammering an already-locked household must
+// advance LockedUntil exactly like hammering an unknown address does, or
+// the two paths become distinguishable again.
 func TestLockedUntilAdvancesWhileALockedHouseholdIsGuessed(t *testing.T) {
 	f := newFixture(t)
 	ctx := context.Background()
@@ -431,10 +417,9 @@ func TestRequestMagicLinkSendsAnEmail(t *testing.T) {
 	if err := f.auth.RequestMagicLink(context.Background(), "andreas@hearth.family"); err != nil {
 		t.Fatalf("RequestMagicLink: %v", err)
 	}
-	// The send happens off the request path (see sendMagicLinkAsync), so the
-	// double's state isn't settled the instant RequestMagicLink returns —
-	// wait for it before reading magicLinks, or this races the background
-	// goroutine as well as flaking under load.
+	// The send happens off the request path (sendMagicLinkAsync), so the
+	// double's state isn't settled the instant RequestMagicLink returns --
+	// wait for it before reading magicLinks, or this races the goroutine.
 	f.mailer.waitForSend(t)
 	if got := f.mailer.sentCount(); got != 1 {
 		t.Fatalf("sent = %d, want 1", got)
@@ -459,13 +444,11 @@ func TestRequestMagicLinkStaysSilentForAnUnknownAddress(t *testing.T) {
 
 // TestRequestMagicLinkStaysSilentForARemovedMember pins the fix for the
 // unusable link an ex-member used to be mailed: removing a member deletes
-// only the memberships row, not the users row underneath it (see
-// MemberService.Remove and the fix report), so RequestMagicLink's
-// known-address branch used to run for them too -- minting a token,
-// persisting it, and mailing a link that ConsumeMagicLink could never turn
-// into a session (it calls Members.ByUser itself and would fail
-// identically). This must be treated exactly like an unknown address: no
-// email sent, no error.
+// only the memberships row, not the users row (see MemberService.Remove),
+// so the known-address branch used to run for them too -- minting a token
+// and mailing a link ConsumeMagicLink could never turn into a session (it
+// calls Members.ByUser itself and fails identically). This must be treated
+// exactly like an unknown address: no email, no error.
 func TestRequestMagicLinkStaysSilentForARemovedMember(t *testing.T) {
 	f := newFixture(t)
 	ctx := context.Background()
@@ -492,10 +475,9 @@ func TestMagicLinkIsRateLimitedSilentlyToThreePerHour(t *testing.T) {
 		f.clock.Advance(time.Minute)
 	}
 
-	// The fourth request must look exactly like the first three from the
-	// outside. Returning an error here would make four requests an oracle for
-	// whether the address belongs to a member, which is the property this
-	// endpoint exists to avoid.
+	// The fourth request must look exactly like the first three from outside.
+	// An error here would make four requests an oracle for whether the
+	// address belongs to a member -- the property this endpoint exists to hide.
 	if err := f.auth.RequestMagicLink(ctx, "andreas@hearth.family"); err != nil {
 		t.Fatalf("the rate limit must be silent, got err = %v", err)
 	}
@@ -586,10 +568,9 @@ func TestAMagicLinkWorksWhileTheHouseholdIsLocked(t *testing.T) {
 
 // TestRequestMagicLinkSwallowsAMailerFailure pins the fix for the oracle a
 // propagated mailer error would create: RequestMagicLink's contract is
-// "always nil," and a relay outage must not carve out an exception for
-// known addresses only, since unknown and rate-limited addresses can never
-// fail this way. A caller who can make the relay misbehave (or who simply
-// catches it misbehaving) must not learn anything from the response.
+// "always nil". Unknown and rate-limited addresses never reach the mailer,
+// so an error surfaced by a relay outage would single out a known address
+// to anyone who can make the relay misbehave, or catch it misbehaving.
 func TestRequestMagicLinkSwallowsAMailerFailure(t *testing.T) {
 	f := newFixture(t)
 	f.mailer.failNextMagicLink(errors.New("smtp: connection refused"))
@@ -616,11 +597,9 @@ func TestRequestMagicLinkSwallowsAMailerFailure(t *testing.T) {
 }
 
 // TestRequestMagicLinkSwallowsAPersistenceFailure is
-// TestRequestMagicLinkSwallowsAMailerFailure's sibling for the other two
-// steps that are reachable only from the known-address branch: token
-// generation and MagicLinks.Create. An INSERT that fails on a statement
-// timeout or a connection blip is exactly as reachable-only-by-a-member as
-// a mailer failure is, so it must be swallowed identically.
+// TestRequestMagicLinkSwallowsAMailerFailure's sibling for the other steps
+// reachable only from the known-address branch: token generation and
+// MagicLinks.Create. A failing INSERT must be swallowed identically.
 func TestRequestMagicLinkSwallowsAPersistenceFailure(t *testing.T) {
 	f := newFixture(t)
 	f.magicLinks.failNextMagicLinkCreate(errors.New("pq: statement timeout"))
@@ -644,14 +623,13 @@ func TestRequestMagicLinkSwallowsAPersistenceFailure(t *testing.T) {
 	}
 }
 
-// TestSendMagicLinkAsyncRecoversFromAPanicInTheSend pins the fix for the
-// second finding: chi's middleware.Recoverer guards only the request
-// goroutine, and sendMagicLinkAsync's send runs on a goroutine of its own
-// after the request has already returned. Without a recover() there, this
-// test's panicking mailer would crash the entire test binary right here,
-// rather than merely failing an assertion — that is the whole point of the
-// fix, and it's why this test's strongest assertion is simply "execution
-// reached this line at all."
+// TestSendMagicLinkAsyncRecoversFromAPanicInTheSend pins a fix: chi's
+// middleware.Recoverer guards only the request goroutine, but
+// sendMagicLinkAsync's send runs on a goroutine of its own after the
+// request has already returned. Without a recover() there, a panicking
+// mailer would crash the whole test binary rather than fail an assertion --
+// which is why this test's strongest assertion is simply "execution reached
+// this line at all."
 func TestSendMagicLinkAsyncRecoversFromAPanicInTheSend(t *testing.T) {
 	f := newFixture(t)
 	f.mailer.panicNextMagicLink("simulated panic in the mail client")
@@ -675,16 +653,14 @@ func TestSendMagicLinkAsyncRecoversFromAPanicInTheSend(t *testing.T) {
 	}
 }
 
-// TestRequestMagicLinkPerformsTheSameReadsForEveryOutcome pins the other
-// half of the fix: a known address under the limit, an unknown address, and
-// a known address that has exhausted the limit must all perform the exact
-// same number of repository reads, in the same order. Before this fix, a
-// rate-limited request returned before ever calling Users.ByEmail, which
-// made the read count itself distinguish "rate limited" from the other two
-// cases — and since CountRecentMagicLinks joins through users, an unknown
-// address can never reach the rate-limited branch in the first place, so
-// that asymmetry was really a membership oracle wearing a read-count
-// disguise.
+// TestRequestMagicLinkPerformsTheSameReadsForEveryOutcome pins a membership
+// oracle shut: a known address under the limit, an unknown address, and
+// a known address that has exhausted the limit must all perform the same
+// repository reads, in the same order. The bug this pins: a rate-limited
+// request used to return before calling Users.ByEmail, and since
+// CountRecentMagicLinks joins through users, an unknown address can never
+// reach the rate-limited branch at all -- so that read-count asymmetry was
+// really a membership oracle in disguise.
 func TestRequestMagicLinkPerformsTheSameReadsForEveryOutcome(t *testing.T) {
 	countReads := func(t *testing.T, do func(f *fixture)) (byEmail, countSince int) {
 		t.Helper()
@@ -724,13 +700,12 @@ func TestRequestMagicLinkPerformsTheSameReadsForEveryOutcome(t *testing.T) {
 		if err := f.auth.RequestMagicLink(ctx, "andreas@hearth.family"); err != nil {
 			t.Fatalf("RequestMagicLink: %v", err)
 		}
-		// Self-check: if magicLinkPerHourLimit ever changes in auth.go
-		// without this test's local copy following it, the priming loop
-		// above would stop actually exhausting the limit, and this whole
-		// test would silently compare "known, under the limit" against
-		// itself twice instead of against the rate-limited case. Confirm
-		// the fourth request really was rate-limited — no additional send —
-		// before trusting the read counts below.
+		// Self-check: if magicLinkPerHourLimit changes in auth.go without
+		// this test's local copy following it, the priming loop above stops
+		// exhausting the limit, and this test would silently compare
+		// "known, under the limit" against itself instead of the
+		// rate-limited case. Confirm the fourth request really was
+		// rate-limited (no additional send) before trusting the read counts.
 		if got := f.mailer.sentCount(); got != primed {
 			t.Fatalf("sent = %d after the priming loop's %d, want no change — "+
 				"the request under test was not actually rate-limited; "+

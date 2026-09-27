@@ -14,30 +14,24 @@ import (
 )
 
 // maxRequestBodyBytes bounds every JSON body this API accepts, except the
-// two routes named on decodeJSONBodyLimit's own doc comment below, which
-// carry a legitimately larger shape and call decodeJSONBodyLimit directly
-// with their own constant instead. It is one constant used everywhere else,
-// rather than a per-handler value, so the limit cannot silently drift from
-// one route to another. 1 KiB is generous for every other request shape in
-// this file: the largest legitimate body (a member invite, or a full
-// household update) is a few hundred bytes of field names and short
-// strings.
+// routes named on decodeJSONBodyLimit's own doc comment below, which
+// call it directly with their own larger constant instead. It is one
+// constant everywhere else so the limit cannot silently drift between
+// routes. 1 KiB is generous here: the largest legitimate body (a member
+// invite, or a full household update) is a few hundred bytes.
 const maxRequestBodyBytes = 1024
 
 // decodeJSONBody reads r.Body bounded to maxRequestBodyBytes and decodes it
-// into dest, writing the response itself on any failure. A caller over the
-// limit gets 413 PAYLOAD_TOO_LARGE through the standard error envelope
-// (never net/http's own bare "http: request body too large" text); any
-// other decode failure -- malformed JSON, a wrong-shaped field -- gets 400
-// INVALID_BODY, exactly as every handler already answered before this
-// helper existed.
+// into dest, writing the response itself on any failure: 413
+// PAYLOAD_TOO_LARGE through the standard error envelope (never net/http's
+// own bare "http: request body too large" text) when the caller is over the
+// limit, 400 INVALID_BODY for any other decode failure.
 //
 // Without this, an unauthenticated POST (sign-in, magic-link, magic-link
-// consume are all reachable pre-auth and pre-CSRF) carrying a
-// multi-gigabyte body would be decoded into memory in full before the
-// handler ever got a chance to reject it -- the worst place for an unbounded
-// read to live, since none of the usual gates (a session, a CSRF token)
-// have run yet.
+// consume -- all reachable pre-auth and pre-CSRF) carrying a multi-gigabyte
+// body would be decoded into memory in full before the handler could reject
+// it: the worst place for an unbounded read, since no session or CSRF gate
+// has run yet.
 //
 // Usage: `var req someRequest; if !decodeJSONBody(w, r, &req) { return }`.
 func decodeJSONBody(w http.ResponseWriter, r *http.Request, dest any) bool {
@@ -50,20 +44,19 @@ func decodeJSONBody(w http.ResponseWriter, r *http.Request, dest any) bool {
 //
 //   - PUT /budgets/{month} always carries the household's entire category
 //     list as budget lines (full-replace, never a patch -- see
-//     BudgetRepository.Upsert's own doc comment), and that list's length is
-//     not bounded by this codebase (Task 10 adds category creation with no
-//     cap). budget_handlers.go's maxBudgetRequestBodyBytes is the caller
-//     that needs this.
+//     BudgetRepository.Upsert's own doc comment), and that list has no
+//     length cap. Caller: budget_handlers.go's maxBudgetRequestBodyBytes.
 //   - PATCH /retros/{month} carries three free-text fields (went well / was
-//     hard / notes) this feature deliberately never caps (usecase.RetroUpdate's
-//     own doc comment). retro_handlers.go's
-//     maxRetroRequestBodyBytes is the caller that needs this.
+//     hard / notes) this feature deliberately never caps
+//     (usecase.RetroUpdate's own doc comment). Caller:
+//     retro_handlers.go's maxRetroRequestBodyBytes.
 //   - POST /marriage/agreements/proposals and
 //     POST /marriage/agreements/proposals/{id}/park carry rune-capped free
 //     text (body, previousBody, note, park note) at 500 runes each, and a
-//     500-rune CJK field alone exceeds the 1 KiB default.
-//     agreement_handlers.go's maxAgreementRequestBodyBytes is the caller that
-//     needs this.
+//     500-rune CJK field alone exceeds the 1 KiB default. Caller:
+//     agreement_handlers.go's maxAgreementRequestBodyBytes.
+//   - PUT /marriage/vision/{year} carries a whole vision document.
+//     Caller: vision_handlers.go's maxVisionRequestBodyBytes.
 //
 // Every other route keeps using the tighter default via decodeJSONBody
 // above.
@@ -91,20 +84,20 @@ func decodeJSONBodyLimit(w http.ResponseWriter, r *http.Request, dest any, maxBy
 	return true
 }
 
-// isJSONMediaType is the login-CSRF guard, and it is a security check, not
-// tidiness. An HTML form on any other site can post text/plain whose body
-// happens to be valid JSON, and the decoder alone would accept it. That
-// matters most on the public routes that hand out a session cookie -- sign-in,
-// magic-link consume, sign-up complete, invite accept -- because they cannot
-// sit behind requireCSRF (no session exists yet) and SameSite=Lax does not stop
-// a browser storing a cookie from a cross-site form post. So a hostile page
-// could sign its visitor in to the attacker's household.
+// isJSONMediaType is the login-CSRF guard, a security check, not tidiness.
+// An HTML form on any other site can post text/plain whose body happens to
+// be valid JSON, which the decoder alone would accept. That matters most on
+// the public routes that hand out a session cookie -- sign-in, magic-link
+// consume, sign-up complete, invite accept -- since they cannot sit behind
+// requireCSRF (no session exists yet) and SameSite=Lax does not stop a
+// cross-site form post from storing a cookie: a hostile page could sign its
+// visitor in to the attacker's household.
 //
-// A form cannot send application/json; a script can only do so cross-origin
-// after a CORS preflight, which this API never answers. Requiring the media
-// type therefore closes the hole for every route at once, including routes
-// added later. Parameters such as charset are allowed. The web client
-// (apiFetch) and hearthctl already send this header on every body.
+// A form cannot send application/json, and a script can only do so
+// cross-origin after a CORS preflight this API never answers, so requiring
+// the media type closes the hole for every route, including ones added
+// later. Charset and other parameters are allowed; apiFetch and hearthctl
+// already send this header on every body.
 func isJSONMediaType(header string) bool {
 	mediaType, _, err := mime.ParseMediaType(header)
 	return err == nil && mediaType == "application/json"
@@ -112,14 +105,12 @@ func isJSONMediaType(header string) bool {
 
 // telegramChatTakenMessage and telegramAlreadyLinkedMessage are the two
 // sentences a member can be given for the same underlying refusal, reached
-// two different ways: POST .../confirm surfaces it as one of these 409s
-// below, and GET .../link/{id} surfaces it earlier, before a confirm is even
-// attempted, as a usecase.TelegramLinkReasonChatTaken /
-// usecase.TelegramLinkReasonAlreadyLinked code on the status response
-// (telegramLinkReasonMessage, telegram_handlers.go). The usecase layer may
-// not import this package or hold user-facing copy (internal/usecase may
-// depend only on the standard library and internal/domain), so it hands back
-// a stable code and this package -- the only one that may -- turns it into
+// two ways: POST .../confirm surfaces one of these 409s below, and GET
+// .../link/{id} surfaces it earlier as a usecase.TelegramLinkReasonChatTaken
+// / usecase.TelegramLinkReasonAlreadyLinked code on the status response
+// (telegramLinkReasonMessage, telegram_handlers.go). internal/usecase may
+// not import this package or hold user-facing copy, so it hands back a
+// stable code and this package -- the only one that may -- turns it into
 // words, once, for both call sites.
 const (
 	telegramChatTakenMessage     = "That Telegram chat is already connected to another Hearth account."
@@ -132,12 +123,9 @@ const (
 // here.
 //
 // It takes *http.Request, not just http.ResponseWriter, so the default,
-// unmapped-error branch can recover the chi request ID from the request's
-// context via middleware.GetReqID: chi's middleware.RequestID only injects
-// the ID into the context, it exposes no other way to read it, and there is
-// no path from a bare http.ResponseWriter back to that context. This is a
-// deliberate, narrow deviation from the signature the task brief sketches
-// (MapDomainError(w, err)) -- see the task report.
+// unmapped-error branch can recover the chi request ID via
+// middleware.GetReqID: chi's middleware.RequestID only injects the ID into
+// the context, with no other way to read it back out.
 //
 // The table itself is domainErrorResponses, below; this function is the
 // SignInFailedError special case and the loop that walks it.
@@ -146,14 +134,13 @@ func MapDomainError(w http.ResponseWriter, r *http.Request, err error) {
 		return
 	}
 
-	// SignInFailedError must be matched with errors.As, not by relying on
-	// errors.Is walking its Unwrap chain: Unwrap alone would correctly pick
-	// the right *sentinel* (ErrHouseholdLocked vs ErrInvalidCredentials), but
-	// only errors.As recovers the concrete struct, which is what carries
-	// AttemptsRemaining and LockedUntil for the response body. The 401 and
-	// 423 cases below are intentionally distinct -- see the type's own doc
-	// comment in usecase/auth.go -- and must never be collapsed into one
-	// status.
+	// SignInFailedError must be matched with errors.As, not errors.Is walking
+	// its Unwrap chain: Unwrap alone picks the right sentinel
+	// (ErrHouseholdLocked vs ErrInvalidCredentials), but only errors.As
+	// recovers the concrete struct carrying AttemptsRemaining and
+	// LockedUntil for the response body. The 401 and 423 cases below are
+	// intentionally distinct (usecase/auth.go's own doc comment) and must
+	// never be collapsed into one status.
 	var signInErr *usecase.SignInFailedError
 	if errors.As(err, &signInErr) {
 		if signInErr.Locked {
@@ -211,12 +198,12 @@ func matchesAny(err error, sentinels []error) bool {
 }
 
 // domainErrorResponses is every sentinel the API answers with something more
-// specific than a 500, IN ORDER. Rows are tried top to bottom and the first
-// match wins, exactly as the switch this table replaced did, and the order is
-// load-bearing: errors.Is walks wrapped errors, so one error can match more
-// than one row. *domain.BillNotPayableError and *domain.BillPaymentNotLatestError
-// both unwrap to domain.ErrForbidden, and a sentinel a service translated out
-// of domain.ErrAlreadyExists must be answered by its own row, which is why
+// specific than a 500, IN ORDER: rows are tried top to bottom and the first
+// match wins. The order is load-bearing because errors.Is walks wrapped
+// errors, so one error can match more than one row --
+// *domain.BillNotPayableError and *domain.BillPaymentNotLatestError both
+// unwrap to domain.ErrForbidden, and a sentinel translated out of
+// domain.ErrAlreadyExists must be answered by its own row, which is why
 // ALREADY_EXISTS sits last. Add a new row where its meaning belongs, above
 // any more general row it could also match.
 //
@@ -230,12 +217,12 @@ var domainErrorResponses = []domainErrorResponse{
 		message:   "That email or password is incorrect.",
 	},
 	{
-		// Deliberately its own code and its own message, never folded into
+		// Deliberately its own code and message, not folded into
 		// HOUSEHOLD_LOCKED below: the two locks are counted in separate
-		// ledgers on purpose (see the admin_reauth_attempts comment in
-		// 00012_admin.sql), and telling an operator their *household* is
-		// locked when only the admin surface is would send them to reset a
-		// password that is working fine.
+		// ledgers on purpose (00012_admin.sql's admin_reauth_attempts
+		// comment), and telling an operator their household is locked
+		// when only the admin surface is would send them to reset a
+		// password that works fine.
 		sentinels: []error{domain.ErrAdminLocked},
 		status:    http.StatusLocked,
 		code:      "ADMIN_LOCKED",
@@ -284,11 +271,11 @@ var domainErrorResponses = []domainErrorResponse{
 		message:   "That feature flag does not exist in this build.",
 	},
 	{
-		// Reaching the HTTP layer means a calculation is wrong, not that the
-		// caller sent a bad request -- nothing on this API surface accepts a
-		// caller-supplied amount that could overflow. Handled like the
-		// default branch (logged, generic 500) with its own case only so the
-		// log line names the specific cause.
+		// Reaching the HTTP layer means a calculation is wrong, not a bad
+		// request -- nothing on this API surface accepts a caller-supplied
+		// amount that could overflow. Handled like the default branch
+		// (logged, generic 500); it has its own case only so the log names
+		// the cause.
 		sentinels: []error{domain.ErrAmountOverflow},
 		internal:  true,
 	},
@@ -299,13 +286,11 @@ var domainErrorResponses = []domainErrorResponse{
 		internal:  true,
 	},
 	{
-		// Unlike ErrAmountOverflow above, this is no longer only an internal-
-		// arithmetic signal: HouseholdService.Update (Task 15) wraps a
-		// caller-supplied currency code's domain.NewMoney failure in this
-		// same sentinel (see normalizeCurrency in usecase/household.go), so
-		// a typo in PATCH /household's primaryCurrency or secondaryCurrency
-		// field reaches here too. That is an ordinary bad request, not a
-		// calculation gone wrong, and must not 500.
+		// A currency-code problem, never arithmetic: HouseholdService.Update
+		// returns normalizeCurrency's error, which domain.ParseCurrency wraps
+		// in this sentinel, so a typo in PATCH /household's primaryCurrency
+		// or secondaryCurrency field reaches here. That is an ordinary bad
+		// request, not a calculation gone wrong, and must not 500.
 		sentinels: []error{domain.ErrInvalidMoney},
 		status:    http.StatusUnprocessableEntity,
 		code:      "INVALID_CURRENCY",
@@ -314,8 +299,8 @@ var domainErrorResponses = []domainErrorResponse{
 	{
 		// Every money field a caller sends that cannot go below zero -- a
 		// holding event's amount, a unit price, a primary-currency figure.
-		// Before this row existed they all wrapped ErrInvalidMoney and were
-		// told their currency code was wrong. Quantity.Value and
+		// Don't wrap ErrInvalidMoney for a negative amount: that row tells
+		// the caller their currency code was wrong. Quantity.Value and
 		// Money.Prorate raise it too, but only on stored figures the
 		// database's own CHECKs already keep non-negative.
 		sentinels: []error{domain.ErrNegativeAmount},
@@ -421,15 +406,13 @@ var domainErrorResponses = []domainErrorResponse{
 	},
 	{
 		// 502 rather than 500: the failure is upstream of this service, not
-		// a bug in it. That is not always "go look at Mailpit, not here",
-		// though -- a stray path segment in MAILPIT_API_URL surfaces as this
-		// same sentinel (see the 404-on-list case in mailpit_outbox.go's
-		// Recent), and the wrapped cause logged below is the only thing
-		// that names the .env line to fix in that case. Deliberately
-		// distinct from the 503 an unconfigured inspector answers -- one
-		// means "set the variable", the other means "the container is
-		// down", and collapsing them would send the operator to fix the
-		// wrong thing.
+		// a bug in it -- though not always "go look at Mailpit, not here":
+		// a stray path segment in MAILPIT_API_URL surfaces as this same
+		// sentinel (mailpit_outbox.go's Recent, the 404-on-list case), and
+		// the wrapped cause logged below is the only thing naming the .env
+		// line to fix there. Deliberately distinct from the 503 an
+		// unconfigured inspector answers: "set the variable" vs "the
+		// container is down" want different fixes.
 		sentinels: []error{usecase.ErrOutboxUnavailable},
 		logAs:     "mail outbox unavailable",
 		status:    http.StatusBadGateway,
@@ -437,22 +420,18 @@ var domainErrorResponses = []domainErrorResponse{
 		message:   "Mailpit is not answering. The messages are not lost — the reader is.",
 	},
 	{
-		// 503 rather than 502: unlike the mail inspector, the failure is not
-		// upstream of this service in another process -- it is this
-		// install's own second connection, and the advice is "look at
-		// DATABASE_READONLY_URL and the hearth_readonly role", not "look at
-		// something else". Deliberately a different code from
-		// DB_BROWSE_NOT_CONFIGURED: "no value set" and "the value is set and
+		// 503 rather than 502: unlike the mail inspector, the failure is
+		// this install's own second connection, not another process
+		// upstream, so the advice is "look at DATABASE_READONLY_URL and the
+		// hearth_readonly role." Deliberately a different code from
+		// DB_BROWSE_NOT_CONFIGURED: "no value set" and "the value is set but
 		// the connection is broken" send the operator to different places.
 		//
-		// Logged for the same reason the outbox branch above is, and it
-		// matters more here: the response body is deliberately generic, so
-		// this line is the ONLY place the cause survives. browseErr in
-		// browse_repo.go wraps both the failing operation and the pg error
-		// into this sentinel (`%w: %s: %v`) precisely so this layer can
-		// record them -- dropping the log would throw away the only thing
-		// that distinguishes a dead connection from a statement timeout
-		// from a revoked privilege.
+		// The response body is deliberately generic, so the log below is the
+		// ONLY place the cause survives -- browseErr in browse_repo.go wraps
+		// both the failing operation and the pg error into this sentinel
+		// (`%w: %s: %v`) precisely so this line can distinguish a dead
+		// connection from a statement timeout from a revoked privilege.
 		sentinels: []error{usecase.ErrBrowseUnavailable},
 		logAs:     "database browse unavailable",
 		status:    http.StatusServiceUnavailable,
@@ -767,11 +746,10 @@ var domainErrorResponses = []domainErrorResponse{
 	{
 		// The plain case: a name collision against a LIVE goal, no restore
 		// hint to offer. goal_handlers.go's writeGoalNameConflict intercepts
-		// this same sentinel before it reaches here whenever the colliding
-		// row turns out to be archived, and builds a richer 409 (the
-		// archived goal's id in details, so the New/Edit modal can offer
-		// Restore instead of a dead end) using this case's own message and
-		// status as its fallback if that lookup itself fails.
+		// this sentinel first when the colliding row is archived, and builds
+		// a richer 409 (the archived goal's id in details, so the New/Edit
+		// modal can offer Restore) -- using this row's own message and status
+		// as its fallback if that lookup fails.
 		sentinels: []error{domain.ErrGoalNameTaken},
 		status:    http.StatusConflict,
 		code:      "GOAL_NAME_TAKEN",
@@ -858,30 +836,28 @@ var domainErrorResponses = []domainErrorResponse{
 	{
 		// The plain case: a name collision against a LIVE bill, no restore
 		// hint to offer. bill_handlers.go's writeBillWriteError intercepts
-		// this same sentinel before it reaches here whenever the colliding
-		// row turns out to be archived, and builds a richer 409 (the
-		// archived bill's id in details, so the New/Edit modal can offer
-		// Restore instead of a dead end) using this case's own message and
-		// status as its fallback if that lookup itself fails -- the
-		// ErrGoalNameTaken precedent above, applied to bills.
+		// this sentinel first when the colliding row is archived, and builds
+		// a richer 409 (the archived bill's id in details, so the New/Edit
+		// modal can offer Restore) using this row's own message and status
+		// as its fallback if that lookup fails -- the ErrGoalNameTaken
+		// precedent above, applied to bills.
 		sentinels: []error{domain.ErrBillNameTaken},
 		status:    http.StatusConflict,
 		code:      "BILL_NAME_TAKEN",
 		message:   "A bill with that name already exists.",
 	},
 	{
-		// bill_handlers.go's handleUpdateBill intercepts this same sentinel
-		// before it reaches here whenever the request carries a
-		// payFromAccountId, building a 422 that names both currencies
-		// (BillService.Update's own doc comment says that message is
-		// deliberately the HTTP layer's job, not the service's). This case
-		// is the fallback for whenever that lookup itself cannot complete.
+		// bill_handlers.go's handleUpdateBill intercepts this sentinel when
+		// the request carries a payFromAccountId, building a 422 that names
+		// both currencies (BillService.Update's own doc comment: that
+		// message is deliberately the HTTP layer's job, not the service's).
+		// This row is the fallback for whenever that lookup cannot complete.
 		sentinels: []error{domain.ErrBillCurrencyImmutable},
 		status:    http.StatusUnprocessableEntity,
 		code:      "BILL_CURRENCY_IMMUTABLE",
 		message:   "A bill's currency cannot be changed after it is created.",
 	},
-	// --- Retros (Task 8) --------------------------------------------------
+	// --- Retros -------------------------------------------------------------
 	{
 		sentinels: []error{domain.ErrRetroChanged},
 		status:    http.StatusConflict,
@@ -889,15 +865,14 @@ var domainErrorResponses = []domainErrorResponse{
 		message:   "Someone else saved this retro while you were editing it. Reload to see their changes.",
 	},
 	{
-		// Deliberately its own code, not RETRO_EXISTS: the two conflicts have
-		// different causes and want different copy. RETRO_EXISTS
-		// (handleStartRetro's own case, ahead of MapDomainError -- see its
-		// comment) is the race of two concurrent Create calls for the SAME
-		// free month; this is the calm case of both candidate months already
-		// being taken, which the Start-retro button should not even be able
-		// to reach (it would not be rendered -- RetrosView.StartMonth would
-		// already be nil), so it needs its own message rather than
-		// "someone already started it," which would be actively wrong here.
+		// Deliberately its own code, not RETRO_EXISTS: the two conflicts
+		// have different causes and want different copy. RETRO_EXISTS
+		// (handleStartRetro's own case, ahead of MapDomainError) is two
+		// concurrent Create calls racing for the SAME free month. This is
+		// the calm case of both candidate months already being taken -- the
+		// Start-retro button shouldn't even reach it, since
+		// RetrosView.StartMonth would already be nil -- so "someone already
+		// started it" would be actively wrong here.
 		sentinels: []error{domain.ErrRetroNothingToStart},
 		status:    http.StatusConflict,
 		code:      "RETRO_NOTHING_TO_START",
@@ -915,7 +890,7 @@ var domainErrorResponses = []domainErrorResponse{
 		code:      "RETRO_ACTION_BODY_REQUIRED",
 		message:   "Give this action some text before saving it.",
 	},
-	// --- Vision (Task 9) ----------------------------------------------------
+	// --- Vision ---------------------------------------------------------------
 	{
 		sentinels: []error{domain.ErrVisionChanged},
 		status:    http.StatusConflict,
@@ -942,11 +917,11 @@ var domainErrorResponses = []domainErrorResponse{
 	},
 	{
 		// Deliberately its own code, not VISION_MEASURE_INVALID: that
-		// message tells a household they picked BOTH a number and a goal,
-		// which is actively wrong here -- switching a measure to "A savings
-		// goal" and saving without choosing one means they picked NEITHER.
-		// Same reasoning RETRO_NOTHING_TO_START's own comment gives for not
-		// reusing RETRO_EXISTS: two different causes want different copy.
+		// message says the household picked BOTH a number and a goal, which
+		// is wrong here -- switching a measure to "A savings goal" and
+		// saving without choosing one means they picked NEITHER. Same
+		// reasoning as RETRO_NOTHING_TO_START above: different causes want
+		// different copy.
 		sentinels: []error{domain.ErrVisionMeasureGoalRequired},
 		status:    http.StatusUnprocessableEntity,
 		code:      "VISION_MEASURE_GOAL_REQUIRED",
@@ -1023,14 +998,13 @@ var domainErrorResponses = []domainErrorResponse{
 	},
 	// --- Agreements ---------------------------------------------------------
 	// domain.ErrUnknownAgreementProposalKind and
-	// domain.ErrUnknownAgreementProposalStatus are deliberately absent from
-	// this block. A bad kind in a request body is answered by
-	// handleProposeAgreementChange's own ParseAgreementProposalKind call, with
-	// 422 AGREEMENT_KIND_INVALID, exactly as parseVisionYear answers a bad year
-	// (decision 21). So either sentinel reaching this function came from a
-	// database column -- a row no migration allows and no writer here wrote --
-	// and the logged 500 below is the right answer to an impossible row, not a
-	// 4xx telling a household their request was wrong when it was not.
+	// domain.ErrUnknownAgreementProposalStatus are deliberately absent here:
+	// handleProposeAgreementChange's own ParseAgreementProposalKind call
+	// already answers a bad kind in the request body with 422
+	// AGREEMENT_KIND_INVALID, the same pattern parseVisionYear uses for a
+	// bad year. Either sentinel reaching this function means an impossible
+	// database row -- one no migration allows and no writer here wrote --
+	// so the logged 500 below is correct, not a 4xx.
 	{
 		sentinels: []error{domain.ErrAgreementsNeedTwoOwners},
 		status:    http.StatusConflict,
@@ -1091,11 +1065,10 @@ var domainErrorResponses = []domainErrorResponse{
 		code:      "AGREEMENT_BODY_TOO_LONG",
 		message:   "That agreement is too long.",
 	},
-	// The two note caps get two codes rather than one shared "note too long",
-	// because they are different fields on different screens: the proposal's
-	// note is in the Propose modal, the park note in the card's Discuss
-	// expander, and a 422 that cannot say which field is a 422 the screen
-	// cannot place.
+	// The two note caps get two codes, not one shared "note too long": they
+	// are different fields on different screens -- the proposal's note is in
+	// the Propose modal, the park note in the card's Discuss expander -- and
+	// a 422 that can't say which field is one the screen can't place.
 	{
 		sentinels: []error{domain.ErrAgreementNoteTooLong},
 		status:    http.StatusUnprocessableEntity,
@@ -1110,12 +1083,11 @@ var domainErrorResponses = []domainErrorResponse{
 	},
 	// domain.ErrUnknownContributionSource has no case here, deliberately: it
 	// means a goal_contributions row holds a source value this code never
-	// wrote (ParseContributionSource's own doc comment), which is a real
-	// internal failure -- a database column disagreeing with every writer
-	// this codebase has -- not a client mistake. It falls through to the
-	// generic, logged 500 below like ErrAmountOverflow does above, rather
-	// than getting a 4xx case that would tell a caller their request was
-	// wrong when it was not.
+	// wrote (ContributionSource's doc comment) -- a real internal failure, a
+	// database column disagreeing with every writer this codebase has, not
+	// a client mistake. It falls through to the generic, logged 500 below
+	// like ErrAmountOverflow does, rather than a 4xx that would tell a
+	// caller their request was wrong when it was not.
 	{
 		sentinels: []error{domain.ErrTelegramChatTaken},
 		status:    http.StatusConflict,
@@ -1148,31 +1120,28 @@ var domainErrorResponses = []domainErrorResponse{
 	},
 	{
 		// Admit's (Let in) re-check, run inside InviteRepo.Admit's own
-		// transaction (spec decision 15): the chat the owner is looking at
-		// joined a different household between the knock and this click.
+		// transaction: the chat the owner is looking at joined a different
+		// household between the knock and this click.
 		sentinels: []error{domain.ErrChatAlreadyBound},
 		status:    http.StatusConflict,
 		code:      "CHAT_ALREADY_BOUND",
 		message:   "That Telegram account joined another household. Get a new link.",
 	},
 	{
-		// Every service that means a genuine, nameable conflict already
+		// Every service meaning a genuine, nameable conflict already
 		// translates domain.ErrAlreadyExists into its own sentinel before
-		// this function ever sees it (e.g. HouseholdService.CreateSpace ->
-		// ErrSpaceNameTaken, InviteService.Create -> ErrInviteeAlreadyRegistered
-		// above) -- both get their own, more specific case, and are matched
-		// first because errors.Is walks in table order. This case is
-		// the backstop for the race those specific translations cannot
-		// close by themselves: two callers hitting the same unique
-		// constraint at once, only one of which had a pre-check to lose.
-		// The clearest example is InviteRepository.Accept -- two invites for
-		// the same new address accepted concurrently both pass Create's
-		// email-not-registered check, and only one of the two CreateUser
-		// calls that follow can win the users.email unique index. Falling
-		// through to the generic 500 default below would be wrong for that
-		// race: it is a real, if rare, conflict a retry can't paper over,
-		// not an internal bug, so 409 is the right answer whenever nothing
-		// more specific already caught it.
+		// this function sees it (HouseholdService.CreateSpace ->
+		// ErrSpaceNameTaken, InviteService.Create ->
+		// ErrInviteeAlreadyRegistered above), matched first since errors.Is
+		// walks in table order. This row backstops the race those
+		// translations can't close alone: two callers hitting the same
+		// unique constraint at once, only one with a pre-check to lose --
+		// e.g. InviteRepository.Accept, where two concurrent invites to the
+		// same new address both pass Create's email-not-registered check
+		// and only one CreateUser call can win the users.email unique
+		// index. That is a real, rare conflict a retry can't paper over,
+		// not a bug, so 409 -- not the generic 500 -- is right whenever
+		// nothing more specific caught it.
 		sentinels: []error{domain.ErrAlreadyExists},
 		status:    http.StatusConflict,
 		code:      "ALREADY_EXISTS",
@@ -1194,10 +1163,9 @@ func logAndWriteInternal(w http.ResponseWriter, r *http.Request, err error) {
 // sessionRevocationWarning is the message a membership mutation's own
 // success body carries when usecase.ErrSessionRevocationFailed comes back:
 // the mutation already committed, so this never goes through
-// MapDomainError's error-envelope shape at all. member_handlers.go checks
-// for this sentinel with errors.Is before calling MapDomainError, and builds
-// a 200 response with the mutation's normal body plus this warning instead --
-// MapDomainError, given only the error, has no way to know what that body
-// should contain.
+// MapDomainError's error envelope. member_handlers.go checks for this
+// sentinel with errors.Is before calling MapDomainError, and builds a 200
+// with the mutation's normal body plus this warning instead -- MapDomainError,
+// given only the error, has no way to know what that body should contain.
 const sessionRevocationWarning = "The change was saved, but we couldn't sign the member out of their other sessions. " +
 	"They may still be able to use an old session until it expires."

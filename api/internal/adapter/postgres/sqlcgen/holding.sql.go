@@ -242,16 +242,15 @@ type ListHoldingEventsRow struct {
 	Currency           string
 }
 
-// ListHoldingEvents is the fold's input and its ORDER BY is a CONTRACT, not a
-// preference. occurred_on is a date, so two events can share one, and
-// domain.Holding.Position sorts stably -- meaning it keeps whatever order it
-// is handed for a tie. The tie is therefore broken here, by the order the
-// events were actually recorded in (created_at, then id).
+// ListHoldingEvents is the fold's input and its ORDER BY is a CONTRACT, not
+// a preference. occurred_on is a date, so two events can share one, and
+// domain.Holding.Position sorts stably -- keeping whatever order it's
+// handed for a tie. The tie is broken here, by the order events were
+// actually recorded in (created_at, then id).
 //
-// Change this ordering and a household's realised gain changes with it,
-// silently: on identical same-day events, buy-then-sell realises 750 where
-// sell-then-buy realises 1000. holding_events_fold_idx exists for exactly
-// this clause.
+// Change this ordering and a household's realised gain changes silently: on
+// identical same-day events, buy-then-sell realises 750 where sell-then-buy
+// realises 1000. holding_events_fold_idx exists for exactly this clause.
 func (q *Queries) ListHoldingEvents(ctx context.Context, arg ListHoldingEventsParams) ([]ListHoldingEventsRow, error) {
 	rows, err := q.db.Query(ctx, listHoldingEvents, arg.HouseholdID, arg.HoldingID)
 	if err != nil {

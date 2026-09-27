@@ -19,9 +19,8 @@ func newAccountService(t *testing.T) (*usecase.AccountService, *fakeAccountRepo)
 	repo := newFakeAccountRepo()
 	repo.memberships["m-1"] = "h-1"
 
-	// Populated with a primary currency because Summary (Task 36) is the first
-	// caller that reads Households -- Create/Update/List/SetArchived never
-	// touch it, so an empty double was enough until now.
+	// Populated with a primary currency: AccountService.Summary reads
+	// household.PrimaryCurrency to convert balances into it.
 	households := newHouseholdDouble()
 	households.put(domain.Household{
 		ID: "h-1", Name: "Andreas & Christine", FamilyName: "Oentoro",
@@ -38,7 +37,7 @@ func newAccountService(t *testing.T) (*usecase.AccountService, *fakeAccountRepo)
 	return svc, repo
 }
 
-// newAccountServiceHolding is newAccountService with an account that already
+// newAccountServiceWithHoldings is newAccountService, but the account already
 // holds something, for the one rule that depends on it.
 func newAccountServiceWithHoldings(t *testing.T, count int64) (*usecase.AccountService, *fakeAccountRepo) {
 	t.Helper()
@@ -58,11 +57,9 @@ func newAccountServiceWithHoldings(t *testing.T, count int64) (*usecase.AccountS
 	}), repo
 }
 
-// An account's type is patchable, so without this an owner could turn a
-// brokerage into a cash account while it still held 300g of gold -- and the
-// holdings would be anchored to an account whose type the holdings service
-// itself refuses to accept. Found while reading account.go for Task 4 of the
-// portfolio plan; the counter port exists for exactly this call.
+// Account type is patchable; without this guard an owner could turn a
+// brokerage still holding gold into a cash account, anchoring the holding to
+// a type that refuses to accept it. The counter port exists for this check.
 func TestAccountTypeCannotChangeWhileTheAccountHoldsInvestments(t *testing.T) {
 	svc, repo := newAccountServiceWithHoldings(t, 1)
 	created, err := svc.Create(context.Background(), investmentAccountInput())
@@ -122,8 +119,8 @@ func investmentAccountInput() usecase.NewAccount {
 	return in
 }
 
-// holdingCounterDouble stands in for the holdings table: n is how many live
-// holdings the account is said to have.
+// holdingCounterDouble stands in for the holdings table, reporting n live
+// holdings.
 type holdingCounterDouble struct{ n int64 }
 
 func (d holdingCounterDouble) CountLiveForAccount(_ context.Context, _, _ string) (int64, error) {
@@ -182,10 +179,10 @@ func TestCreateRefusesAnUnknownType(t *testing.T) {
 	}
 }
 
-// TestCreateRefusesACurrencyTheMoneyPathRendersWrong covers JPY: it is a real
-// ISO 4217 code, so ParseCurrency would accept it, but Money.String hard-codes
-// two decimal places and would render every JPY amount a hundred times too
-// small. The same gate a household's primary currency goes through.
+// TestCreateRefusesACurrencyTheMoneyPathRendersWrong covers JPY: a real ISO
+// 4217 code ParseCurrency accepts, but Money.String hard-codes two decimals
+// and would render it a hundred times too small -- the same gate a
+// household's primary currency goes through.
 func TestCreateRefusesACurrencyTheMoneyPathRendersWrong(t *testing.T) {
 	svc, _ := newAccountService(t)
 	for _, code := range []string{"ZZZ", "JPY", "KWD"} {
@@ -209,14 +206,12 @@ func TestCreateRefusesAFutureOpeningBalanceDate(t *testing.T) {
 	}
 }
 
-// TestCreateAcceptsTodayFromAnyTimezone is the reason the future check carries
-// a day of tolerance. No household stores a timezone, so at 17:00 UTC it is
-// already tomorrow in Singapore -- and a household there entering today's
-// balance must not be refused for eight hours out of every twenty-four.
-//
-// The clock here reads 09:00 UTC on the 28th; the date is the 29th, which is
-// "today" for any household east of UTC+9. Real zones span UTC-12 to UTC+14,
-// so one day of slack covers all of them.
+// TestCreateAcceptsTodayFromAnyTimezone: households store no timezone, so
+// from 16:00 UTC it is already tomorrow in Singapore (UTC+8), and without
+// slack a household there could not enter today's balance for eight hours
+// a day. The clock reads 09:00 UTC on the 28th and the input is the 29th,
+// 15 hours ahead: inside the one day of slack that covers every real zone
+// (UTC-12 to UTC+14).
 func TestCreateAcceptsTodayFromAnyTimezone(t *testing.T) {
 	svc, _ := newAccountService(t)
 	in := validNewAccount()
@@ -252,8 +247,8 @@ func TestCreateAllowsANegativeAsset(t *testing.T) {
 }
 
 // TestCreateRefusesAnOwnerFromAnotherHousehold is the check that only shows up
-// once there are two households in the database -- which, since self-serve
-// sign-up shipped, is every deployment.
+// once there are two households in the database -- which, with self-serve
+// sign-up, is every deployment.
 func TestCreateRefusesAnOwnerFromAnotherHousehold(t *testing.T) {
 	svc, repo := newAccountService(t)
 	repo.memberships["m-other"] = "h-2"
@@ -309,10 +304,9 @@ func TestUpdateIsARealPatch(t *testing.T) {
 	}
 }
 
-// TestUpdateCanClearTheOwnerToShared documents the one subtlety in the patch
-// shape: a nil pointer means "leave it alone", and a pointer to "" means "make
-// this shared". Without the second, an account assigned to the wrong person
-// could never be un-assigned.
+// TestUpdateCanClearTheOwnerToShared: without a pointer-to-"" meaning
+// "shared" (see AccountUpdate), a wrongly assigned account could never be
+// un-assigned.
 func TestUpdateCanClearTheOwnerToShared(t *testing.T) {
 	svc, _ := newAccountService(t)
 	in := validNewAccount()
@@ -334,10 +328,9 @@ func TestUpdateCanClearTheOwnerToShared(t *testing.T) {
 	}
 }
 
-// TestUpdateRefusesANegativeBalanceWhenTheTypeBecomesADebt is the case a
-// per-field patch makes reachable: neither change is invalid alone, and the
-// pair is. Validation therefore runs against the merged account, never against
-// the incoming fields.
+// TestUpdateRefusesANegativeBalanceWhenTheTypeBecomesADebt is only reachable
+// via a per-field patch: neither change is invalid alone, but validation
+// runs against the merged account, so the pair together is.
 func TestUpdateRefusesANegativeBalanceWhenTheTypeBecomesADebt(t *testing.T) {
 	svc, _ := newAccountService(t)
 	in := validNewAccount()

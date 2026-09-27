@@ -125,10 +125,9 @@ func TestTransactionRoundTrips(t *testing.T) {
 	}
 
 	// before_from_opening is a strict < against opening_balance_as_of
-	// (queries/transaction.sql), so a transaction dated exactly on the
-	// opening date is NOT before it -- false here, same as the 18th above.
-	// Only a transaction dated strictly earlier is before (see the block
-	// below).
+	// (queries/transaction.sql): a transaction dated exactly on the opening
+	// date is NOT before it -- false here, like the 18th above. Only one
+	// dated strictly earlier is (the block below).
 	onOpening, err := repo.Create(ctx, domain.Transaction{
 		HouseholdID:   householdID,
 		Kind:          domain.TransactionExpense,
@@ -145,8 +144,8 @@ func TestTransactionRoundTrips(t *testing.T) {
 		t.Fatalf("get on opening date: %v", err)
 	}
 	// Dated exactly ON the opening date: the opening balance is the balance
-	// at the START of that day (spec 2026-07-30, decision 1), so this row
-	// moves the balance and must NOT be marked.
+	// at the START of that day, so this row moves the balance and must NOT
+	// be marked.
 	if onOpeningView.BeforeFromAccountOpening == nil || *onOpeningView.BeforeFromAccountOpening {
 		t.Fatalf("beforeFromAccountOpening = %v, want non-nil false for a transaction on the opening date itself",
 			onOpeningView.BeforeFromAccountOpening)
@@ -226,15 +225,13 @@ func TestDeleteRemovesTheRow(t *testing.T) {
 	}
 }
 
-// Both are database behaviour, so only a database can prove them. The
-// membership case is why the column is ON DELETE SET NULL. The household
-// delete at the end proves households.id cascades away its transactions
-// end-to-end; it does not by itself prove the account columns are CASCADE
-// and not RESTRICT -- transactions.household_id's own cascade removes this
-// row before the account's cascade ever runs, so a RESTRICT on
-// from_account_id/to_account_id would never be reached from this path.
-// TestDeletingAnAccountTakesItsTransactionsWithIt is the test for that
-// property, isolated from this race.
+// Both are database behaviour, so only a database can prove them: the
+// membership case is why the column is ON DELETE SET NULL, and the
+// household delete proves households.id cascades away its transactions.
+// It does NOT prove the account columns are CASCADE rather than RESTRICT --
+// transactions.household_id's own cascade removes this row before the
+// account's cascade ever runs. TestDeletingAnAccountTakesItsTransactionsWithIt
+// is the test isolated from that race.
 func TestDeletingAMemberKeepsTheirTransactionsAndDeletingAHouseholdTakesThemAway(t *testing.T) {
 	db := openTestDB(t)
 	ctx := context.Background()
@@ -271,16 +268,14 @@ func TestDeletingAMemberKeepsTheirTransactionsAndDeletingAHouseholdTakesThemAway
 	}
 }
 
-// The account columns are CASCADE and not RESTRICT so that deleting a
-// household -- which cascades to its accounts -- never fails with a foreign
-// key violation from a transaction still pointing at one. Deleting the
-// account directly, rather than via a household delete, is what isolates
-// this: a household delete also cascades the transaction away through its
-// own household_id reference, which can remove the row before the account's
-// side is ever checked and would let a RESTRICT there pass unnoticed -- see
-// TestDeletingAMemberKeepsTheirTransactionsAndDeletingAHouseholdTakesThemAway's
-// own comment. Both from_account_id and to_account_id are covered since
-// they are declared identically but nothing enforces that they stay that way.
+// The account columns are CASCADE, not RESTRICT, so deleting a household
+// (which cascades to its accounts) never fails on a transaction still
+// pointing at one. Deleting the account directly, not via a household
+// delete, is what isolates this: a household delete would remove the
+// transaction first through its own cascade, letting a RESTRICT here pass
+// unnoticed (see the sibling test's comment above). Both from_account_id and
+// to_account_id are covered since they are declared identically, but
+// nothing enforces that they stay that way.
 func TestDeletingAnAccountTakesItsTransactionsWithIt(t *testing.T) {
 	db := openTestDB(t)
 	ctx := context.Background()
@@ -321,16 +316,14 @@ func TestDeletingAnAccountTakesItsTransactionsWithIt(t *testing.T) {
 }
 
 // Update's own param block has thirteen fields, hand-mapped from the domain
-// type field by field -- exactly the shape a copy-paste slip (writing one
-// field's source value into an adjacent field's slot) survives compilation
-// and every other test in this file. This changes more than one field of
-// different kinds in the same update, on purpose: a plain value (kind,
-// description, amount), both directions of the "" <-> NULL convention on two
-// different optional ids in the same call (to_account_id and
-// paid_by_membership_id go from unset to set; category_id goes from set to
-// unset), and the received-amount pair together (nil to a real pair) --
-// received_amount_is_a_transfer_thing is why this update also turns the
-// transaction into a transfer, the only kind that permits one.
+// type -- exactly the shape where a copy-paste slip (one field's value in
+// an adjacent slot) survives compilation and every other test here. This
+// changes several kinds of field at once: a plain value, both directions of
+// the "" <-> NULL convention on two ids (to_account_id and
+// paid_by_membership_id unset to set; category_id set to unset), and the
+// received-amount pair (nil to real) -- received_amount_is_a_transfer_thing
+// is also why this update turns the transaction into a transfer, the only
+// kind that permits one.
 func TestUpdateChangesEveryMutableFieldAtOnce(t *testing.T) {
 	db := openTestDB(t)
 	ctx := context.Background()
@@ -409,19 +402,15 @@ func TestUpdateChangesEveryMutableFieldAtOnce(t *testing.T) {
 	}
 }
 
-// The reason paging is keyset and not offset. With OFFSET, inserting a row
-// dated between page one and page two shifts every later row by one, so the
-// reader either sees a transaction twice or never sees it at all -- silently,
-// in a list of their own money.
+// Paging is keyset, not offset: with OFFSET, a row inserted between page
+// one and two shifts every later row by one, so the reader silently sees a
+// transaction twice or not at all.
 //
-// The 17th gets a second transaction, on purpose. With every date otherwise
-// distinct, a keyset predicate that compares the date alone and one that
-// compares the (occurred_on, id) pair return identical results -- there is
-// never a tie for them to disagree over. The duplicate lands exactly on the
-// page-one/page-two boundary (page size 4, so the boundary is row 4 of the
-// 5 returned), which is the one place a date-only cursor drops a row a
-// row-value cursor would keep: it excludes the whole boundary date, not just
-// the boundary row.
+// The 17th gets a second transaction on purpose: with every other date
+// distinct, a date-only cursor and a (occurred_on, id) cursor agree, so
+// there's no tie to expose the bug. The duplicate lands exactly on the
+// page boundary (page size 4, row 4 of 5), the one place a date-only
+// cursor drops the whole boundary date instead of just the boundary row.
 func TestPagingIsStableWhenARowIsInsertedMidScroll(t *testing.T) {
 	db := openTestDB(t)
 	ctx := context.Background()
@@ -603,14 +592,13 @@ func TestMonthTotalsCoversTheWholeMonthAndNothingElse(t *testing.T) {
 }
 
 // A malformed account id is a filter that matches nothing, not an absent
-// filter -- but uuid() reports a parse failure the same way it reports "not
-// set" (Valid: false), and the query's own "IS NULL OR column = ..." form
-// cannot tell the two apart: both arrive as SQL NULL, and NULL means "no
-// filter" there. Left unguarded, this fails open: a caller who mistypes an
-// account id would get back the household's whole ledger instead of the
-// empty page a filter that matches nothing should produce. CategoryID and
-// PaidByMembershipID share the same uuid()-backed pattern in List and are
-// exercised the same way here rather than in three near-identical tests.
+// one -- but uuid() reports a parse failure the same way it reports "not
+// set" (Valid: false), and the query's "IS NULL OR column = ..." form can't
+// tell them apart: both arrive as SQL NULL, meaning "no filter". Left
+// unguarded this fails open, returning the whole ledger for a mistyped id
+// instead of an empty page. CategoryID and PaidByMembershipID share the
+// same pattern, so all three are exercised here rather than in three
+// near-identical tests.
 func TestListRefusesAMalformedIDFilterInsteadOfReturningEverything(t *testing.T) {
 	db := openTestDB(t)
 	ctx := context.Background()
@@ -649,12 +637,11 @@ func TestListRefusesAMalformedIDFilterInsteadOfReturningEverything(t *testing.T)
 	}
 }
 
-// List's Month filter is the same two-boundary range predicate
-// (occurred_on >= start AND < start + 1 month) that MonthTotalsQuery already
-// carries -- a second, independent copy of "one calendar month" in the same
-// file. Reuses the fixture TestMonthTotalsCoversTheWholeMonthAndNothingElse
-// pins MonthTotalsQuery's copy with, so an edit to one boundary clause and
-// not the other has a test watching both.
+// List's Month filter is the same two-boundary predicate (occurred_on >=
+// start AND < start + 1 month) MonthTotalsQuery already carries -- a
+// second, independent copy of "one calendar month". Reuses
+// TestMonthTotalsCoversTheWholeMonthAndNothingElse's fixture, so an edit to
+// either boundary clause has a test watching it.
 func TestListsMonthFilterCoversTheWholeMonthAndNothingElse(t *testing.T) {
 	db := openTestDB(t)
 	ctx := context.Background()

@@ -35,21 +35,20 @@ func TestVisionMeasureCannotBeBothTypedAndLinked(t *testing.T) {
 	_, err := db.Pool().Exec(ctx,
 		`INSERT INTO vision_measures (pillar_id, position, label, current_value, target_value, goal_id)
 		 VALUES ($1, 0, 'Emergency fund', 2, 4, $2)`, pillarID, goalID)
-	// Any error would pass a bare err == nil check -- a typo in the column
-	// list or a dropped connection looks the same as a refused row. Unwrap to
-	// the driver error and check which constraint fired, so this test proves
-	// the database refused the ambiguous measure specifically, not merely
-	// that something went wrong.
+	// A bare err == nil check would also pass for a typo in the column list
+	// or a dropped connection -- unwrap to the driver error and check which
+	// constraint fired, so this proves the database refused THIS measure
+	// specifically, not merely that something went wrong.
 	var pgErr *pgconn.PgError
 	if !errors.As(err, &pgErr) || pgErr.ConstraintName != "measure_is_typed_or_linked" {
 		t.Fatalf("expected measure_is_typed_or_linked to refuse a measure that is both typed and linked, got: %v", err)
 	}
 }
 
-// Deleting a goal must unlink the measure, not fail. ON DELETE SET NULL is
-// an UPDATE, and Postgres enforces CHECK constraints on UPDATE -- so without
-// the constraint's third (all-null) branch this delete raises a violation
-// inside the GOALS feature, where nobody would think to look at Vision.
+// Deleting a goal must unlink the measure, not fail: ON DELETE SET NULL is
+// an UPDATE, and Postgres enforces CHECK constraints on UPDATE too -- so
+// without the constraint's all-null branch, this delete would raise a
+// violation inside the GOALS feature, not Vision.
 func TestDeletingALinkedGoalUnlinksTheMeasureInsteadOfFailing(t *testing.T) {
 	db := openTestDB(t)
 	ctx := context.Background()
@@ -128,11 +127,10 @@ func TestVisionRepoGetReadsPillarsMeasuresAndMilestonesInPositionOrder(t *testin
 		t.Fatalf("insert vision: %v", err)
 	}
 	// Two pillars, inserted out of position order on purpose -- position 1
-	// first, then position 0 -- the same pattern the measures and milestones
-	// below already use, so this proves ORDER BY position rather than
-	// insertion order. A prior version of this test used only one pillar,
-	// under which ListVisionPillars' ORDER BY could be deleted with nothing
-	// going red.
+	// first, then position 0, the same pattern the measures and milestones
+	// below use -- so this proves ORDER BY position, not insertion order.
+	// Keep both: with only one, ListVisionPillars' ORDER BY could be
+	// deleted with nothing going red.
 	if _, err := db.Pool().Exec(ctx,
 		`INSERT INTO vision_pillars (vision_id, position, name, description)
 		 VALUES ($1, 1, 'Money without fear', '')`, visionID); err != nil {
@@ -328,13 +326,12 @@ func TestVisionSaveRefusesAGoalFromAnotherHousehold(t *testing.T) {
 	}
 }
 
-// The zero-row UPDATE's two possible causes must not be collapsed into one
-// answer: this is the "deleted" leg, the twin of
+// The zero-row UPDATE has two possible causes that must not collapse into
+// one answer -- this is the "deleted" leg, twin of
 // TestVisionSaveRefusesAStaleVersion's "someone else saved first" leg. A
-// version-guarded save against a household-year that no longer exists must
-// report domain.ErrNotFound, never domain.ErrVisionChanged -- a caller that
-// saw ErrVisionChanged would reload and retry forever against a row that can
-// never come back.
+// save against a household-year that no longer exists must report
+// domain.ErrNotFound, never ErrVisionChanged, or a caller would reload and
+// retry forever against a row that can never come back.
 func TestVisionSaveReportsNotFoundForADeletedVision(t *testing.T) {
 	db := openTestDB(t)
 	ctx := context.Background()
@@ -355,12 +352,11 @@ func TestVisionSaveReportsNotFoundForADeletedVision(t *testing.T) {
 	}
 }
 
-// This repository does not get to assume v.Year was already validated --
-// VisionService normally checks it first, but this test calls the
-// repository directly, the same way a caller that forgot the check would.
-// 67562 is the value versionParam's own reasoning uses for Version:
-// int16(67562) == 2026, so an unguarded cast would silently write this save
-// against the wrong household-year instead of refusing it.
+// This repository does not get to assume v.Year was validated first --
+// VisionService normally checks it, but this test calls the repository
+// directly, as a caller that skipped the check would. 67562 is yearParam's
+// own example value: int16(67562) == 2026, so an unguarded cast would
+// silently save against the wrong household-year instead of refusing it.
 func TestVisionSaveRefusesAYearOutOfRange(t *testing.T) {
 	db := openTestDB(t)
 	ctx := context.Background()

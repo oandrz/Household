@@ -40,10 +40,9 @@ func TestParsePeriodKindRefusesAnythingElse(t *testing.T) {
 	}
 }
 
-// The four quarters, both halves and the year, each with its first and last
-// day written out. These are the numbers every other figure in the report is
-// measured between, so they are asserted literally rather than computed -- a
-// test that derives the boundary the same way the code does proves nothing.
+// The four quarters, both halves and the year, each with first and last day
+// written out. Asserted literally, not computed -- a test deriving the
+// boundary the same way the code does proves nothing.
 func TestQuarterStartsAndEndsOnTheCalendarQuarter(t *testing.T) {
 	cases := []struct {
 		index      int
@@ -95,10 +94,9 @@ func TestTheFirstQuarterOfALeapYearStillEndsOnThirtyFirstMarch(t *testing.T) {
 	}
 }
 
-// The end is INCLUSIVE. Every figure in the report is measured over
-// [Start, End], so an exclusive end would drop the last day of every period --
-// and the last day of a quarter is the day a household is most likely to have
-// recorded a price on.
+// The end is INCLUSIVE: every figure is measured over [Start, End], so an
+// exclusive end would drop the last day of every period -- the day a
+// household is most likely to have recorded a price on.
 func TestAPeriodContainsBothOfItsOwnBoundariesAndNeitherNeighbour(t *testing.T) {
 	p := mustPeriod(t, domain.PeriodQuarter, 2026, 2)
 
@@ -117,9 +115,9 @@ func TestAPeriodContainsBothOfItsOwnBoundariesAndNeitherNeighbour(t *testing.T) 
 }
 
 // A timestamp is a moment, not a day: 23:00 on 30 June in Singapore is 15:00
-// on 30 June in UTC, and both are the last day of H1. Contains truncates
-// rather than comparing instants, for the reason budget.go's startOfMonth
-// does -- no household in Hearth stores a timezone.
+// UTC the same day, and both are the last day of H1. Contains truncates
+// rather than compares instants, since no household in Hearth stores a
+// timezone.
 func TestContainsJudgesTheDayNotTheInstant(t *testing.T) {
 	p := mustPeriod(t, domain.PeriodHalf, 2026, 1)
 	singapore := time.FixedZone("+08", 8*60*60)
@@ -202,8 +200,8 @@ func TestPeriodContainingFindsTheOneTheDayFallsIn(t *testing.T) {
 }
 
 // The report's series ends with the period the household is living in, because
-// the owner's first question is "how am I doing now" -- see the plan's decision
-// 2. Oldest first, because that is the order a chart draws them in.
+// the owner's first question is "how am I doing now". Oldest first, because
+// that is the order a chart draws them in.
 func TestPeriodsEndingOnRunsOldestFirstAndEndsWithTodaysPeriod(t *testing.T) {
 	got, err := domain.PeriodsEndingOn(domain.PeriodQuarter, utcDay(2026, time.August, 9), 3)
 	if err != nil {

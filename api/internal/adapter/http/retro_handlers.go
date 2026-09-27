@@ -12,21 +12,20 @@ import (
 )
 
 // maxRetroRequestBodyBytes replaces the ordinary maxRequestBodyBytes for
-// PATCH /retros/{month} only: its body carries three free-text fields (went
-// well / was hard / notes) that this feature deliberately never caps
-// (usecase.RetroUpdate's own doc comment), and the design's own worked
-// example already runs to nine bullets across two of those fields before
-// JSON-escaping even doubles the cost of every newline. 8 KiB is generous
-// for an honest ten-minute retro while still refusing anything absurd -- the
-// same reasoning maxBudgetRequestBodyBytes (budget_handlers.go) already
-// gives for its own override.
+// PATCH /retros/{month} only: its three free-text fields (went well / was
+// hard / notes) are deliberately never capped (usecase.RetroUpdate's own
+// doc comment), and the design's worked example already runs to nine
+// bullets before JSON-escaping doubles the cost of every newline. 8 KiB is
+// generous for an honest retro while still refusing anything absurd -- the
+// same reasoning maxBudgetRequestBodyBytes (budget_handlers.go) gives for
+// its own override.
 const maxRetroRequestBodyBytes = 8 * 1024
 
 // retroActionDTO is one action a retro decided on. AssigneeMembershipIDs is
-// always an array, never null, even when nobody is assigned yet -- the same
-// "no null collections" convention goalDTO's own slices follow -- and
-// CarriedFrom is "" rather than omitted when the action was not carried, so
-// the frontend never has to distinguish an absent key from an empty one.
+// always an array, never null, even with nobody assigned -- the same "no
+// null collections" convention goalDTO's slices follow. CarriedFrom is ""
+// rather than omitted when not carried, so the frontend never distinguishes
+// an absent key from an empty one.
 type retroActionDTO struct {
 	ID                    string     `json:"id"`
 	Body                  string     `json:"body"`
@@ -53,10 +52,9 @@ type retroDTO struct {
 // retroSummaryDTO is one row of the Retros history list. Quote already
 // carries RetroService.List's derived "first sentence of Notes" figure --
 // this DTO does not recompute it. ActionCount is the retro's total;
-// OpenActionCount is the subset still unticked (usecase.RetroSummary's own
-// doc comment says which caller reads which) -- Overview's "Next retro"
+// OpenActionCount is the subset still unticked. Overview's "Next retro"
 // card reads OpenActionCount, RetroHistoryList reads ActionCount, and both
-// numbers travel on every row so neither caller needs a second request.
+// travel on every row so neither caller needs a second request.
 type retroSummaryDTO struct {
 	ID              string `json:"id"`
 	Month           string `json:"month"`
@@ -96,27 +94,23 @@ type retroResponse struct {
 
 // retroWriteResponse is what POST /retros, PATCH /retros/{month} and POST
 // /retros/{month}/complete all answer: the retro itself, nested under the
-// same "retro" key retroResponse uses -- no top-level CarryOver, because that
-// field is a detail-*screen* concept (retroResponse's own doc comment: "a
-// carried-over action belongs to LAST month's retro, not this one"), not
-// part of the retro resource these three writes return. PATCH and complete
-// both fill Actions from a real read taken moments earlier in the same
-// request (see handleSaveRetro and handleCompleteRetro), never from an
-// empty placeholder: an inaccurate "actions": [] here would look like real
-// data and could silently wipe out a client's already-loaded action list if
-// it merged this response in naively.
+// same "retro" key retroResponse uses. No top-level CarryOver -- that's a
+// detail-screen concept, not part of the write resource. PATCH and complete
+// fill Actions from a real read taken moments earlier (see handleSaveRetro,
+// handleCompleteRetro), never an empty placeholder: a fake "actions": []
+// would look real and could silently wipe out a client's loaded action list
+// if merged naively.
 type retroWriteResponse struct {
 	Retro retroDTO `json:"retro"`
 }
 
 // saveRetroRequest is PATCH /retros/{month}'s body: a full replace of the
 // retro's own fields, never a partial patch -- the modal always sends all
-// three text fields plus mood plus the version it loaded (RetroService.Save
-// always overwrites WentWell/WasHard/Notes unconditionally; there is no
-// per-field "unchanged" sentinel the way updateGoalRequest's pointers give
-// goals). Mood is *int so JSON null clears it, a real and legitimate state
-// (RetroRecord.Mood's own doc comment) -- Go's zero value for int, 0, cannot
-// be used for that because 0 is not a valid mood either.
+// three text fields plus mood plus the version it loaded, and
+// RetroService.Save overwrites them unconditionally (no per-field
+// "unchanged" sentinel the way updateGoalRequest's pointers give goals).
+// Mood is *int so JSON null clears it, a legitimate state; Go's int zero
+// value (0) can't represent that since 0 isn't a valid mood either.
 type saveRetroRequest struct {
 	Mood     *int   `json:"mood"`
 	WentWell string `json:"wentWell"`
@@ -127,11 +121,11 @@ type saveRetroRequest struct {
 
 // addRetroActionRequest is POST /retros/{month}/actions' body.
 // AssigneeMembershipIDs and CarriedFrom are exactly RetroActionInput's own
-// optional fields; neither is validated here beyond decoding -- Task 6's
+// optional fields; neither is validated here beyond decoding -- the
 // repository already refuses a malformed or foreign-household CarriedFrom
 // as domain.ErrNotFound and treats a duplicate assignee as a no-op, so
-// re-checking either in this handler would be a second, possibly-diverging
-// copy of a rule that already lives at the boundary that owns it.
+// re-checking either here would duplicate a rule that already lives at the
+// boundary that owns it.
 type addRetroActionRequest struct {
 	Body                  string   `json:"body"`
 	AssigneeMembershipIDs []string `json:"assigneeMembershipIds"`
@@ -157,11 +151,11 @@ type setRetroActionDoneRequest struct {
 // retroActionDTO. RetroActionRepository.SetDone returns no record, only an
 // error, and this handler never resolves {month} into a retro id (see
 // handleSetRetroActionDone's own comment for why), so nothing here could
-// fill Body, CarriedFrom or AssigneeMembershipIDs honestly. Shipping a
-// retroActionDTO with those zeroed would look like real data and could
-// silently wipe them out if a client ever merged this response into its
-// action list the way it merges a real one -- naming a narrower type here
-// stops that mistake at compile time on the frontend side (Task 9).
+// fill Body, CarriedFrom or AssigneeMembershipIDs honestly. A zeroed
+// retroActionDTO would look like real data and could silently wipe those
+// fields out if a client merged this response into its action list the way
+// it merges a real one -- naming a narrower type stops that mistake at
+// compile time on the frontend.
 type retroActionTickResponse struct {
 	ID     string     `json:"id"`
 	DoneAt *time.Time `json:"doneAt"`
@@ -186,15 +180,14 @@ func handleListRetros(deps Deps) http.HandlerFunc {
 
 // handleGetRetro serves one month's detail screen: the retro, its own
 // actions, and the previous month's still-open actions as a carry-over
-// offer. {month} is parsed with parseBudgetMonth -- the same parser
-// budget_handlers.go already uses for the identical "YYYY-MM path segment"
-// wire shape, so a malformed month answers the same INVALID_MONTH/400 there
-// rather than a second, possibly-diverging parser living here.
+// offer. {month} is parsed with parseBudgetMonth, the same parser
+// budget_handlers.go uses for the identical "YYYY-MM path segment" shape,
+// so a malformed month gives the same INVALID_MONTH/400 rather than a
+// second, possibly-diverging parser here.
 //
-// month is passed through to RetroService.Month un-normalised: the service
-// normalises it (RetroService.Month's own doc comment), not this layer, so
-// there is exactly one place that decides what "the first of the month,
-// midnight UTC" means.
+// month is passed through to RetroService.Month un-normalised -- the
+// service normalises it (its own doc comment), so there is exactly one
+// place that decides what "the first of the month, midnight UTC" means.
 //
 // A month with no retro comes back as domain.ErrNotFound, which
 // MapDomainError turns into 404 -- the page reads that as "not started," an
@@ -225,31 +218,29 @@ func handleGetRetro(deps Deps) http.HandlerFunc {
 	}
 }
 
-// handleStartRetro creates the draft RetroService.Start picks -- the earlier
-// of {this month, last month} that has none yet. It reads no body: the month
-// comes entirely from the household's own state and the clock, never from
-// the client, because a client-supplied month would let a stale tab file a
-// retro against a month the "Start retro" button never actually offered it
-// (domain.StartableMonth's own contract).
+// handleStartRetro creates the draft RetroService.Start picks -- the
+// earlier of {this month, last month} that has none yet. It reads no body:
+// the month comes from household state and the clock, never the client,
+// because a client-supplied month would let a stale tab file a retro
+// against a month "Start retro" never actually offered (domain.StartableMonth's
+// own contract).
 func handleStartRetro(deps Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		scope, _ := RequestScope(r)
 
 		created, err := deps.Retros.Start(r.Context(), scope.HouseholdID, deps.Clock.Now())
 		if err != nil {
-			// Start's own repository never wraps this in anything more
-			// specific (RetroRepository.Create's own doc comment: a plain
+			// Start's repository never wraps this in anything more specific
+			// (RetroRepository.Create's doc comment: a plain
 			// domain.ErrAlreadyExists on the UNIQUE clash) -- unlike
 			// CreateGoal or CreateSpace, which translate the same sentinel
-			// into a route-specific one before MapDomainError ever sees it.
-			// The intercept has to live here instead, one request early, the
-			// same shape writeGoalNameConflict (goal_handlers.go) already
-			// uses for its own sentinel. This is a real race, not a
-			// theoretical one: two partners tapping "Start retro" at the
-			// same instant both pass Start's own pre-check before only one
-			// of the two concurrent inserts can win -- see
+			// before MapDomainError sees it. So the intercept lives here
+			// instead, the same shape writeGoalNameConflict
+			// (goal_handlers.go) uses. This is a real race: two partners
+			// tapping "Start retro" at the same instant both pass Start's
+			// pre-check before only one insert wins -- see
 			// TestStartRetroRaceIs409RetroExists (marriage_api_test.go),
-			// which builds that race with a repository double because no
+			// which builds the race with a repository double since no
 			// sequential HTTP call can reach it.
 			if errors.Is(err, domain.ErrAlreadyExists) {
 				WriteError(w, http.StatusConflict, "RETRO_EXISTS",
@@ -267,14 +258,14 @@ func handleStartRetro(deps Deps) http.HandlerFunc {
 }
 
 // handleSaveRetro replaces the retro's own fields (mood, the two textareas,
-// notes) under the version guard decision 6 exists for: a stale version
-// answers domain.ErrRetroChanged (409 RETRO_CHANGED), never a silent merge.
+// notes) under a version guard: a stale version answers
+// domain.ErrRetroChanged (409 RETRO_CHANGED), never a silent merge.
 //
 // RetroUpdate needs the retro's own id, which {month} alone does not carry.
 // deps.Retros.Month resolves it, and its Actions come back to the response
-// for free: Save touches only the retro's own columns, never retro_actions
-// (RetroService.Save's own doc comment), so a read taken moments before Save
-// runs is still accurate by the time this handler answers.
+// for free: Save touches only the retro's own columns, never retro_actions,
+// so a read taken moments before Save runs is still accurate by the time
+// this handler answers.
 func handleSaveRetro(deps Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		scope, _ := RequestScope(r)
@@ -314,16 +305,15 @@ func handleSaveRetro(deps Deps) http.HandlerFunc {
 }
 
 // handleCompleteRetro finishes the retro: its own route, not a field on
-// PATCH, so that saving a typo in the notes can never finish the retro as a
-// side effect (the same reasoning archive already carries on accounts,
-// categories, goals and bills). Idempotent -- RetroService.Finish's own doc
+// PATCH, so a typo saved in the notes can never finish the retro as a side
+// effect (the same reasoning archive already carries on accounts,
+// categories, goals and bills). Idempotent -- RetroService.Finish's doc
 // comment -- so a double-submit or a retry after a dropped response is
 // harmless.
 //
 // {month} is resolved to the retro's own id the same way handleSaveRetro
-// resolves it, and for the same reason the Actions read taken during that
-// resolve is still accurate afterwards: Finish only stamps completed_at, it
-// never touches retro_actions.
+// resolves it; Finish only stamps completed_at, never retro_actions, so the
+// Actions read taken during that resolve is still accurate afterwards.
 func handleCompleteRetro(deps Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		scope, _ := RequestScope(r)
@@ -348,16 +338,14 @@ func handleCompleteRetro(deps Deps) http.HandlerFunc {
 	}
 }
 
-// handleDiscardRetro removes a draft. {month} is resolved to the retro's own
-// id the same way the two handlers above resolve it -- deps.Retros.Month's
-// underlying ByMonth finds a FINISHED retro too, completed_at plays no part
-// in that lookup, so a delete aimed at a finished retro still reaches
-// DiscardDraft. What actually refuses it is RetroRepository.DeleteDraft's
-// own `WHERE completed_at IS NULL` (its doc comment), which answers
-// domain.ErrNotFound on that zero-row match -- the identical 404 a genuinely
-// missing retro gets, which is the point: "there is no draft here" reads the
-// same either way, with no separate "that retro is already finished" state
-// for the client to handle.
+// handleDiscardRetro removes a draft. {month} resolves to the retro's own
+// id the same way the handlers above resolve it -- deps.Retros.Month's
+// ByMonth finds a FINISHED retro too, so a delete aimed at a finished retro
+// still reaches DiscardDraft. What actually refuses it is
+// RetroRepository.DeleteDraft's own `WHERE completed_at IS NULL`, which
+// answers domain.ErrNotFound -- the identical 404 a genuinely missing retro
+// gets, so "there is no draft here" reads the same either way, with no
+// separate "already finished" state for the client to handle.
 func handleDiscardRetro(deps Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		scope, _ := RequestScope(r)
@@ -419,19 +407,18 @@ func handleAddRetroAction(deps Deps) http.HandlerFunc {
 }
 
 // handleSetRetroActionDone ticks or unticks one action. Unlike every write
-// handler above, it does NOT resolve {month} into a retro id at all:
-// RetroActionRepository.SetDone (like Remove, below) is scoped by household
-// id and action id alone, the same household-plus-id scoping every other
-// by-id route in this API already relies on. {month} sits in the URL only so
-// the route reads like the screen -- the spec's own reasoning for addressing
-// every retro route by month -- and is never cross-checked against which
-// retro actually owns the action.
+// handler above, it does NOT resolve {month} into a retro id: SetDone (like
+// Remove, below) is scoped by household id and action id alone, the same
+// scoping every other by-id route in this API relies on. {month} sits in
+// the URL only so the route reads like the screen -- the spec's own reason
+// for addressing every retro route by month -- and is never cross-checked
+// against which retro actually owns the action.
 //
 // That is a deliberate, narrow gap, not an oversight: an action id is
 // already household-scoped and not guessable across households, so the
-// worst a mismatched {month} in the URL can do is tick the caller's own,
-// correctly-scoped action under a URL that mislabels which month it belongs
-// to -- never reach another household's data, and never bypass
+// worst a mismatched {month} can do is tick the caller's own,
+// correctly-scoped action under a URL that mislabels its month -- it can
+// never reach another household's data, and never bypasses
 // requireCapability/requireOwner/requireCSRF, which run before this handler
 // regardless of what {month} says.
 func handleSetRetroActionDone(deps Deps) http.HandlerFunc {

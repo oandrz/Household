@@ -41,7 +41,7 @@ type CountAgreementOwnerSignaturesParams struct {
 }
 
 // Joined through memberships: a departed owner's signature is ignored, never
-// deleted (decision 4).
+// deleted.
 func (q *Queries) CountAgreementOwnerSignatures(ctx context.Context, arg CountAgreementOwnerSignaturesParams) (int64, error) {
 	row := q.db.QueryRow(ctx, countAgreementOwnerSignatures, arg.ProposalID, arg.HouseholdID)
 	var count int64
@@ -78,8 +78,8 @@ type CreateAgreementSectionRow struct {
 }
 
 // No ON CONFLICT here: the unique index decides a name collision and
-// translate maps it by constraint name (decision 19). A "does this name
-// exist" pre-read is a check-then-write two owners can both pass.
+// translate maps it by constraint name. A "does this name exist" pre-read
+// is a check-then-write two owners can both pass.
 func (q *Queries) CreateAgreementSection(ctx context.Context, arg CreateAgreementSectionParams) (CreateAgreementSectionRow, error) {
 	row := q.db.QueryRow(ctx, createAgreementSection, arg.HouseholdID, arg.Name, arg.CreatedAt)
 	var i CreateAgreementSectionRow
@@ -98,8 +98,8 @@ type CreateAgreementSectionIfAbsentParams struct {
 	CreatedAt   pgtype.Timestamptz
 }
 
-// The starter set's insert (decision 17): DO NOTHING, so a second click is a
-// no-op rather than a 409.
+// The starter set's insert: DO NOTHING, so a second click is a no-op rather
+// than a 409.
 func (q *Queries) CreateAgreementSectionIfAbsent(ctx context.Context, arg CreateAgreementSectionIfAbsentParams) error {
 	_, err := q.db.Exec(ctx, createAgreementSectionIfAbsent, arg.HouseholdID, arg.Name, arg.CreatedAt)
 	return err
@@ -309,8 +309,8 @@ type ListAgreementSectionsRow struct {
 	CreatedAt pgtype.Timestamptz
 }
 
-// Ordering is created_at, id everywhere (decision 11: no position column, so
-// insertion order IS the order). The one exception is
+// Ordering is created_at, id everywhere: no position column, so insertion
+// order IS the order. The one exception is
 // ListAcceptedAgreementProposals: a version is the k-th ACCEPTANCE, and two
 // proposals created A then B can be accepted B then A.
 func (q *Queries) ListAgreementSections(ctx context.Context, householdID pgtype.UUID) ([]ListAgreementSectionsRow, error) {
@@ -443,16 +443,14 @@ type ListOpenAgreementProposalsRow struct {
 
 // The three proposal reads select p.* plus the same signed_by aggregate, so
 // sqlc generates three structs with identical fields in identical order --
-// which is what makes toAgreementProposal's conversion at each call site
-// legal. Change one select list and the conversion stops compiling: that is
-// the warning, not an accident.
+// what makes toAgreementProposal's conversion at each call site legal.
+// Changing one select list breaks that conversion on purpose, as a warning.
 //
-// GROUP BY p.id is enough because id is the primary key (Postgres then treats
-// every other column of p as functionally dependent), the same rule
-// ListRetroActions documents. The FILTER clause is what keeps an unsigned
-// proposal at '{}' rather than array_agg's default one-element array holding
-// a single NULL, and the ORDER BY inside array_agg makes the signature list
-// stable between reads.
+// GROUP BY p.id is enough because id is the primary key, so Postgres treats
+// every other column of p as functionally dependent (same rule
+// ListRetroActions uses). FILTER keeps an unsigned proposal at '{}' instead
+// of array_agg's default one-element NULL array; ORDER BY inside array_agg
+// keeps the signature list stable between reads.
 func (q *Queries) ListOpenAgreementProposals(ctx context.Context, householdID pgtype.UUID) ([]ListOpenAgreementProposalsRow, error) {
 	rows, err := q.db.Query(ctx, listOpenAgreementProposals, householdID)
 	if err != nil {
@@ -542,13 +540,13 @@ type LockAgreementTargetRow struct {
 	SectionID pgtype.UUID
 }
 
-// Sign's step 2, and the lock that matters (decision 12): the proposal lock
-// orders two signatures on one proposal and nothing else, so two proposals
-// against the same agreement never contend on it. All three predicates are IN
-// the WHERE -- under READ COMMITTED a waiter re-evaluates them after the
-// holder commits, so a removal or a rewording by the other proposal returns
-// zero rows here. A bare FOR UPDATE plus a Go-side compare defeats exactly
-// that race. CreateProposal makes the same call at propose time.
+// Sign's step 2, and the lock that matters: the proposal lock (step 1) only
+// orders signatures on one proposal, so two proposals against the same
+// agreement never contend on it -- this row lock is where they queue.
+// Predicates sit in the WHERE rather than a bare FOR UPDATE plus a Go-side
+// compare: under READ COMMITTED a blocked waiter re-evaluates it after the
+// holder commits, catching a concurrent removal or reword. CreateProposal
+// repeats this at propose time.
 func (q *Queries) LockAgreementTarget(ctx context.Context, arg LockAgreementTargetParams) (LockAgreementTargetRow, error) {
 	row := q.db.QueryRow(ctx, lockAgreementTarget, arg.HouseholdID, arg.ID, arg.Body)
 	var i LockAgreementTargetRow
@@ -567,11 +565,11 @@ type ParkAgreementProposalParams struct {
 	ID          pgtype.UUID
 }
 
-// resolved_at stays NULL: parking keeps the proposal OPEN (decision 7). The
-// status condition is in the WHERE, never a service if -- a check-then-write
-// races. Nothing here touches a retro table and there is no foreign key to a
-// retro row: the next retro usually does not exist yet, which is exactly when
-// a couple parks something.
+// resolved_at stays NULL: parking keeps the proposal OPEN. The status
+// condition is in the WHERE, never a service if, because a check-then-write
+// races. Nothing here touches a retro table and there is no foreign key to
+// one: the next retro usually does not exist yet, exactly when a couple
+// parks something.
 func (q *Queries) ParkAgreementProposal(ctx context.Context, arg ParkAgreementProposalParams) (int64, error) {
 	result, err := q.db.Exec(ctx, parkAgreementProposal, arg.Note, arg.HouseholdID, arg.ID)
 	if err != nil {
@@ -621,10 +619,10 @@ type SignAgreementProposalParams struct {
 	HouseholdID  pgtype.UUID
 }
 
-// DO UPDATE, never DO NOTHING: it stores nothing new -- signed_at is left
-// alone, keeping the first stamp (decision 16) -- but still counts a row,
-// which is what lets :execrows tell a double-click (1) from a caller who is
-// not an owner here (0). DO NOTHING would make the two identical.
+// DO UPDATE, never DO NOTHING: it stores nothing new -- signed_at stays as
+// the first stamp -- but still counts a row, which is what lets :execrows
+// tell a double-click (1) from a caller who is not an owner here (0). DO
+// NOTHING would make the two indistinguishable.
 func (q *Queries) SignAgreementProposal(ctx context.Context, arg SignAgreementProposalParams) (int64, error) {
 	result, err := q.db.Exec(ctx, signAgreementProposal,
 		arg.ProposalID,
@@ -655,16 +653,15 @@ type WithdrawAgreementProposalParams struct {
 	By          pgtype.UUID
 }
 
-// The proposer clause is a BACKSTOP; the handler answers first (decision 22).
-// Its second leg is decision 15: once the proposer is no longer an owner
-// here, any owner may withdraw -- without it a proposal a departed partner
-// left behind could never be removed by anyone.
-// Aliased as ap: sqlc v1.30.0 rejects the unaliased form with "column
-// reference \"household_id\" is ambiguous" once the correlated subquery below
-// reaches the UPDATE target by its bare table name. The alias sidesteps that
-// without changing what the statement does -- confirmed by the Withdraw
-// tests, which exercise both the proposer leg and the departed-owner leg
-// against a real Postgres container.
+// The proposer clause is a BACKSTOP; the handler answers first. Its second
+// leg -- once the proposer is no longer an owner here, any owner may
+// withdraw -- exists so a proposal a departed partner left behind is never
+// stuck forever.
+// Aliased as ap: sqlc v1.30.0 reports household_id ambiguous once the
+// correlated subquery reaches the UPDATE target by its bare table name. The
+// alias fixes that without changing behaviour -- the Withdraw tests confirm
+// both the proposer and departed-owner legs against a real Postgres
+// container.
 func (q *Queries) WithdrawAgreementProposal(ctx context.Context, arg WithdrawAgreementProposalParams) (int64, error) {
 	result, err := q.db.Exec(ctx, withdrawAgreementProposal,
 		arg.At,

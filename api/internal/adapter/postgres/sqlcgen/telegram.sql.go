@@ -30,11 +30,10 @@ type ConsumeTelegramLinkRequestRow struct {
 }
 
 // ConsumeTelegramLinkRequest is the single-use gate, and it records the
-// redeeming chat in the same statement. The guard lives here rather than in
-// the caller for the same reason ConsumeSignup's does: zero rows is the
-// authoritative answer to the race between a read and this write. It now
-// returns user_id as well, because the caller's next decision -- link, sign
-// in, or sign up -- is exactly that column.
+// redeeming chat in the same statement. The guard lives here, not in the
+// caller, for the same reason ConsumeSignup's does -- zero rows is the
+// authoritative answer to a read/write race. It returns user_id too, since
+// the caller's next decision (link, sign in, or sign up) is that column.
 func (q *Queries) ConsumeTelegramLinkRequest(ctx context.Context, arg ConsumeTelegramLinkRequestParams) (ConsumeTelegramLinkRequestRow, error) {
 	row := q.db.QueryRow(ctx, consumeTelegramLinkRequest, arg.NonceHash, arg.ChatID, arg.ChatUsername)
 	var i ConsumeTelegramLinkRequestRow
@@ -54,7 +53,7 @@ type CountTelegramLinkMintsSinceParams struct {
 
 // CountTelegramLinkMintsSince bounds how many link nonces one member can
 // mint. The per-chat limit below bounds redemption; this bounds minting,
-// which a signed-in session can now do with no chat involved at all.
+// which a signed-in session can do with no chat involved at all.
 func (q *Queries) CountTelegramLinkMintsSince(ctx context.Context, arg CountTelegramLinkMintsSinceParams) (int64, error) {
 	row := q.db.QueryRow(ctx, countTelegramLinkMintsSince, arg.UserID, arg.CreatedAt)
 	var count int64
@@ -232,12 +231,11 @@ WHERE created_at < $1
 `
 
 // PruneTelegramLinkRequests mirrors PruneSignups exactly: same retention
-// condition (created before the cutoff, and either already consumed or
-// expired), for the same reason -- a nonce nobody ever redeemed carries no
-// chat_id (see the table's own CHECK), so no per-chat limit ever bounds how
-// many a stranger can mint. This is the third of the three tables a stranger
-// can grow without an account; the other two (signups, login_attempts) are
-// already pruned by adminctl prune.
+// condition (created before the cutoff, consumed or expired), for the same
+// reason -- a nonce nobody redeemed carries no chat_id (the table's CHECK),
+// so no per-chat limit bounds a stranger's minting. This is the third of
+// three tables a stranger can grow without an account; the others
+// (signups, login_attempts) are already pruned by adminctl prune.
 func (q *Queries) PruneTelegramLinkRequests(ctx context.Context, createdAt pgtype.Timestamptz) (int64, error) {
 	result, err := q.db.Exec(ctx, pruneTelegramLinkRequests, createdAt)
 	if err != nil {

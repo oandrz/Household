@@ -15,13 +15,11 @@ import (
 
 // holdingDTO is one holding as the portfolio screen sees it.
 //
-// Quantity crosses the wire as BOTH a string and its nano integer, and that is
-// deliberate. The string is what a screen renders; the integer is what a
-// caller that does exact arithmetic reads. The browser must never divide the
-// integer by 1e9 to get the string -- that is float64 arithmetic on a figure a
-// money screen shows, and docs/LEARNING.md records what it costs
-// (333333 * 0.3 === 99999.90000000001 in JavaScript). Sending both keeps the
-// division on this side, in integers.
+// Quantity crosses the wire as both a string (for display) and its nano
+// integer (for exact arithmetic) -- deliberately. The browser must never
+// divide the nano integer by 1e9 itself: that's float64 arithmetic on a money
+// figure (docs/LEARNING.md: 333333 * 0.3 === 99999.90000000001 in
+// JavaScript). Sending both keeps the division here, in integers.
 type holdingDTO struct {
 	ID          string     `json:"id"`
 	AccountID   string     `json:"accountId"`
@@ -37,28 +35,25 @@ type holdingDTO struct {
 	CostMinor     int64  `json:"costMinor"`
 	RealisedMinor int64  `json:"realisedMinor"`
 
-	// HasMarketValue false means NO figure, not a figure of zero. A holding
-	// nobody has priced is unknowable, not worthless, and the screen shows the
-	// reason instead of a number -- the same rule the net worth card follows
-	// when a primary-currency change strands an account. ValuedAt is null in
-	// that case, and otherwise says how stale the price is.
+	// HasMarketValue false means no figure, not a figure of zero: an unpriced
+	// holding is unknowable, not worthless, so the screen shows the reason
+	// instead -- same rule the net worth card follows for a stranded account.
+	// ValuedAt is null then, and otherwise says how stale the price is.
 	MarketValueMinor int64   `json:"marketValueMinor"`
 	HasMarketValue   bool    `json:"hasMarketValue"`
 	ValuedAt         *string `json:"valuedAt"`
 
 	// The same value in the household's own currency, present only when the
-	// holding is not already in it. Null means "this holding is already in
-	// your currency", not "we could not work it out" -- so the screen shows
-	// one figure rather than two identical ones.
+	// holding isn't already in it. Null means "already in your currency", not
+	// "couldn't work it out" -- so the screen shows one figure, not two.
 	PrimaryMarketValueMinor *int64  `json:"primaryMarketValueMinor"`
 	PrimaryCurrency         *string `json:"primaryCurrency"`
 }
 
 // portfolioResponse carries NotInNetWorth as a literal wire-level fact rather
-// than letting the page hard-code it. Milestone 1 deliberately keeps holdings
-// out of net worth and the twelve-month trend, and the page says so on its
-// face; when milestone 3 changes that, this flag changes with the server and
-// the label follows.
+// than letting the page hard-code it. Holdings are deliberately kept out of
+// net worth and the trend for now; the page says so on its face, and when
+// that changes, this flag and the label change with it.
 type portfolioResponse struct {
 	Holdings      []holdingDTO `json:"holdings"`
 	NotInNetWorth bool         `json:"notInNetWorth"`
@@ -223,10 +218,9 @@ func handleUpdateHolding(deps Deps) http.HandlerFunc {
 	}
 }
 
-// Archive and restore are their own routes rather than a field on PATCH, the
-// same reasoning accounts, categories and goals follow: if archiving were
-// patchable, an ordinary rename that happened to include the field would
-// archive the holding as a side effect of saving a name.
+// Archive and restore are their own routes, not a field on PATCH -- same
+// reasoning as accounts, categories and goals: a patchable field risks an
+// ordinary rename archiving the holding as a side effect.
 func handleArchiveHolding(deps Deps) http.HandlerFunc { return setHoldingArchived(deps, true) }
 func handleRestoreHolding(deps Deps) http.HandlerFunc { return setHoldingArchived(deps, false) }
 
@@ -245,27 +239,20 @@ func setHoldingArchived(deps Deps, archived bool) http.HandlerFunc {
 	}
 }
 
-// writeOneHolding re-reads the WHOLE portfolio so a write answers with the same
-// shape a read does, derived figures included.
+// writeOneHolding re-reads the whole portfolio so a write answers with the
+// same shape a read does, derived figures included -- the same reason
+// writeGoal re-reads rather than converting what Create returned.
 //
-// The cost is deliberate and worth stating, because it is not obvious: every
-// write here issues three queries (all holdings, all events, all valuations)
-// and folds every position, to return one row. Recording ten lots therefore
-// costs ten full portfolio reads. At a household's scale -- single-digit
-// holdings, tens of events -- that is free, and the alternative is a write
-// response whose figures are computed differently from a read's, which is how
-// the two drift apart.
-//
-// It stops being free somewhere around a household with hundreds of events,
-// where the answer is a per-holding read rather than a portfolio one. Until
-// then the simplicity is worth more than the queries. A write's own return value
-// carries the stored row but not the fold or the price -- the same reason
-// writeGoal re-reads rather than converting what Create handed back.
+// The cost: every write issues three queries (holdings, events, valuations)
+// and folds every position, just to return one row -- so recording ten lots
+// costs ten portfolio reads. That's free at a household's scale (single-digit
+// holdings, tens of events); the alternative is a write response computed
+// differently from a read's, which is how the two drift apart. It stops being
+// free around hundreds of events, where a per-holding read replaces this.
 func writeOneHolding(w http.ResponseWriter, r *http.Request, deps Deps, householdID, holdingID string, status int) {
-	// includeArchived is true unconditionally here, and that matters: archiving
-	// answers with the holding it just archived, and folding it as if it were
-	// live is what stops that response claiming the position was always empty.
-	// An archived holding still held what it held.
+	// includeArchived is always true here: archiving must still answer with
+	// the holding it just archived, folded as live so the response doesn't
+	// read as an empty position.
 	view, err := deps.Holdings.Portfolio(r.Context(), householdID, true)
 	if err != nil {
 		MapDomainError(w, r, err)
@@ -281,16 +268,13 @@ func writeOneHolding(w http.ResponseWriter, r *http.Request, deps Deps, househol
 }
 
 // writeHoldingNameConflict turns the plain 409 into one the modal can act on
-// when the colliding holding turns out to be ARCHIVED: it carries that
-// holding's id, so the screen offers Restore rather than a dead end. Archived
-// rows still occupy their name (archived_at is not part of the unique key), so
-// without this, re-adding something the household archived last year is a
-// refusal with no way forward -- and the household cannot see the row that is
-// blocking them.
+// when the colliding holding is archived: it carries that holding's id so the
+// screen can offer Restore instead of a dead end. Archived rows still occupy
+// their name (archived_at isn't part of the unique key), so without this, an
+// archived name blocks re-adding with no visible cause.
 //
-// The precedent and the shape are goal_handlers.go's writeGoalNameConflict. As
-// there, a failure to look the archived row up falls back to the plain error
-// rather than replacing one problem with another.
+// Same precedent as goal_handlers.go's writeGoalNameConflict: a failed lookup
+// of the archived row falls back to the plain error, not a worse one.
 func writeHoldingNameConflict(w http.ResponseWriter, r *http.Request, deps Deps, householdID, accountID, name string, err error) {
 	if !errors.Is(err, domain.ErrHoldingNameTaken) {
 		MapDomainError(w, r, err)
@@ -377,10 +361,9 @@ func handleCreateHoldingEvent(deps Deps) http.HandlerFunc {
 		if !ok {
 			return
 		}
-		// The holding is read for its currency, which an event carries but
-		// does not state: an event is denominated in its holding's currency by
-		// construction. The service re-reads and re-validates, so this read is
-		// for building the request, not for trusting.
+		// Read for the holding's currency: an event doesn't state its own and
+		// is denominated in the holding's by construction. The service
+		// re-reads and re-validates, so this read only builds the request.
 		holding, err := deps.Holdings.Get(r.Context(), scope.HouseholdID, holdingID)
 		if err != nil {
 			MapDomainError(w, r, err)
@@ -467,9 +450,8 @@ type createValuationRequest struct {
 }
 
 // Recording a valuation answers 200, never 201: one price per holding per day
-// means a second write for the same date replaces the first rather than
-// creating anything. Saying "Created" for a correction would be a lie the
-// frontend could act on.
+// means a second write for the same date replaces the first instead of
+// creating anything, and "Created" for a correction would mislead the frontend.
 func handleCreateHoldingValuation(deps Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		scope, ok := requireScope(w, r)
@@ -655,10 +637,9 @@ func handleDeleteHoldingIncome(deps Deps) http.HandlerFunc {
 	}
 }
 
-// componentDTO is one figure in both currencies. The primary one is the
-// household's own and is what answers "did this make us richer"; the native one
-// sits beside it so the owner can still tell whether the PICK was good and the
-// exchange rate was the problem.
+// componentDTO is one figure in both currencies: the primary side answers
+// "did this make us richer", and the native side beside it lets the owner
+// tell a good pick from a favourable exchange rate.
 type componentDTO struct {
 	NativeMinor  int64 `json:"nativeMinor"`
 	PrimaryMinor int64 `json:"primaryMinor"`
@@ -678,11 +659,10 @@ func toComponentPointer(c *domain.ReturnComponent) *componentDTO {
 
 // periodReturnDTO is one holding's figures for one period.
 //
-// unrealised and total are NULL rather than zero when they cannot be known,
-// and `reason` says which price was missing. A screen must render the reason,
-// never a zero: a quarter nobody priced is unknowable, not flat. realised,
-// income and fees are always present -- no price is involved in them, so a
-// missing valuation cannot take them away.
+// Unrealised and total are null, not zero, when they can't be known, and
+// `reason` says which price was missing -- the screen must render that
+// reason, never a zero: an unpriced quarter is unknowable, not flat. Realised,
+// income and fees are always present since no price is involved in them.
 type periodReturnDTO struct {
 	Unrealised *componentDTO `json:"unrealised"`
 	Realised   componentDTO  `json:"realised"`
@@ -691,11 +671,10 @@ type periodReturnDTO struct {
 	Total      *componentDTO `json:"total"`
 	Reason     string        `json:"reason"`
 
-	// The days each end was measured at, as dates rather than as a "we have a
-	// price" boolean: a screen that only knows a price EXISTS cannot say how
-	// stale it is, and stale valuations are this feature's top product risk.
-	// Null means no price was consulted, which is what holding nothing at that
-	// end means.
+	// Dates, not a "we have a price" boolean: a screen that only knows a price
+	// exists can't say how stale it is, and staleness is this feature's top
+	// product risk. Null means no price was consulted -- holding nothing at
+	// that end.
 	OpeningPriceAsOf *string `json:"openingPriceAsOf"`
 	ClosingPriceAsOf *string `json:"closingPriceAsOf"`
 }
@@ -723,10 +702,9 @@ type reportHoldingDTO struct {
 	Returns     []periodReturnDTO `json:"returns"`
 }
 
-// reportResponse carries the periods once and every holding's figures aligned
-// to them by POSITION. A chart reads the two together by index rather than
-// matching labels, which is also what stops a holding with a gap in its
-// history shifting its own bars.
+// reportResponse carries the periods once, with every holding's figures
+// aligned to them by position. A chart reads the two together by index
+// rather than matching labels, so a holding with a gap can't shift its bars.
 type reportResponse struct {
 	Kind            string             `json:"kind"`
 	PrimaryCurrency string             `json:"primaryCurrency"`
@@ -734,11 +712,10 @@ type reportResponse struct {
 	Holdings        []reportHoldingDTO `json:"holdings"`
 }
 
-// defaultReportPeriods is how far back each kind looks when the request does
-// not say. It lives HERE rather than in the frontend because a default in the
-// browser would be a second copy of the window rule, free to drift from this
-// one -- and because the chart's own bar budget is what these numbers are
-// chosen against.
+// defaultReportPeriods is how far back each kind looks when the request
+// doesn't say. It lives here, not in the frontend, so there's no second copy
+// of the rule to drift -- and because these numbers are chosen against the
+// chart's own bar budget.
 var defaultReportPeriods = map[domain.PeriodKind]int{
 	domain.PeriodQuarter: 6,
 	domain.PeriodHalf:    4,

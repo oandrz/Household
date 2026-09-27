@@ -11,10 +11,10 @@ import (
 )
 
 // Someone will eventually paste the read-write URL into DATABASE_READONLY_URL
-// to make a broken panel work, at 1 a.m., meaning to change it back. That is
-// not a hypothetical failure mode; it is the ordinary one. This is the test
-// that turns the spec's guard 1 from a claim in a document into a property of
-// the running process.
+// to fix a broken panel at 1 a.m., meaning to change it back later -- an
+// ordinary failure mode, not a hypothetical one. This test makes the
+// read-only guarantee a property of the running process, not just a claim
+// in the design doc.
 func TestOpenReadOnlyRefusesAConnectionThatCanWrite(t *testing.T) {
 	adminURL := testsupport.StartPostgres(t)
 
@@ -28,14 +28,13 @@ func TestOpenReadOnlyRefusesAConnectionThatCanWrite(t *testing.T) {
 	if !strings.Contains(err.Error(), "DATABASE_READONLY_URL") {
 		t.Fatalf("error does not name the variable: %v", err)
 	}
-	// main.go decides whether to refuse the boot by matching this sentinel.
-	// It survives out through Ping only because assertCannotWrite and
-	// OpenReadOnly each wrap it with %w -- pgxpool v5.10.0 and puddle v2.2.2
-	// pass an AfterConnect error straight through unwrapped at every hop
-	// (the pool's Constructor, puddle's acquire, and Pool.Ping all just
-	// `return err`), so nothing outside this file has to preserve the
-	// chain. If this assertion fails, one of this file's two %w wraps broke,
-	// and main.go would degrade instead of refusing -- exactly backwards.
+	// main.go refuses the boot by matching this sentinel, which survives out
+	// through Ping only because assertCannotWrite and OpenReadOnly each wrap
+	// it with %w -- pgxpool v5.10.0 and puddle v2.2.2 pass an AfterConnect
+	// error through unwrapped at every hop (the pool's Constructor, puddle's
+	// acquire, and Pool.Ping all just `return err`), so nothing else
+	// preserves the chain. If this assertion fails, one of those wraps broke
+	// and main.go would degrade instead of refuse -- exactly backwards.
 	if !errors.Is(err, postgres.ErrReadOnlyMisconfigured) {
 		t.Fatalf("error does not carry ErrReadOnlyMisconfigured: %v", err)
 	}
@@ -57,8 +56,8 @@ func TestOpenReadOnlyAcceptsTheReadOnlyRole(t *testing.T) {
 }
 
 // The pool carries the timeout itself as well as the role carrying it, so a
-// database whose role predates this decision -- an existing box provisioned
-// from an older PROVISION.md -- is still bounded.
+// database whose role predates the statement_timeout setting -- an existing
+// box provisioned from an older PROVISION.md -- is still bounded.
 func TestTheReadOnlyPoolBoundsItsOwnStatements(t *testing.T) {
 	adminURL := testsupport.StartPostgres(t)
 
@@ -78,11 +77,11 @@ func TestTheReadOnlyPoolBoundsItsOwnStatements(t *testing.T) {
 }
 
 func TestOpenReadOnlyRefusesAnUnparseableURL(t *testing.T) {
-	// "host=x port=notanumber", not something vaguely wrong-looking: pgx
-	// accepts a bare string as a keyword/value DSN, so a value like "not a
-	// dsn at all" might parse into keys rather than fail, and the test would
-	// pass or fail depending on pgx's parser rather than on this code. A
-	// non-numeric port is refused by ParseConfig for certain.
+	// "host=x port=notanumber", not a vaguely-wrong string: pgx accepts a
+	// bare string as a keyword/value DSN, so something looser might parse
+	// into keys instead of failing, making the result depend on pgx's
+	// parser rather than this code. A non-numeric port fails ParseConfig
+	// for certain.
 	_, err := postgres.OpenReadOnly(context.Background(), "host=x port=notanumber dbname=hearth")
 	if err == nil {
 		t.Fatal("OpenReadOnly accepted a URL that is not a DSN")
@@ -92,9 +91,10 @@ func TestOpenReadOnlyRefusesAnUnparseableURL(t *testing.T) {
 	}
 }
 
-// The other half of the same decision, and the one that keeps a restore from
-// taking the whole product down: a database that is simply not there yet is
-// NOT a misconfiguration, so main.go degrades instead of refusing the boot.
+// The other half of ErrReadOnlyMisconfigured's rule, and the one that keeps
+// a restore from taking the whole product down: a database that is simply
+// not there yet is NOT a misconfiguration, so main.go degrades instead of
+// refusing the boot.
 func TestOpenReadOnlyTreatsAnUnreachableDatabaseAsMerelyUnavailable(t *testing.T) {
 	// A DSN that parses and cannot connect: nothing listens on this port.
 	_, err := postgres.OpenReadOnly(context.Background(),

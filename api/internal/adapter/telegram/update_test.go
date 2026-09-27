@@ -61,14 +61,13 @@ func TestParseStartReadsTheSenderName(t *testing.T) {
 	}
 }
 
-// A first name is not an identifier: Telegram lets anyone set it to anything,
-// including someone else's real @username. If ParseStart fell back to it,
-// a chat with no @username and a first name of "andreas" would render on the
-// confirm screen (telegramChatLabel) as "@andreas" -- indistinguishable from
-// the genuine handle, and the confirm step's only piece of evidence
-// (docs/adr/0010-binding-a-chat-needs-a-confirm.md) would be forgeable by
-// whoever set their first name. So a first name with no @username must read
-// as "", not as a name.
+// A first name is not an identifier -- Telegram lets anyone set it to
+// anything, including someone else's real @username. If ParseStart fell
+// back to it, a chat with no @username and first name "andreas" would
+// render on the confirm screen (telegramChatLabel) as "@andreas",
+// indistinguishable from the genuine handle and forging the confirm step's
+// only evidence (docs/adr/0010-binding-a-chat-needs-a-confirm.md). So a
+// first name with no @username must read as "", not as a name.
 func TestParseStartRefusesAFirstNameAsTheSenderName(t *testing.T) {
 	u := Update{UpdateID: 71, Message: &Message{Text: "/start abc"}}
 	u.Message.Chat.ID = 511

@@ -13,9 +13,8 @@ import (
 // from, described the same way, because it is the same rule.
 
 // BudgetCategoryView is one row of the categories grid: a category's cap
-// (zero Money when the month has no line for it, never a nil), its spend,
-// and whether it is over. Archived is carried so the screen can still render
-// an archived category's cap (spec decision 5) while marking it retired.
+// (zero Money when unset, never nil), its spend, and whether it is over.
+// Archived lets the screen still render a retired category's cap.
 type BudgetCategoryView struct {
 	CategoryID   string
 	CategoryName string
@@ -25,17 +24,11 @@ type BudgetCategoryView struct {
 	Over         bool
 }
 
-// BudgetPersonView is one row of Spending by person. Every membership that
-// paid for something this month gets a row, and so does the unattributed
-// bucket (MembershipID "") for spend with no payer on file -- a hand-entered
-// transaction saved without one, or (once Bills ships) a bill with no "Paid
-// by". That bucket's Name is deliberately "": copy for it belongs in the
-// frontend (BudgetByPerson.tsx), the same house rule budgetCopy.ts follows
-// for everything else this screen renders, not composed here. Dropping the
-// bucket instead -- the earlier shape -- let the rows sum to less than Spent
-// with nothing on screen explaining the gap; this is not the "Kids (shared)"
-// grouping the spec rejects, since it attributes spend to nobody, it only
-// names the absence of a payer.
+// BudgetPersonView is one row of "Spending by person".
+//
+// MembershipID "" collects spend with no payer on file. Keep that row:
+// without it the rows sum to less than Spent and nothing on screen explains
+// the gap. Its Name is empty on purpose - the frontend owns all copy here.
 type BudgetPersonView struct {
 	MembershipID string
 	Name         string
@@ -43,10 +36,10 @@ type BudgetPersonView struct {
 }
 
 // BudgetMonthView is the whole Budget screen in one response. Budget is nil
-// when the month has never been budgeted -- the empty state -- while
-// Categories, Spent and ByPerson are still populated: the screen shows what
-// was spent even before caps exist (spec decision 4's cost, and the
-// TestBudgetMonthUnbudgetedStillReportsSpend behaviour).
+// in the empty state -- a never-budgeted month, since budgets never copy
+// forward on their own -- while Categories, Spent and ByPerson are still
+// populated: the screen shows what was spent even before caps exist
+// (TestBudgetMonthUnbudgetedStillReportsSpend).
 type BudgetMonthView struct {
 	Currency       string
 	Month          time.Time
@@ -65,38 +58,28 @@ type BudgetMonthView struct {
 	OverCount      int
 
 	// RolledOverAt and RolloverGoalID mirror domain.Budget's own rollover
-	// stamp (see its doc comment for why the two always move together), read
-	// out to the top level here rather than making every caller reach
-	// through the nilable Budget pointer above: a never-budgeted month has
-	// no rollover to speak of either, and nil/"" says that as directly as
-	// Budget == nil does for the empty state.
+	// stamp, read out to the top level so callers need not reach through
+	// the nilable Budget pointer above -- nil/"" says "never budgeted" as
+	// directly as Budget == nil does.
 	RolledOverAt   *time.Time
 	RolloverGoalID string
 
-	// RolloverAmountMinor is domain.Budget's own field of the same name,
-	// carried up here the same way -- the amount RollOver actually wrote,
-	// nil until a rollover happens and fixed from then on. It is
-	// deliberately NOT `Remaining` at read time: Remaining a few lines above
-	// is Budgeted minus Spent, recomputed on every call to Month from
-	// whatever transactions exist in the ledger right now, so a caller that
-	// showed Remaining next to a past-tense "moved into X" sentence was
-	// showing a live number, not the record of what actually moved. A
-	// backdated transaction, or an edit or delete inside an
-	// already-rolled-over month -- none of them blocked anywhere in this
-	// codebase -- would silently change that sentence's own figure after the
-	// fact. RolloverAmountMinor is the fix: read off the goal_contributions
-	// row RollOver wrote, not recomputed from today's ledger.
+	// RolloverAmountMinor is domain.Budget's own field, carried up the same
+	// way: the amount RollOver actually wrote, nil until a rollover
+	// happens. It is deliberately NOT `Remaining` -- Remaining recomputes
+	// from today's ledger on every call, so a backdated transaction or an
+	// edit inside an already-rolled-over month would silently change a
+	// "moved into X" sentence built from it. This field reads off the
+	// goal_contributions row RollOver wrote instead, so that sentence stays
+	// true.
 	RolloverAmountMinor *int64
 }
 
 // BudgetHistoryMonth is one row of the History modal. Closed is false only
-// for the month containing `today` -- the spec's History table calls out
-// "the current month" showing "so far" instead of a final result, and that
-// is the real calendar month, not whichever month a caller happened to
-// anchor the walk-back window on. Asking for history anchored on a past
-// month (the page's picker sitting on June while today is July) marks every
-// returned row Closed, June included: none of them is the month actually in
-// progress.
+// for the month containing `today` -- "the current month" means the real
+// one, never whichever month a caller anchored the walk-back window on. A
+// picker sitting on a past month marks every returned row Closed, that
+// month included.
 type BudgetHistoryMonth struct {
 	Month    time.Time
 	Budgeted domain.Money
@@ -113,13 +96,12 @@ type BudgetLineInput struct {
 }
 
 // BudgetDeps gathers every port BudgetService needs, mirroring
-// TransactionDeps. Members is the same MembershipRepository.List the member
-// handlers already use for names -- ByPerson needs display names, not a
-// second, narrower port asking Postgres the same question a different way.
+// TransactionDeps. Members is MembershipRepository.List, the same one the
+// member handlers use for names -- a second, narrower port would ask
+// Postgres the same question another way.
 //
-// There is no Clock here. Month, Save and History all take the time they
-// need as parameters; a service that read time.Now() itself would make the
-// days-left and history-window tests non-deterministic.
+// There is no Clock: Month, Save and History all take the time they need as
+// parameters, so the days-left and history-window tests stay deterministic.
 type BudgetDeps struct {
 	Budgets      BudgetRepository
 	Transactions TransactionRepository
@@ -128,18 +110,16 @@ type BudgetDeps struct {
 	Members      MembershipRepository
 	FX           FXRateProvider
 	// Goals is read only by RollOver, to fetch the target goal before any
-	// write -- see that method's own comment for why the fetch cannot be
-	// skipped or reordered after BudgetRepository.RollOverToGoal. It is the
-	// one-method GoalLookup, not the whole GoalRepository: the budget service
-	// has no business writing goals.
+	// write (see that method's own comment for why the order matters). It
+	// is the one-method GoalLookup, not GoalRepository -- Budget never
+	// writes goals.
 	Goals GoalLookup
 }
 
-// BudgetService composes the Budget screen from the same ledger Transactions
-// already exposes: an envelope per category is a sum over the month's
-// transactions by category, which TransactionRepository.MonthTotals already
-// returns. It takes no actor parameter, by the rule this codebase follows:
-// services enforce what is valid, middleware enforces who is asking.
+// BudgetService composes the Budget screen from the same ledger
+// Transactions already exposes: an envelope per category is a sum over
+// TransactionRepository.MonthTotals. It takes no actor parameter: services
+// enforce what is valid, middleware enforces who is asking.
 type BudgetService struct {
 	d BudgetDeps
 }
@@ -148,19 +128,16 @@ func NewBudgetService(d BudgetDeps) *BudgetService {
 	return &BudgetService{d: d}
 }
 
-// Month composes the whole screen for one household-month. today is always a
-// parameter -- see BudgetDeps' doc comment -- so DaysLeft and the pace figure
-// are deterministic in tests and driven by the clock port at the HTTP layer
-// in production.
+// Month composes the whole screen for one household-month. today is always
+// a parameter -- see BudgetDeps' doc comment -- so DaysLeft and the pace
+// figure are deterministic in tests.
 //
-// Spent is computed exactly the way TransactionService.MonthSummary computes
-// it (see monthsummary.go's own comment for why the order matters): convert
-// each expense-kind transaction into the household's primary currency first,
-// then add, per transaction, so a mixed-currency household never sums two
-// different currencies together. A transaction with no available rate is
-// excluded from Spent, from its category's figure, and from its person's
-// figure alike, and named in ExcludedNoRate -- a quietly short total looks
-// identical to a correct one, which is the failure this refuses.
+// Spent follows TransactionService.MonthSummary's exact rule: convert each
+// expense transaction into primary first, then add, so a mixed-currency
+// household never sums two currencies together. A no-rate transaction is
+// excluded from Spent, its category and its person alike, and named in
+// ExcludedNoRate -- a quietly short total must never look like a correct
+// one.
 func (s *BudgetService) Month(ctx context.Context, householdID string, month, today time.Time) (BudgetMonthView, error) {
 	household, err := s.d.Households.Get(ctx, householdID)
 	if err != nil {
@@ -178,8 +155,8 @@ func (s *BudgetService) Month(ctx context.Context, householdID string, month, to
 	switch {
 	case errors.Is(err, domain.ErrNotFound):
 		// No budget row: the empty state. Categories and Spent still get
-		// filled in below -- decision 4's cost is an empty state each new
-		// month, not a blind screen.
+		// filled in below -- budgets never copy forward on their own, so a
+		// new month is an empty state, not a blind screen.
 		budget = nil
 	case err != nil:
 		return BudgetMonthView{}, err
@@ -187,9 +164,8 @@ func (s *BudgetService) Month(ctx context.Context, householdID string, month, to
 		budget = &b
 	}
 
-	// includeArchived=true: an archived category's cap must still render
-	// (spec decision 5) -- archiving hides a category from new-cap pickers,
-	// it does not erase its history.
+	// includeArchived=true: an archived category's cap must still render --
+	// archiving hides a category from new-cap pickers, not its history.
 	categories, err := s.d.Categories.List(ctx, householdID, true)
 	if err != nil {
 		return BudgetMonthView{}, err
@@ -222,13 +198,11 @@ func (s *BudgetService) Month(ctx context.Context, householdID string, month, to
 	daysLeft := domain.DaysLeftInMonth(month, today)
 	dailyPace, dailyPaceOK := domain.DailyPace(remaining, daysLeft)
 	// domain.DailyPace only knows Remaining and DaysLeft, so on its own it
-	// cannot enforce the spec's other condition: "hidden when ... the viewed
-	// month is not the current one." A *future* month still gets a full
-	// DaysLeftInMonth and can have Remaining > 0, so DailyPaceOK would
-	// otherwise come back true for a month that has not started yet. Only
-	// this method holds both `month` and `today`, so the comparison happens
-	// here rather than being pushed onto a caller that would have to
-	// duplicate it.
+	// can't enforce "hidden unless the viewed month is the current one": a
+	// future month still gets a full DaysLeftInMonth and Remaining > 0,
+	// which would read DailyPaceOK true before the month has even started.
+	// Only this method holds both `month` and `today`, so the check happens
+	// here rather than being duplicated by every caller.
 	if !startOfMonth(month).Equal(startOfMonth(today)) {
 		dailyPace, dailyPaceOK = 0, false
 	}
@@ -292,13 +266,12 @@ type spendTally struct {
 	spent      domain.Money
 	byCategory map[string]domain.Money
 	byPerson   map[string]domain.Money
-	// personOrder keeps ByPerson's row order deterministic: real members in
-	// first-appearance order (the order MonthTotals already returns in a
-	// stable way), with the unattributed key "" appended after tallySpend's
-	// loop so it always renders last -- ranging over byPerson directly would
-	// make the order vary run to run, and putting "" in at its own first
-	// appearance would let an unattributed transaction that happened to be
-	// dated (or entered) first jump ahead of real members.
+	// personOrder keeps ByPerson deterministic: real members in
+	// first-appearance order (MonthTotals' own stable order), with "" always
+	// appended last after tallySpend's loop -- ranging over byPerson
+	// directly would vary run to run, and letting "" join at its own first
+	// appearance could put an unattributed transaction ahead of real
+	// members.
 	personOrder []string
 	excluded    []ExcludedTransaction
 }
@@ -315,10 +288,10 @@ func (s *BudgetService) tallySpend(ctx context.Context, views []TransactionView,
 
 	for _, view := range views {
 		t := view.Transaction
-		// Income is not spending, and a transfer is the same money arriving
-		// somewhere else -- the exact MonthSummary rule. Deleting this guard
-		// is the designated mutation: TestBudgetMonthSpentReusesTheMonthSummaryRule
-		// pins it by adding an income transaction that must not move Spent.
+		// Income is not spending, and a transfer is money arriving
+		// somewhere else -- the exact MonthSummary rule.
+		// TestBudgetMonthSpentReusesTheMonthSummaryRule pins this guard: an
+		// income transaction added there must never move Spent.
 		if t.Kind != domain.TransactionExpense {
 			continue
 		}
@@ -353,19 +326,13 @@ func (s *BudgetService) tallySpend(ctx context.Context, views []TransactionView,
 		}
 
 		// Accumulate unconditionally, keyed on the possibly-empty payer id.
-		// The old `if t.PaidByMembershipID != ""` guard here is what let
-		// this card's rows sum to less than Spent above it. `tally.spent` a
-		// few lines up has no such guard, and this accumulator now matches
-		// it. `tally.byCategory` just above DOES still guard on
-		// `t.CategoryID != ""` -- that one is deliberate, not a sibling to
-		// copy: Categories has no "uncategorised" row for a bare category id
-		// to land in, so a transaction with no category is correctly left out
-		// of it. ByPerson is different on purpose -- it now has an
-		// unattributed bucket for exactly that case, which is the whole point
-		// of this change. Real members are recorded into personOrder as they
-		// first appear; "" is deliberately left out of that here and appended
-		// once after the loop, so it lands last regardless of when the first
-		// unattributed transaction showed up.
+		// Don't guard on `t.PaidByMembershipID != ""` here: that guard let
+		// ByPerson's rows sum to less than Spent. `tally.byCategory` above
+		// DOES guard on `t.CategoryID != ""` -- deliberately, since
+		// Categories has no uncategorised row for a transaction to land in.
+		// "" is appended to personOrder after the loop, so it always renders
+		// last regardless of when the first unattributed transaction
+		// appeared.
 		total, seen := tally.byPerson[t.PaidByMembershipID]
 		if !seen {
 			total = zero
@@ -411,15 +378,13 @@ func (s *BudgetService) buildPersonViews(ctx context.Context, householdID string
 
 // buildCategoryViews projects the household's expense categories into the
 // grid's rows. A category with no cap line renders at zero and is never
-// "over" -- Over requires an actual line, not just a nil-turned-zero Money,
-// so a category nobody has budgeted yet cannot show as over merely because
-// it has some spend (TestBudgetMonthUnbudgetedStillReportsSpend). A category
-// budgeted at exactly zero -- "spend nothing on this" -- can still go over,
-// because that zero came from a real line.
+// "over" -- Over requires an actual line, not a nil-turned-zero Money, so a
+// never-budgeted category can't show over merely from having spend
+// (TestBudgetMonthUnbudgetedStillReportsSpend). A category budgeted at
+// exactly zero can still go over, since that zero came from a real line.
 //
 // Income categories are left out: caps envelope spending only (see
-// CategoryService.Create's own comment for why an income category is never
-// offered a cap in the first place).
+// CategoryService.Create's own comment).
 func buildCategoryViews(categories []domain.Category, caps, spentByCategory map[string]domain.Money, zero domain.Money) ([]BudgetCategoryView, int) {
 	views := make([]BudgetCategoryView, 0, len(categories))
 	overCount := 0
@@ -467,25 +432,21 @@ func (s *BudgetService) memberNames(ctx context.Context, householdID string) (ma
 }
 
 // Save validates the whole line set before BudgetRepository ever sees it,
-// then delegates the write wholesale -- BudgetRepository.Upsert's own doc
-// comment is explicit that it never merges. Every cap is constructed via
-// domain.NewMoney(capMinor, primary) here, in the service, so a caller can
-// never make a Budget carry a currency the household does not have: the repo
-// relabels to the household's primary currency regardless, but that must
-// never be the only thing standing between a bad currency and a stored row.
+// then delegates the write wholesale -- BudgetRepository.Upsert never
+// merges. Every cap is built via domain.NewMoney(capMinor, primary) here,
+// so a caller can never make a Budget carry a currency the household
+// doesn't have; the repo relabels to primary regardless, but that must not
+// be the only defence.
 //
 // A duplicate category id, a negative cap, or a negative expected income is
-// refused before any repo call -- domain.ErrBudgetLineDuplicate,
-// domain.ErrBudgetCapNegative and domain.ErrBudgetIncomeNegative, following
-// the per-field sentinel convention domain/errors.go already uses (there is
-// no domain.ErrValidation). domain.NewMoney does not itself refuse a
-// negative amount -- a transaction's Money can legitimately be negative --
-// so nothing downstream of this check would otherwise catch a negative
-// income before it reached the repository. An unknown or foreign category id
-// is not checked here at all: that is BudgetRepository.Upsert's own
-// household-ownership check (validateLineCategories in the postgres
-// adapter), and its error passes through unchanged rather than being
-// duplicated or reinterpreted in this layer.
+// refused before any repo call (domain.ErrBudgetLineDuplicate,
+// ErrBudgetCapNegative, ErrBudgetIncomeNegative -- per-field sentinels,
+// since there is no domain.ErrValidation). domain.NewMoney does not itself
+// refuse a negative amount -- a
+// transaction's Money can legitimately be negative -- so nothing downstream
+// would otherwise catch it. An unknown or foreign category id is NOT
+// checked here: that is BudgetRepository.Upsert's own household-ownership
+// check, and its error passes through unchanged.
 func (s *BudgetService) Save(ctx context.Context, householdID string, month time.Time, expectedIncomeMinor *int64, lines []BudgetLineInput) (domain.Budget, error) {
 	if expectedIncomeMinor != nil && *expectedIncomeMinor < 0 {
 		return domain.Budget{}, domain.ErrBudgetIncomeNegative
@@ -541,9 +502,9 @@ func (s *BudgetService) Save(ctx context.Context, householdID string, month time
 
 // RollOver moves a CLOSED month's unspent budget into a goal, as one
 // contribution, once. It is the manual half of the design's "Roll unspent
-// into savings" toggle: nothing here runs on a clock, and the spec's
-// decision 4 explains why a stored toggle that acts only when clicked would
-// be worse than this button.
+// into savings" toggle: nothing here runs on a clock, and a stored toggle
+// that only acted when clicked would read as automatic when it isn't --
+// this button is the honest version.
 //
 // Every refusal THIS METHOD can detect happens before anything is written,
 // in this order:
@@ -553,43 +514,33 @@ func (s *BudgetService) Save(ctx context.Context, householdID string, month time
 //   - an archived goal                     -> domain.ErrGoalArchived
 //   - a goal not in the primary currency   -> domain.ErrRolloverCurrencyMismatch
 //
-// domain.ErrRolloverAlreadyDone is not in that list because this method
-// cannot see it coming: it surfaces from INSIDE BudgetRepository.RollOverToGoal's
-// own transaction, after its conditional UPDATE (StampBudgetRollover, ...
-// AND rolled_over_at IS NULL) has already been attempted and matched zero
-// rows -- diagnoseUnstampedRollover (budget_repo.go) is what tells that apart
-// from "never budgeted" and returns the sentinel. The transaction still rolls
-// back on it, so nothing is left half-written, but a reader looking for this
-// refusal should not expect to find a pre-write check for it in this file.
+// domain.ErrRolloverAlreadyDone is not in that list: it surfaces from
+// INSIDE BudgetRepository.RollOverToGoal's own transaction, when its
+// conditional UPDATE matches zero rows and diagnoseUnstampedRollover tells
+// that apart from "never budgeted." The transaction still rolls back, so
+// nothing is left half-written.
 //
-// The closed-month check compares month-starts, not instants, using the
-// same UTC truncation domain/budget.go's own DaysLeftInMonth applies (via
-// this file's startOfMonth) -- a mid-month "unspent" figure is still moving,
-// and money moved out of a number that later shrinks is a wrong number the
-// household cannot undo.
+// The closed-month check compares month-starts, not instants (via
+// startOfMonth) -- a mid-month "unspent" figure is still moving, and money
+// moved out of a number that later shrinks is a wrong number the household
+// cannot undo.
 //
-// Remaining comes from Month, so this never computes spend a second way.
-// Month's own Budget field is nil exactly when the month has never been
-// budgeted (the empty state) -- that is checked explicitly, before Remaining
-// is ever read, because an unbudgeted month's Budgeted is zero and would
-// otherwise make Remaining go negative on its own, misreporting
-// domain.ErrNotFound as a silent domain.ErrRolloverNothingUnspent instead.
+// Remaining comes from Month, never recomputed a second way. Month's Budget
+// field is checked for nil BEFORE Remaining is read: an unbudgeted month's
+// Budgeted is zero, which would otherwise make Remaining go negative and
+// misreport domain.ErrNotFound as domain.ErrRolloverNothingUnspent.
 //
-// The currency refusal is spec decision 11: budgets carry no currency column
-// and are implicitly in the household's primary currency, while a goal
-// carries an explicit one. Converting inside a rollover would store a rate
-// nobody can audit, so a non-primary goal is refused even when FX knows a
-// live rate for it -- this is about auditability, not availability.
+// The currency refusal: budgets carry no currency column and are
+// implicitly primary, while a goal carries an explicit one. Converting
+// inside a rollover would store a rate nobody can audit, so a non-primary
+// goal is refused even with a live rate available -- this is about
+// auditability, not availability.
 //
-// s.d.Goals.Get runs BEFORE BudgetRepository.RollOverToGoal, and that
-// ordering is load-bearing, not incidental: RollOverToGoalInput.GoalID
-// reaches the repository's SQL in a value position (Task 5's review), so an
-// id that does not exist, or belongs to a different household, would
-// otherwise reach a foreign-key violation and surface as an unmapped 500
-// rather than this method's own domain.ErrNotFound. Get is also what this
-// method needs anyway, to read the goal's ArchivedAt and currency -- so
-// fetching it first costs nothing extra and closes that gap at the same
-// time.
+// s.d.Goals.Get runs BEFORE BudgetRepository.RollOverToGoal: GoalID reaches
+// the repository's SQL in a value position, so an invalid id would
+// otherwise surface as an unmapped 500 (a foreign-key violation) instead of
+// this method's own domain.ErrNotFound. Get is needed anyway, for the
+// goal's ArchivedAt and currency, so fetching it first costs nothing extra.
 func (s *BudgetService) RollOver(ctx context.Context, householdID string, month time.Time, goalID string, today time.Time) (domain.GoalContribution, error) {
 	if !startOfMonth(month).Before(startOfMonth(today)) {
 		return domain.GoalContribution{}, domain.ErrRolloverMonthOpen
@@ -627,19 +578,14 @@ func (s *BudgetService) RollOver(ctx context.Context, householdID string, month 
 }
 
 // History reports the viewed month (if budgeted) plus up to `months` closed
-// months walked back from it, newest first, exactly the windowing
-// BudgetRepository.History's own doc comment pins -- a month without a
-// budget row is simply absent, never zero-filled. `month` only decides that
-// window; it does not decide Closed (see BudgetHistoryMonth's doc comment)
-// -- `today` does, because "the current month" in the spec's History table
-// means the real one, not whichever month a caller anchored the walk-back
-// window on.
+// months walked back from it, newest first -- a month without a budget row
+// is simply absent, never zero-filled. `month` decides that window; `today`
+// decides Closed (see BudgetHistoryMonth's doc comment).
 //
-// Each row's Spent and Budgeted are computed by calling Month for that row's
-// own month, rather than re-deriving spend here a second way: the whole
-// point of "Spent reuses the MonthSummary rule exactly" is that there is
-// exactly one place that rule lives, and History reusing Month is what keeps
-// that true instead of merely asserted.
+// Each row's Spent and Budgeted are computed by calling Month for that
+// row's own month, rather than re-deriving spend a second way -- reusing
+// Month is what keeps "Spent reuses the MonthSummary rule" true, not merely
+// asserted.
 func (s *BudgetService) History(ctx context.Context, householdID string, month, today time.Time, months int) ([]BudgetHistoryMonth, error) {
 	budgets, err := s.d.Budgets.History(ctx, householdID, month, months)
 	if err != nil {
@@ -663,11 +609,17 @@ func (s *BudgetService) History(ctx context.Context, householdID string, month, 
 	return out, nil
 }
 
-// startOfMonth truncates to the first of the month in UTC, the same
-// normalisation fakeBudgetRepo.budgetKey and the postgres adapter's
-// startOfMonth both apply -- Budget.Month is documented as "any instant in
-// the month", so comparing two months for equality must not depend on which
-// instant a caller happened to pass.
+// startOfMonth reads t.Year() and t.Month() in t's own location, without
+// converting to UTC first, and returns midnight UTC on the first of that
+// month. Every caller passes a UTC-located time today: the HTTP handlers
+// via time.Parse and clock.System, and the daily digest because
+// NudgeService.RunOnce re-anchors the local calendar date to UTC midnight
+// before Compose runs -- that step, not this one, is where the local zone
+// matters (see RunOnce's own comment).
+// It applies the same normalisation as budgetKey (the fakeBudgetRepo
+// double) and the postgres adapter's startOfMonth -- Budget.Month is
+// documented as "any instant in the month", so comparing two months for
+// equality must not depend on which instant a caller happened to pass.
 func startOfMonth(t time.Time) time.Time {
 	return time.Date(t.Year(), t.Month(), 1, 0, 0, 0, 0, time.UTC)
 }

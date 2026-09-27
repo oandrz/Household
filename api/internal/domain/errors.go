@@ -21,51 +21,50 @@ var (
 	// ErrEmailInvitesDisabled is FlagEmailInvites' refusal: an install
 	// whose mail cannot leave the box (ADR 3) must not create an invite
 	// nobody can ever receive, and enforcing that only in the UI would
-	// leave hearthctl and any crafted request still able to create one
-	// (spec decision 10).
+	// leave hearthctl and any crafted request still able to create one.
 	ErrEmailInvitesDisabled = errors.New("email invites are disabled on this install")
-	// ErrTelegramInvitesUnavailable is the Telegram channel's refusal, and
-	// now covers two distinct causes: no bot is configured on this install
-	// at all (invite.go's CreateTelegram and NewLink, checking
-	// BotUsername), or a bot is configured but the household has the
-	// telegram_sign_in flag off (member_handlers.go, checking
-	// scope.Flags). Both answer the same sentinel because a caller cannot
-	// act differently on the two -- either way there is no Telegram invite
-	// to offer.
+	// ErrTelegramInvitesUnavailable is the Telegram channel's refusal, for
+	// either of two causes: no bot configured on this install at all
+	// (invite.go's CreateTelegram and NewLink, checking BotUsername), or a bot
+	// configured but the household's telegram_sign_in flag off
+	// (member_handlers.go, checking scope.Flags). Both answer the same
+	// sentinel, since a caller cannot act differently on the two.
 	ErrTelegramInvitesUnavailable = errors.New("telegram invites are unavailable on this install")
 	// ErrInviteNotTelegram is InviteService.NewLink's refusal for an email
-	// invite: "get a new link" and "Not them" only make sense for a
-	// Telegram invite's t.me link, and an email invite's channel is fixed
-	// at creation (spec decision 9), so there is nothing here to replace.
+	// invite: "get a new link" and "Not them" only make sense for a Telegram
+	// invite's t.me link, and an email invite's channel is fixed at creation.
 	ErrInviteNotTelegram = errors.New("only telegram invites have a link")
 
 	// ErrInviteNotKnocked is Admit's ("Let in") refusal when nobody has
-	// knocked on this Telegram invite -- nobody has tapped the link yet, or
-	// NewLink cleared a previous knock when a fresh link replaced it. There
-	// is no one waiting for the owner to let in.
+	// knocked on this Telegram invite: nobody has tapped the link yet, or
+	// NewLink cleared a previous knock when a fresh link replaced it.
 	ErrInviteNotKnocked = errors.New("no one is waiting on this invite")
 	ErrTokenExpired     = errors.New("token has expired or been used")
 	ErrRateLimited      = errors.New("too many requests")
 
-	// Added in the Task 6 fix round (see task-6-report.md, "Fix round 1").
+	// ErrAmountOverflow is Money arithmetic whose answer does not fit in an
+	// int64: a sum (Money.Add), a conversion (Rate.Apply), a priced or
+	// prorated quantity (Quantity.Value, Money.Prorate), or negating
+	// math.MinInt64, which has no positive counterpart
+	// (AccountType.SignedNetWorthAmount). It is always refused, never
+	// wrapped around silently.
 	ErrAmountOverflow = errors.New("amount overflows a signed 64-bit integer")
 	// ErrNoRate: there is no rate between two currencies. An FXRateProvider
-	// returns it, wrapped, for a pair it does not cover. It is the ONLY
+	// returns it, wrapped, for a pair it doesn't cover. It's the ONLY
 	// conversion failure a screen may answer by leaving an amount out of a
-	// total (CONTEXT.md, "No rate"); every other conversion error fails the
-	// request, because a smaller total labelled "no rate" would be a false
-	// statement about the household's money.
+	// total (CONTEXT.md, "No rate") -- every other conversion error fails the
+	// request, since a smaller total labelled "no rate" would misstate the
+	// household's money.
 	ErrNoRate = errors.New("no rate between these currencies")
 	// ErrInvalidRate: a rate whose numerator or denominator is not positive.
 	// Rates come from a provider this code does not construct, so Rate.Apply
 	// checks rather than trusts.
 	ErrInvalidRate = errors.New("rate is invalid")
-	// ErrInvalidMoney is a currency-code problem: a code that is not an
-	// active ISO 4217 currency, or one this product cannot select. It is NOT
-	// the error for a bad amount --
-	// adapter/http/errors.go answers it with "That currency code is not
-	// valid.", so an amount refused with it tells the person to fix the wrong
-	// field. Amounts have their own two sentinels, directly below.
+	// ErrInvalidMoney is a currency-code problem: a code that isn't an active
+	// ISO 4217 currency, or one this product can't select. It is NOT the error
+	// for a bad amount -- adapter/http/errors.go answers it with "That
+	// currency code is not valid.", so the person is told the right field to
+	// fix. Amounts have their own two sentinels, directly below.
 	ErrInvalidMoney = errors.New("money value is invalid")
 	// ErrMoneyWithoutCurrency: arithmetic was handed a Money zero value, one
 	// with no currency. Nothing a caller sends can produce one -- NewMoney
@@ -77,20 +76,19 @@ var (
 	// negative -- a holding event's amount, a unit price, an income amount,
 	// a primary-currency figure, a cost pool being prorated.
 	ErrNegativeAmount = errors.New("an amount cannot be negative")
-	// ErrInvalidAmount is ParseAmount's refusal: text that is not a
-	// positive amount the currency can represent -- not a number, too many
-	// decimal places, too large, or zero. Only the Telegram channel parses
-	// amount text today (explain() in adapter/telegram/commands.go), so
-	// adapter/http/errors.go has no row for it. An HTTP route that starts
-	// parsing text must add one, with its own code, in the same change.
+	// ErrInvalidAmount is ParseAmount's refusal: text that isn't a positive
+	// amount the currency can represent -- not a number, too many decimal
+	// places, too large, or zero. Only the Telegram channel parses amount text
+	// today (explain() in adapter/telegram/commands.go); an HTTP route that
+	// starts parsing text must add its row to adapter/http/errors.go, with its
+	// own code, in the same change.
 	ErrInvalidAmount                = errors.New("that is not an amount")
 	ErrOwnerMustHoldAllCapabilities = errors.New("an owner must hold every capability")
 
-	// ErrQuantityNegative is NewQuantity's refusal. A holding's quantity is how
-	// much of a thing is held, so negative is not a smaller amount -- it is a
-	// different claim, and one no screen in this product can render. A disposal
-	// is recorded as its own event with its own positive quantity, never as a
-	// negative holding.
+	// ErrQuantityNegative is NewQuantity's refusal. A negative quantity isn't
+	// a smaller amount -- it's a different claim, one no screen in this
+	// product can render. A disposal is recorded as its own event with a
+	// positive quantity, never as a negative holding.
 	ErrQuantityNegative = errors.New("a quantity cannot be negative")
 	// ErrInvalidQuantity is ParseQuantity's refusal -- a quantity that is not a
 	// number, carries a sign, or is finer than a billionth. Separate from
@@ -102,12 +100,12 @@ var (
 	// pool by an empty holding. Returning zero instead would report that a
 	// disposal cost nothing, which reads on screen as pure profit.
 	ErrProrateWholeNotPositive = errors.New("cannot prorate across a zero quantity")
-	// ErrProratePartExceedsWhole keeps Prorate's own refusal separate from the
-	// holding fold's ErrHoldingOversold. They fire on the same shape but mean
-	// different things -- one is "this proportion is not a proportion", the
-	// other is "this household does not own that much" -- and collapsing them
-	// into one error made each guard untestable, because either alone still
-	// produced the error the test looked for.
+	// ErrProratePartExceedsWhole keeps Prorate's refusal separate from the
+	// holding fold's ErrHoldingOversold: they fire on the same shape but mean
+	// different things -- "this proportion isn't a proportion" versus "this
+	// household doesn't own that much". Collapsing them made each guard
+	// untestable, since either alone still produced the error the test looked
+	// for.
 	ErrProratePartExceedsWhole = errors.New("cannot prorate more than the whole")
 
 	// The holding errors. ErrHoldingOversold is the fold refusing to sell more
@@ -223,8 +221,7 @@ var (
 	// ErrAlreadyExists mirrors ErrNotFound: a row that must be unique
 	// already exists. It exists so an adapter can translate a Postgres
 	// unique-violation (SQLSTATE 23505) into something usecase code can
-	// test with errors.Is, instead of a generic wrapped driver error. Added
-	// in the Task 15 fix round (see task-15-report.md, "Fix round 2").
+	// test with errors.Is, instead of a generic wrapped driver error.
 	ErrAlreadyExists = errors.New("already exists")
 
 	// ErrCategoryNameTaken is UNIQUE (household_id, name) on categories,
@@ -241,9 +238,8 @@ var (
 
 	// The budget sentinels. BudgetService.Save checks all three before
 	// BudgetRepository.Upsert ever runs, following the per-field sentinel
-	// convention above rather than a generic ErrValidation -- there is no
-	// such sentinel in this codebase, deliberately, so every 422 the HTTP
-	// layer returns can carry a field-specific code.
+	// convention above rather than a generic ErrValidation -- deliberately, so
+	// every 422 the HTTP layer returns can carry a field-specific code.
 	ErrBudgetLineDuplicate  = errors.New("a budget line's category is repeated")
 	ErrBudgetCapNegative    = errors.New("a budget cap cannot be negative")
 	ErrBudgetIncomeNegative = errors.New("a budget's expected income cannot be negative")
@@ -256,10 +252,10 @@ var (
 	// ErrBudgetCategoryUnknown is BudgetRepository.Upsert's own
 	// household-ownership check (validateLineCategories in the postgres
 	// adapter) failing: a budget line names a category id that either does
-	// not exist at all or belongs to a different household. Task 8's Save
-	// deliberately does not pre-check this -- see its own doc comment -- so
-	// this sentinel is what lets the HTTP layer turn that failure into a 422
-	// instead of an unmapped 500.
+	// not exist at all or belongs to a different household.
+	// BudgetService.Save deliberately does not pre-check this -- see its own
+	// doc comment -- so this sentinel is what lets the HTTP layer turn that
+	// failure into a 422 instead of an unmapped 500.
 	ErrBudgetCategoryUnknown = errors.New("a budget line's category does not belong to this household")
 
 	// The goal sentinels. GoalService checks each before its repository call,
@@ -297,7 +293,6 @@ var (
 	// amount is stored in its pay-from account's currency (usecase.BillRecord's
 	// own doc comment), so re-pointing PayFromAccountID at an account in
 	// a different currency would silently reinterpret every past figure.
-	// Added in Task 6 (see task-6-report.md).
 	ErrBillCurrencyImmutable = errors.New("a bill's currency cannot be changed")
 
 	// ErrInvalidMood is returned when a mood outside 1..5 arrives from a
@@ -315,7 +310,7 @@ var (
 	// ErrRetroNothingToStart is returned when both candidate months -- the
 	// current one and the previous one -- already have a retro, so there is
 	// nothing left for "Start retro" to create (domain.StartableMonth's own
-	// `ok == false` case). The HTTP layer maps this to 409 (Task 8).
+	// `ok == false` case). The HTTP layer maps this to 409.
 	ErrRetroNothingToStart = errors.New("both candidate months already have a retro")
 
 	// ErrRetroActionBodyRequired is returned when an action's body is empty
@@ -383,27 +378,29 @@ var (
 
 	// --- Agreements ---
 
-	// ErrAgreementsNeedTwoOwners is decision 1's gate. It sits here, in this
-	// "--- Agreements ---" block after ErrAdminLocked, grouped with the
-	// feature's other sentinels below it rather than beside ErrLastOwner
-	// (208 lines up) — even though it is, like ErrLastOwner, a fact about
-	// the owner set rather than part of any port's contract. Every write
-	// refuses with it while a household has fewer than MinAgreementOwners
-	// owners.
+	// ErrAgreementsNeedTwoOwners is every write's refusal while a household
+	// has fewer than MinAgreementOwners owners: the signing set is the
+	// household's current owners, so "both sign" has to mean two, never one.
+	// It sits here rather than beside ErrLastOwner, grouped with the feature's
+	// other sentinels, even though it is, like ErrLastOwner, a fact about the
+	// owner set rather than part of any port's contract.
 	ErrAgreementsNeedTwoOwners = errors.New("agreements need at least two owners")
 
-	// ErrAgreementChanged is a target that moved, went, or no longer reads the proposal's previous_body.
-	// Deliberately not ErrNotFound: "it vanished" and "someone changed it" are different things to be told,
+	// ErrAgreementChanged is a target that moved, went, or no longer reads
+	// the proposal's previous_body. Deliberately not ErrNotFound: "it
+	// vanished" and "someone changed it" are different things to be told,
 	// and ErrNotFound on these routes means the proposal row itself.
 	ErrAgreementChanged = errors.New("the agreement this proposal targets has changed")
 
-	// ErrAgreementNotOpen is a sign, park or withdraw against a resolved proposal -- ordinarily the last
-	// signer double-clicking Agree. It means "reload, this was settled", not "try again", and it pairs with
-	// AgreementProposalStatus.IsOpen. The wire code it maps to is AGREEMENT_PROPOSAL_RESOLVED, deliberately
-	// worded from the caller's side rather than this sentinel's.
+	// ErrAgreementNotOpen is a sign, park or withdraw against a resolved
+	// proposal -- ordinarily the last signer double-clicking Agree. It
+	// means "reload, this was settled", not "try again", and it pairs with
+	// AgreementProposalStatus.IsOpen. The wire code it maps to is
+	// AGREEMENT_PROPOSAL_RESOLVED, deliberately worded from the caller's
+	// side rather than this sentinel's.
 	ErrAgreementNotOpen = errors.New("this proposal is no longer open")
 
-	// Sections are never deleted, so a name is never freed again (decision 19).
+	// Sections are never deleted, so a name is never freed again.
 	ErrAgreementSectionNameTaken    = errors.New("that section name is already used")
 	ErrAgreementSectionNameRequired = errors.New("a section needs a name")
 	ErrAgreementSectionNameTooLong  = errors.New("a section name is too long")
@@ -411,25 +408,31 @@ var (
 	ErrAgreementBodyRequired = errors.New("an agreement needs a body")
 	ErrAgreementBodyTooLong  = errors.New("an agreement body is too long")
 
-	// The two notes get a sentinel each rather than sharing one, so every 422 can name the field the screen
-	// has to highlight -- and so that MaxAgreementParkNoteLen quietly becoming an alias of MaxAgreementNoteLen
-	// is visible somewhere. AgreementService.Park's test is that somewhere; no domain assertion can see it.
+	// The two notes get a sentinel each rather than sharing one, so every
+	// 422 can name the field the screen has to highlight -- and so that
+	// MaxAgreementParkNoteLen quietly becoming an alias of
+	// MaxAgreementNoteLen is visible somewhere. AgreementService.Park's
+	// test is that somewhere; no domain assertion can see it.
 	ErrAgreementNoteTooLong     = errors.New("a proposal note is too long")
 	ErrAgreementParkNoteTooLong = errors.New("a discussion note is too long")
 
-	// ErrAgreementProposalShapeInvalid covers every wrong combination of the four content fields -- an add
-	// with no section, an edit with no target, a remove with no previous body -- as one sentinel, the way
-	// ErrTransactionAccountsInvalid does: the modal sends one of three complete shapes, so a mismatch is a
-	// hand-built request, and four codes would only tell it which field to try next.
+	// ErrAgreementProposalShapeInvalid covers every wrong combination of
+	// the four content fields -- an add with no section, an edit with no
+	// target, a remove with no previous body -- as one sentinel, the way
+	// ErrTransactionAccountsInvalid does: the modal sends one of three
+	// complete shapes, so a mismatch is a hand-built request, and four
+	// codes would only tell it which field to try next.
 	ErrAgreementProposalShapeInvalid = errors.New("this proposal's fields do not match its kind")
 
-	// Separate from the shape refusal, because there the shape is fine and the screen says something
-	// different: the version number is a promise that something happened.
+	// Separate from the shape refusal, because there the shape is fine and
+	// the screen says something different: the version number is a promise
+	// that something happened.
 	ErrAgreementEditUnchanged = errors.New("an edit must change the wording")
 
-	// Neither of these gets a MapDomainError case (Task 8). A bad kind in a request body is answered 422 by
-	// the handler's own parser (decision 21), so both can only reach the mapper from a database column --
-	// where a logged 500 is the right answer to an impossible row.
+	// Neither of these gets a MapDomainError case. A bad kind in a request
+	// body is answered 422 by the handler's own parser, so both can only
+	// reach the mapper from a database column -- where a logged 500 is the
+	// right answer to an impossible row.
 	ErrUnknownAgreementProposalKind   = errors.New("unknown agreement proposal kind")
 	ErrUnknownAgreementProposalStatus = errors.New("unknown agreement proposal status")
 
@@ -445,9 +448,9 @@ var (
 	// per user is a database constraint; this is how it reads to a person.
 	ErrTelegramAlreadyLinked = errors.New("this account already has a telegram chat")
 
-	// ErrTelegramLinkNotPending covers a confirm before any chat redeemed
-	// the link, and a confirm after it expired. The two are one error
-	// because the panel's next instruction is the same for both: start again.
+	// ErrTelegramLinkNotPending covers a confirm before any chat redeemed the
+	// link, and a confirm after it expired -- one error, since the panel's
+	// next instruction is the same for both: start again.
 	ErrTelegramLinkNotPending = errors.New("no chat has opened this link")
 
 	// ErrTelegramUnlinkWouldLockOut is a disconnect refused because the
@@ -462,10 +465,9 @@ var (
 	ErrTelegramMintsRateLimited = errors.New("too many telegram link attempts")
 
 	// ErrChatAlreadyBound is InviteService.Knock's refusal for a chat that
-	// already belongs to a Hearth account. It is the one invite-knock
-	// refusal that is NOT the bland dead-link answer every other case
-	// gets: it says nothing about the *link*, only about the tapper's own
-	// chat, which they could already learn by sending /start with no
-	// payload at all (spec decision 15).
+	// already belongs to a Hearth account. It is the one invite-knock refusal
+	// that is NOT the bland dead-link answer every other case gets: it says
+	// nothing about the *link*, only about the tapper's own chat, which they
+	// could already learn by sending /start with no payload.
 	ErrChatAlreadyBound = errors.New("this telegram chat already belongs to an account")
 )
