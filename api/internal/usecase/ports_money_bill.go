@@ -12,7 +12,7 @@ import (
 
 // BillRecord is a bill joined to the names the screen displays -- its category
 // and its pay-from account's nickname. Same shape and same reason as
-// AccountView and TransactionView above: every consumer of the list wants
+// AccountView and TransactionView: every consumer of the list wants
 // the names, and re-reading them per row is a query per row.
 //
 // Bill.Amount carries the pay-from account's currency: a bill has no

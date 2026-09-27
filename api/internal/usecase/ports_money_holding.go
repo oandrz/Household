@@ -12,7 +12,7 @@ import (
 
 // HoldingRecord is a holding joined to the account it sits in, which is what
 // every consumer of the holdings list actually wants -- the same shape and the
-// same reason as AccountView and MemberView above.
+// same reason as AccountView and MemberView.
 type HoldingRecord struct {
 	Holding         domain.Holding
 	AccountName     string
@@ -61,9 +61,9 @@ type HoldingRepository interface {
 // holdings, and nothing more: whether an account still holds anything, and
 // whether the household holds anything at all. A narrow port rather than the
 // whole HoldingRepository, by the same interface-segregation rule that gives
-// this file nine small repositories instead of one object with forty methods
-// -- and so that the accounts and household services cannot grow a dependency
-// on holdings they were never meant to have.
+// the usecase ports nine small repositories instead of one object with forty
+// methods -- and so that the accounts and household services cannot grow a
+// dependency on holdings they were never meant to have.
 type HoldingCounter interface {
 	CountLiveForAccount(ctx context.Context, householdID, accountID string) (int64, error)
 	// CountForHousehold counts ARCHIVED holdings too. An archived holding

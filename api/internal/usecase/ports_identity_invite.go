@@ -85,7 +85,7 @@ type InviteKnock struct {
 // stored, and the hash is nobody's business above the adapter.
 //
 // Named InviteSummary rather than the design doc's "PendingInvite" because
-// that name is already taken above by the operator admin directory's own,
+// that name is already taken by the operator admin directory's own,
 // differently-shaped view of an invite (no ID, no Capabilities -- it is
 // read-only and never withdrawn from that screen). The two are genuinely
 // different data for different audiences, so each keeps a name of its own

@@ -158,7 +158,7 @@ type HouseholdMember struct {
 
 // PendingInvite is the operator admin directory's own, differently-shaped
 // view of an invite -- read-only, no ID, never withdrawn from this screen.
-// See InviteSummary's doc comment below for why the two keep separate names
+// See InviteSummary's doc comment for why the two keep separate names
 // despite the design doc calling both "PendingInvite".
 type PendingInvite struct {
 	Name  string

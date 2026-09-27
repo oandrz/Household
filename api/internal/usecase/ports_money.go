@@ -26,7 +26,7 @@ type FXRateProvider interface {
 
 // AccountView is an account joined to its owner's display name, which is what
 // every consumer of the accounts list actually wants -- the same shape and the
-// same reason as MemberView above.
+// same reason as MemberView.
 //
 // Balance is the account's current balance: its opening balance plus every
 // transaction dated on or after Account.OpeningBalanceAsOf, summed by the
@@ -126,7 +126,7 @@ type AccountLookup interface {
 
 // TransactionView is a transaction joined to the names the ledger displays --
 // its category, who paid, and each account's nickname. Same shape and same
-// reason as MemberView and AccountView above: every consumer of the list wants
+// reason as MemberView and AccountView: every consumer of the list wants
 // the names, and re-reading them per row is a query per row.
 //
 // The two Before...Opening fields answer whether this transaction predates the

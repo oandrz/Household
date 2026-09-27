@@ -1645,12 +1645,23 @@ person to ask whether the test could ever have gone red in the first place.
   an off-by-one in where it thought the import block ended. The build would
   have failed loudly for `Clock`; it would not have for a dropped doc
   comment or a floating section comment, and those are what this file's
-  readers depend on. Two checks caught or would catch every such loss: a
+  readers depend on. Two checks caught or would catch every lost line: a
   line-multiset comparison of the old file against the new ones (1981
   non-blank lines before, 1981 after, proven able to fail by deleting a
   line), and `go doc -all` before and after, whose only permitted change was
-  the package description. **For a move, compare the moved text, not only
-  the compiled result.**
+  the package description. Neither can see a comment whose words survived
+  but whose meaning depended on where it sat: seven "above", "below" and
+  "this file" pointers in the moved comments went false (`BillRecord`'s
+  "same reason as AccountView and TransactionView above" now opens a file
+  that holds neither), and only the code review found them. Two more
+  near-misses, both from the comment rewrites: a reflow script treated
+  sqlc's `-- name: UpdateBill :one` annotation as prose and merged it into
+  the paragraph above (caught by reading the diff before `make sqlc`), and
+  a vague "see ports.go" became a precise "see StoredUser's doc comment"
+  that the comment it pointed at contradicted. **For a move, compare the
+  moved text, not only the compiled result — then grep the moved files for
+  "above", "below" and "this file", and re-read every pointer you made
+  precise against what it now points at.**
 
 **Mutate to prove a test.** Break the code deliberately, watch the test go red,
 restore it. If it stays green, the test is decoration — and if it goes red for
