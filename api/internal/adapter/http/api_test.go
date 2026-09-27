@@ -651,6 +651,17 @@ func (env *testEnv) auditRowCount(t *testing.T) int {
 	return n
 }
 
+// reauthAttemptCount reads admin_reauth_attempts straight from the database,
+// for the same reason auditRowCount does: no route exposes that ledger.
+func (env *testEnv) reauthAttemptCount(t *testing.T) int {
+	t.Helper()
+	var n int
+	if err := env.db.Pool().QueryRow(context.Background(), `SELECT count(*) FROM admin_reauth_attempts`).Scan(&n); err != nil {
+		t.Fatalf("count re-auth attempts: %v", err)
+	}
+	return n
+}
+
 // auditEntries returns up to limit audit rows, newest first -- the order the
 // deleted AdminAuditRepository.Recent used, so a caller's "the latest row"
 // still means the request it just made.

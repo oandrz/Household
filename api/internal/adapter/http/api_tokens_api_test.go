@@ -163,6 +163,76 @@ func TestATokenCannotReachAdmin(t *testing.T) {
 	}
 }
 
+// TestAPlatformAdminsTokenCannotReachAdmin is ADR 7 rule 3 for the case the
+// test above cannot see: a token that belongs to a platform admin. The admin
+// guard asks who the caller is, and for this caller the honest answer is
+// "an admin" -- so the guard must also ask how they authenticated. A token
+// gets exactly what a non-admin gets: the same 404 body, and no side effect
+// anywhere behind the guard (no re-auth attempt recorded, no audit row).
+func TestAPlatformAdminsTokenCannotReachAdmin(t *testing.T) {
+	env := newTestEnv(t)
+	env.makePlatformAdmin(t, env.ownerEmail)
+	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
+	adminToken := env.mustCreateToken(t, session, csrf, "admin's token")
+	limited, limitedCSRF := env.signIn(t, env.limitedEmail, env.limitedPassword)
+	nonAdminToken := env.mustCreateToken(t, limited, limitedCSRF, "non-admin's token")
+
+	for _, probe := range []struct {
+		method, path string
+		body         any
+	}{
+		{http.MethodPost, "/api/v1/admin/session", map[string]string{"password": "not-the-password"}},
+		{http.MethodGet, "/api/v1/admin/flags", nil},
+		{http.MethodGet, "/api/v1/admin/households", nil},
+	} {
+		want := env.bearer(t, probe.method, probe.path, probe.body, nonAdminToken.Token)
+		got := env.bearer(t, probe.method, probe.path, probe.body, adminToken.Token)
+		// Read both bodies before assertErrorResponse, which drains the
+		// recorder's buffer as it decodes.
+		gotBody, wantBody := got.Body.String(), want.Body.String()
+		assertErrorResponse(t, got, http.StatusNotFound, "NOT_FOUND")
+		if gotBody != wantBody {
+			t.Fatalf("%s %s: an admin's token must get the non-admin body byte for byte\n got: %s\nwant: %s",
+				probe.method, probe.path, gotBody, wantBody)
+		}
+	}
+
+	if n := env.reauthAttemptCount(t); n != 0 {
+		t.Fatalf("a token request must never reach the admin password check, but %d attempt(s) were recorded", n)
+	}
+	if n := env.auditRowCount(t); n != 0 {
+		t.Fatalf("a token request must stop at the guard, before the audit middleware, but %d audit row(s) were written", n)
+	}
+}
+
+// TestAnAdminsTokenBesideALiveSessionCookieGetsNoGrant covers the request the
+// test above cannot send: an admin's token AND a live session cookie, with
+// the right password. The token is the only credential requireSession
+// considers, so this request is a token request -- and it must not open the
+// admin surface for the session whose cookie happened to ride along.
+func TestAnAdminsTokenBesideALiveSessionCookieGetsNoGrant(t *testing.T) {
+	env := newTestEnv(t)
+	env.makePlatformAdmin(t, env.ownerEmail)
+	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
+	tok := env.mustCreateToken(t, session, csrf, "admin's token")
+
+	b, _ := json.Marshal(map[string]string{"password": env.ownerPassword})
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/session", bytes.NewReader(b))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+tok.Token)
+	req.AddCookie(session)
+	rec := httptest.NewRecorder()
+	env.router.ServeHTTP(rec, req)
+	assertErrorResponse(t, rec, http.StatusNotFound, "NOT_FOUND")
+
+	// The session the cookie belongs to must still have no grant.
+	rec = env.authedGet(t, "/api/v1/admin/flags", session)
+	assertErrorResponse(t, rec, http.StatusUnauthorized, "ADMIN_REAUTH_REQUIRED")
+	if n := env.reauthAttemptCount(t); n != 0 {
+		t.Fatalf("a token request must never reach the admin password check, but %d attempt(s) were recorded", n)
+	}
+}
+
 func TestRemovingAMemberKillsTheirToken(t *testing.T) {
 	env := newTestEnv(t)
 	owner, ownerCSRF := env.signIn(t, env.ownerEmail, env.ownerPassword)

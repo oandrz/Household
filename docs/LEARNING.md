@@ -1605,6 +1605,40 @@ person to ask whether the test could ever have gone red in the first place.
   query that returns on the first match, not on every source settling, needs
   an explicit anchor proving the slower source has rendered before the count
   it draws is trusted.**
+- `TestATokenCannotReachAdmin` guarded ADR 7 rule 3 ("a token cannot reach
+  `/admin`") and stayed green for as long as it existed, because its token
+  belonged to an owner who was **not** a platform admin. `requirePlatformAdmin`
+  refused that caller for the easy reason — not an admin — so the test never
+  asked the question the rule is about: what happens when an admin's own
+  token arrives? On `dfb00f2` it passed the guard. With no cookie, a wrong
+  password answered `401 INVALID_CREDENTIALS` rather than the non-admin 404,
+  and each attempt counted towards the operator's lockout. With the admin's
+  session cookie riding along and the right password, it answered `204` and
+  **wrote a grant onto that cookie's session**, because `handleAdminSession`
+  re-read the cookie header on its own instead of using the session that had
+  authenticated. The review that found B2 (2026-09-26 architecture review)
+  saw only the first half; the second was found by the code review of the
+  fix itself. `TestAPlatformAdminsTokenCannotReachAdmin` (token only) and
+  `TestAnAdminsTokenBesideALiveSessionCookieGetsNoGrant` (token + cookie +
+  right password) now pin both. Both go red on `dfb00f2`'s code (`401
+  INVALID_CREDENTIALS` and `204` respectively), and both go red on the final
+  code with the new guard disabled. Same lesson as the owner-gated route-walk
+  matrix above: **a refusal test whose caller is turned away for a different
+  reason proves nothing about the rule it is named after.** Also see pattern
+  25 — the guard checked *who* the caller was, never *how* they had
+  authenticated.
+- **A mutation check run before a later edit in the same change is not
+  evidence for the final code.** The first mutation check for the B2 fix was
+  run, recorded as "red with `401 INVALID_CREDENTIALS`", and then the handler
+  was reordered. After the reorder the same mutation went red with `401
+  UNAUTHENTICATED` instead, and one of the test's three assertions (no re-auth
+  attempt recorded) could no longer fail at all, because the handler's new
+  early check now covered for the removed guard. The code review caught both.
+  **Re-run every mutation check after the last code edit, and record the
+  result from that run.** Where a handler's own check stands behind a guard
+  that refuses the same requests (the new session-hash check in
+  `handleAdminSession`), say plainly that it cannot be mutation-checked
+  through the router rather than claiming it is covered.
 
 **Mutate to prove a test.** Break the code deliberately, watch the test go red,
 restore it. If it stays green, the test is decoration — and if it goes red for
@@ -4214,6 +4248,25 @@ like it was closed by one milestone's own fix.
   a private chat id is always positive. The database-level half of this
   fix is therefore two-thirds done, on purpose, and the gap is a live
   security-review item, not a closed one.
+
+- **B2, fixed 2026-09-27: the admin guard checked the user, not the
+  credential.** `requirePlatformAdmin` asked "is this user a platform
+  admin?" and nothing else. For a request that arrived on a personal API
+  token, the honest answer can still be yes — the token belongs to that
+  user — so ADR 7 rule 3's promise held for non-admins only (details under
+  pattern 2). The missing context was **how the caller authenticated**. The
+  fix names it: anything whose `Scope.AuthVia` is not exactly
+  `authViaSession` gets the non-admin 404 before the admin lookup. It is
+  written as "not a session", not "is a token", so an unset `AuthVia` or a
+  future third kind of credential is refused too — the same fail-closed
+  shape as `requireCookieSession`.
+  The fix's own code review found a second place the credential was not
+  bound to its context: `handleAdminSession` wrote the grant against
+  whatever session cookie the request carried, re-read from the header,
+  not against the session that had authenticated. `requireSession` now
+  puts that session's hash on the request context (`requestSessionHash`),
+  and the grant is written against that, so a cookie riding beside a token
+  can never be the session that gets the grant.
 
 **When a check passes, ask what it actually proved, and about whom.** "This
 chat is bound" proved a binding exists, not that one person is on the other
