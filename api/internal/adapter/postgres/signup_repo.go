@@ -14,10 +14,9 @@ import (
 	"github.com/andreasoentoro/hearth/api/internal/usecase"
 )
 
-// SignupRepo implements usecase.SignupRepository. It keeps the pool alongside
-// the pool-backed *sqlcgen.Queries, just as InviteRepo and UserRepo do,
-// because Provision needs to begin its own transaction -- something a
-// *sqlcgen.Queries built once at construction time cannot do on its own.
+// SignupRepo implements usecase.SignupRepository. It keeps the pool
+// alongside the pool-backed *sqlcgen.Queries, like InviteRepo and UserRepo,
+// because Provision needs to begin its own transaction.
 type SignupRepo struct {
 	pool *pgxpool.Pool
 	q    *sqlcgen.Queries
@@ -35,10 +34,9 @@ func (r *SignupRepo) Create(ctx context.Context, email string, tokenHash []byte,
 	}), "create signup")
 }
 
-// CreateConsumed writes a row via CreateConsumedSignup, whose own doc comment
-// (queries/signup.sql) explains why: it is what makes
-// CountForEmailSince/CountSince advance for a registered address, the same
-// way Create advances them for a fresh one.
+// CreateConsumed writes a row via CreateConsumedSignup (see its doc comment
+// in queries/signup.sql): it makes CountForEmailSince/CountSince advance for
+// a registered address, the same way Create advances them for a fresh one.
 func (r *SignupRepo) CreateConsumed(ctx context.Context, email string, tokenHash []byte, expiresAt time.Time) error {
 	return translate(r.q.CreateConsumedSignup(ctx, sqlcgen.CreateConsumedSignupParams{
 		Email:     text(email),
@@ -91,21 +89,19 @@ func (r *SignupRepo) CountSince(ctx context.Context, since time.Time) (int, erro
 	return int(n), nil
 }
 
-// Provision creates a whole household in one transaction: the household, the
-// owner, their membership, the three builtin spaces and the notification
-// preferences, with the signup stamped consumed first.
+// Provision creates a whole household in one transaction: household, owner,
+// membership, the three builtin spaces and notification preferences, with
+// the signup stamped consumed first.
 //
-// The ordering matters. ConsumeSignup runs before any insert, so its guarded
-// UPDATE is what serialises two concurrent completions of the same token --
-// the loser gets zero rows and returns domain.ErrTokenExpired having written
-// nothing. Doing it last would let both callers create a household.
+// ConsumeSignup runs before any insert so its guarded UPDATE serialises two
+// concurrent completions of the same token -- the loser writes nothing and
+// gets domain.ErrTokenExpired. Running it last would let both callers
+// create a household.
 //
-// Do not decompose this into separate repository calls. A failure between
-// them would leave a users row occupying users.email's unique index with no
-// membership under it, and that address could then never sign up again: a
-// retry cannot create a second user with the same email, so there is no path
-// forward short of manual SQL. InviteRepository.Accept exists for the
-// identical reason.
+// Never split this into separate repository calls -- a failure partway
+// through would orphan a users row blocking users.email's unique index with
+// no membership under it, permanently locking that address out. (Same risk
+// InviteRepository.Accept guards against.)
 func (r *SignupRepo) Provision(ctx context.Context, signupID, passwordHash string,
 	b usecase.HouseholdBlueprint) (usecase.ProvisionedHousehold, error) {
 	tx, err := r.pool.Begin(ctx)
@@ -119,18 +115,17 @@ func (r *SignupRepo) Provision(ctx context.Context, signupID, passwordHash strin
 
 	q := r.q.WithTx(tx)
 
-	// The guard is in the SQL (consumed_at IS NULL AND expires_at > now()), so
-	// this single statement both claims the signup and tells us whether it was
-	// claimable. It returns the email, which is how the verified address
-	// reaches the user row without a caller being able to substitute a
-	// different one.
+	// The guard is in the SQL (consumed_at IS NULL AND expires_at > now()):
+	// this single statement both claims the signup and tells us whether it
+	// was claimable. It returns the email, so the verified address reaches
+	// the user row without a caller substituting a different one.
 	claimed, err := q.ConsumeSignup(ctx, uuid(signupID))
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			// Consumed or expired -- indistinguishable here, deliberately.
-			// SignupService.Complete's own TokenLifecycle read is what tells
-			// the two apart for a caller; this answer is authoritative only
-			// for the race between that read and this write.
+			// SignupService.Complete's TokenLifecycle read tells the two
+			// apart for a caller; this answer is authoritative only for the
+			// race between that read and this write.
 			return usecase.ProvisionedHousehold{}, domain.ErrTokenExpired
 		}
 		return usecase.ProvisionedHousehold{}, translate(err, "consume signup")
@@ -176,14 +171,12 @@ func (r *SignupRepo) Provision(ctx context.Context, signupID, passwordHash strin
 		return usecase.ProvisionedHousehold{}, translate(err, "create owner membership for signup")
 	}
 
-	// Bind the chat from the row that was just claimed, never from a caller.
-	// This is the same rule ConsumeSignup's comment states for the email: the
-	// verified value reaches the user row from the row being claimed, so no
-	// caller can substitute a different one.
+	// Bind the chat from the claimed row, never from a caller -- the same
+	// rule ConsumeSignup's comment states for the email.
 	//
-	// It is inside this transaction, not after it, because a household that
-	// exists with its chat unbound is an account its owner can never sign into
-	// again -- the token is spent and there is no other way in.
+	// It happens inside this transaction because a household left with its
+	// chat unbound is an account its owner can never sign into again: the
+	// token is already spent.
 	if claimed.TelegramChatID != nil {
 		if err := q.CreateTelegramAccount(ctx, sqlcgen.CreateTelegramAccountParams{
 			UserID: userRow.ID,
@@ -197,10 +190,9 @@ func (r *SignupRepo) Provision(ctx context.Context, signupID, passwordHash strin
 		}
 	}
 
-	// domain.BuiltinSpaces is called here, inside the transaction, because it
-	// needs the household ID -- which does not exist until the insert above.
-	// The knowledge of which spaces a household starts with stays in domain;
-	// this only executes it.
+	// domain.BuiltinSpaces runs here, inside the transaction, because it
+	// needs the household ID that the insert above just created. Domain owns
+	// which spaces a household starts with; this only executes that.
 	for _, s := range domain.BuiltinSpaces(householdID) {
 		if _, err := q.CreateSpace(ctx, sqlcgen.CreateSpaceParams{
 			HouseholdID:        householdRow.ID,

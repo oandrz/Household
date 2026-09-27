@@ -45,13 +45,11 @@ func TestEnsureSeededIsIdempotent(t *testing.T) {
 // read-then-write seed passes the test above and fails this one.
 //
 // The pool is warmed and every goroutine is released through a closed
-// channel rather than started with a bare `go`. Without this, each
-// goroutine's first query pays its own connection-dial latency, which
-// serialises the count-then-insert window enough that this test stayed
-// green for five straight runs against a seed with no ON CONFLICT at all --
-// verified while diagnosing this test. Warming the pool first and releasing
-// every goroutine from the same instant closes that gap and reproduces the
-// race the seed is meant to survive.
+// channel rather than started with a bare `go`: without that, each
+// goroutine's own connection-dial latency serialises the count-then-insert
+// window enough that this test stayed green for five straight runs against
+// a seed with no ON CONFLICT at all. Warming the pool and releasing every
+// goroutine from the same instant closes that gap and reproduces the race.
 func TestEnsureSeededSurvivesConcurrentFirstRequests(t *testing.T) {
 	db := openTestDB(t)
 	ctx := context.Background()
@@ -101,17 +99,13 @@ func TestEnsureSeededSurvivesConcurrentFirstRequests(t *testing.T) {
 // A household that cleared its list has arranged it deliberately, and must
 // not have it rebuilt out from under it.
 //
-// On this path -- EnsureSeeded called in sequence, not concurrently -- what
-// actually stops the rebuild is CountCategories counting archived rows the
-// same as live ones: the household already has thirteen rows, so the count
-// check reports it as already seeded and EnsureSeeded returns before ever
-// reaching the INSERT. That makes this test blind to ON CONFLICT and the
-// unique key it targets -- it would pass identically if ON CONFLICT were
-// deleted from SeedCategories entirely, because SeedCategories is never
-// called here a second time.
-// TestSeedCategoriesRespectsTheUniqueKeyEvenWhenEveryRowIsArchived exercises
-// the unique key directly, by calling SeedCategories without EnsureSeeded's
-// count check in the way.
+// What stops the rebuild here is CountCategories counting archived rows the
+// same as live ones: the household already has thirteen, so the count check
+// reports it as seeded and EnsureSeeded returns before the INSERT. That
+// makes this test blind to ON CONFLICT and its unique key -- it would pass
+// even with ON CONFLICT removed, since SeedCategories is never called here a
+// second time; TestSeedCategoriesRespectsTheUniqueKeyEvenWhenEveryRowIsArchived
+// exercises that key directly.
 func TestEnsureSeededDoesNotRebuildOverArchivedCategories(t *testing.T) {
 	db := openTestDB(t)
 	ctx := context.Background()
@@ -149,11 +143,11 @@ func TestEnsureSeededDoesNotRebuildOverArchivedCategories(t *testing.T) {
 // TestSeedCategoriesRespectsTheUniqueKeyEvenWhenEveryRowIsArchived pins
 // SeedCategories' own ON CONFLICT DO NOTHING, which
 // TestEnsureSeededDoesNotRebuildOverArchivedCategories cannot: that test's
-// second EnsureSeeded call never reaches the INSERT, because
-// CountCategories already reports the household as seeded. This test calls
-// the generated query directly -- bypassing EnsureSeeded's count check
-// entirely -- against a household whose starter set exists but is entirely
-// archived, which is the one place only the unique key protects.
+// second EnsureSeeded call never reaches the INSERT, since CountCategories
+// already reports the household seeded. This test calls the generated query
+// directly, bypassing that count check, against a household whose starter
+// set exists but is entirely archived -- the one place only the unique key
+// protects.
 func TestSeedCategoriesRespectsTheUniqueKeyEvenWhenEveryRowIsArchived(t *testing.T) {
 	db := openTestDB(t)
 	ctx := context.Background()

@@ -16,20 +16,18 @@ import (
 const pgUniqueViolation = "23505"
 
 // uniqueConstraintErrors maps a unique constraint's NAME to the domain
-// sentinel its violation means. translate matches by name, not only by
-// SQLSTATE 23505, so a future unique key on the same table -- or any other
-// 23505 whose message happens to mention it -- cannot masquerade as one of
-// these collisions: an unlisted name falls through to ErrAlreadyExists. A new
-// named collision is one entry here, not a new case in translate.
-//
-// Most names are Postgres's default for an unnamed table constraint,
-// "<table>_<columns>_key"; the two indexes were named in their migrations.
+// sentinel its violation means. translate matches by name, not just
+// SQLSTATE 23505, so an unrelated 23505 cannot masquerade as one of these
+// collisions -- an unlisted name falls through to ErrAlreadyExists. A new
+// named collision is one entry here, not a new case in translate. Most
+// names are Postgres's default, "<table>_<columns>_key"; the two indexes
+// were named in their migrations.
 var uniqueConstraintErrors = map[string]error{
 	// categories' UNIQUE (household_id, name), 00005_transactions.sql.
-	// CategoryRepository's own contract wants a sentinel
-	// specific to this constraint, not the generic ErrAlreadyExists: Create
-	// and Rename both hit it on a name collision, archived rows included,
-	// since archived_at is not part of the unique key.
+	// CategoryRepository wants a sentinel specific to this constraint, not
+	// the generic ErrAlreadyExists: Create and Rename both hit it on a name
+	// collision, archived rows included, since archived_at is not part of
+	// the key.
 	"categories_household_id_name_key": domain.ErrCategoryNameTaken,
 
 	// goals' UNIQUE (household_id, name), 00007_goals.sql. GoalRepository's
@@ -40,12 +38,10 @@ var uniqueConstraintErrors = map[string]error{
 
 	// goal_contributions' partial unique index on (household_id,
 	// source_budget_month) WHERE source = 'budget_rollover', 00007_goals.sql.
-	// BudgetRepo.RollOverToGoal's own doc comment: a concurrent pair that both
-	// reach the INSERT must not surface as a raw 23505. StampBudgetRollover's
-	// conditional UPDATE is the first line of defence and normally catches
-	// this before the INSERT is ever attempted; this index is what makes a
-	// future code path that forgets that UPDATE fail safely instead of
-	// silently.
+	// A concurrent pair reaching the INSERT must not surface as a raw 23505
+	// (BudgetRepo.RollOverToGoal's own doc). StampBudgetRollover's conditional
+	// UPDATE normally catches this first; this index is the backstop that
+	// makes a future path that skips that UPDATE fail safely, not silently.
 	"goal_contributions_one_rollover_per_month": domain.ErrRolloverAlreadyDone,
 
 	// bills' UNIQUE (household_id, name), 00008_bills.sql. BillRepository's
@@ -59,19 +55,18 @@ var uniqueConstraintErrors = map[string]error{
 	// a 409.
 	"transactions_household_idempotency_key": domain.ErrIdempotencyKeyInUse,
 
-	// agreement_sections' UNIQUE (household_id, name), 00015_agreements.sql
-	// (decision 19). AgreementRepository.CreateSection's contract: the unique
-	// index decides the collision, never a pre-read, and the screen has to be
-	// able to say "you already have a section called that". Sections are never
-	// deleted, so a name is never freed once taken.
+	// agreement_sections' UNIQUE (household_id, name), 00015_agreements.sql.
+	// AgreementRepository.CreateSection's contract: the unique index decides
+	// the collision, never a pre-read, so the screen can say "you already
+	// have a section called that". Sections are never deleted, so a name is
+	// never freed once taken.
 	"agreement_sections_household_id_name_key": domain.ErrAgreementSectionNameTaken,
 
 	// holdings' UNIQUE (account_id, name), 00019_holdings.sql. Scoped to the
-	// ACCOUNT, not the household: holding the same ticker in two brokerages is
-	// ordinary, and they are genuinely different positions with different cost
-	// bases. HoldingRepository.Create's contract: archived holdings still
-	// occupy the name, and the screen has to be able to offer restore rather
-	// than show a bare 409.
+	// ACCOUNT, not the household: the same ticker in two brokerages is
+	// ordinary, with different cost bases. Archived holdings still occupy the
+	// name (HoldingRepository.Create's contract), so the screen can offer
+	// restore rather than show a bare 409.
 	"holdings_account_id_name_key": domain.ErrHoldingNameTaken,
 }
 
@@ -87,26 +82,20 @@ func translate(err error, op string) error {
 	case errors.As(err, &pgErr) && pgErr.Code == pgUniqueViolation:
 		sentinel, named := uniqueConstraintErrors[pgErr.ConstraintName]
 		if !named {
-			// Mirrors ErrNotFound's translation: a caller-testable domain
-			// sentinel rather than a generic wrapped driver error, so
-			// usecase-level code can distinguish "this already exists" from
-			// any other failure with errors.Is. Task 15's CreateSpace is the
-			// first caller: its own pre-check (list, then compare keys) closes
-			// the common case, but two concurrent creates deriving the same
-			// key can both pass that check before either insert lands, and the
-			// database's UNIQUE (household_id, key) constraint is the
-			// authoritative backstop for that race.
+			// Mirrors ErrNotFound's translation: a caller-testable sentinel,
+			// not a generic wrapped error, so usecase code can distinguish
+			// "already exists" from any other failure with errors.Is. A
+			// caller's own pre-check can race two concurrent creates past it
+			// before either insert lands -- the UNIQUE constraint is the
+			// backstop.
 			sentinel = domain.ErrAlreadyExists
 		}
-		// op and pgErr.ConstraintName are folded into the message -- not just
-		// discarded the way a bare `return sentinel` would -- because these are
-		// the errors with a typed sentinel a caller can match against, which
-		// makes them exactly the case where losing the diagnostic (which
-		// operation, which constraint) would be missed most: every log line
-		// would otherwise read "already exists" with no way to tell
-		// CreateSpace's key collision apart from CreateUser's email collision.
-		// %w keeps it errors.Is-matchable despite the wrapping, exactly as the
-		// default branch below does for every other error.
+		// op and pgErr.ConstraintName are folded into the message, not
+		// discarded as a bare `return sentinel` would: for these
+		// typed-sentinel errors, losing the diagnostic would be missed most
+		// (every log line would read "already exists" with no way to tell
+		// which collision). %w keeps it errors.Is-matchable, like the
+		// default branch below.
 		return fmt.Errorf("%s: constraint %q: %w", op, pgErr.ConstraintName, sentinel)
 	default:
 		return fmt.Errorf("%s: %w", op, err)

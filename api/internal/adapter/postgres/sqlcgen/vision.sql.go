@@ -21,12 +21,12 @@ type CountGoalsInHouseholdParams struct {
 	GoalIds     []pgtype.UUID
 }
 
-// CountGoalsInHousehold answers how many of the given goal ids actually belong
-// to this household. VisionRepo.Save compares this against the number of
-// distinct ids it asked about, inside the same transaction as the write --
-// vision_measures' own FK only proves a goal exists somewhere, never that it
-// is this household's. The identical hole CountCategoriesInHousehold closes
-// for budget lines.
+// CountGoalsInHousehold answers how many of the given goal ids actually
+// belong to this household. Save compares this against the number of
+// distinct ids it asked about, in the same transaction as the write -- the
+// vision_measures FK only proves a goal exists somewhere, not that it is
+// this household's. CountCategoriesInHousehold closes the same hole for
+// budget lines.
 func (q *Queries) CountGoalsInHousehold(ctx context.Context, arg CountGoalsInHouseholdParams) (int64, error) {
 	row := q.db.QueryRow(ctx, countGoalsInHousehold, arg.HouseholdID, arg.GoalIds)
 	var count int64
@@ -58,15 +58,12 @@ type CreateVisionRow struct {
 }
 
 // CreateVision is the version-0 path: a first save for a household-year.
-// ON CONFLICT DO NOTHING rather than an upsert, so a zero-row result means
-// "someone else created it while this editor was typing" and the repository
-// can answer domain.ErrVisionChanged instead of silently overwriting a whole
-// year of pillars.
-//
-// Both parent writes MUST return the post-write version: VisionRepo.Save
-// hands it straight back as the token the next save will send, so a RETURNING
-// list that gave back the version it read would make every subsequent save
-// conflict against itself. Do not trim `version` from either RETURNING.
+// ON CONFLICT DO NOTHING (not an upsert) so a zero-row result means another
+// editor created it first, which the repository turns into
+// domain.ErrVisionChanged. RETURNING must give the post-write version, not
+// the version read: Save sends it back as the next save's token, so
+// returning the read version would make every later save conflict with
+// itself. Don't trim `version` from RETURNING here or in UpdateVision.
 func (q *Queries) CreateVision(ctx context.Context, arg CreateVisionParams) (CreateVisionRow, error) {
 	row := q.db.QueryRow(ctx, createVision,
 		arg.HouseholdID,

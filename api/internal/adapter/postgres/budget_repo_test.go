@@ -17,29 +17,25 @@ func month2026(m time.Month) time.Time {
 	return time.Date(2026, m, 1, 0, 0, 0, 0, time.UTC)
 }
 
-// august is july's (transaction_repo_test.go) own counterpart for the same
-// year, used below to give a rollover's OccurredOn a calendar month that
-// disagrees with its Month -- deliberately, so a bug that wrote
-// source_budget_month from OccurredOn instead of the normalised Month cannot
-// hide behind two dates that happen to agree.
+// august is july's (transaction_repo_test.go) counterpart, used to give a
+// rollover's OccurredOn a calendar month that disagrees with its Month on
+// purpose: a bug that took source_budget_month from OccurredOn instead of
+// the normalised Month can't hide behind dates that already agree.
 func august(day int) time.Time {
 	return time.Date(2026, time.August, day, 0, 0, 0, 0, time.UTC)
 }
 
-// firstOfMonth is a test-only duplicate of the repository's own startOfMonth
-// normalisation (transaction_repo.go), kept deliberately independent: the
-// assertions below compute their own expectation instead of borrowing the
-// private function under test, so a bug in that function's own normalisation
-// cannot also hide from the test that is supposed to catch it.
+// firstOfMonth duplicates the repository's own startOfMonth normalisation
+// (transaction_repo.go) independently, so a bug in that private function
+// can't also hide from the test meant to catch it.
 func firstOfMonth(t time.Time) time.Time {
 	return time.Date(t.Year(), t.Month(), 1, 0, 0, 0, 0, time.UTC)
 }
 
 // budgetRolloverStamp reads a budget month's rollover stamp directly off the
-// table. domain.Budget itself carries neither rolled_over_at nor
-// rollover_goal_id -- BudgetRepository.Get has no reason to return them --
-// so this raw read is the only way a test can see the stamp RollOverToGoal
-// writes (or ClearBudgetRollover clears).
+// table: domain.Budget carries neither rolled_over_at nor rollover_goal_id,
+// so this is the only way a test can see what RollOverToGoal writes (or
+// ClearBudgetRollover clears).
 func budgetRolloverStamp(t *testing.T, db *postgres.DB, householdID string, month time.Time) (rolledOverAt *time.Time, rolloverGoalID *string) {
 	t.Helper()
 	err := db.Pool().QueryRow(context.Background(),
@@ -52,10 +48,9 @@ func budgetRolloverStamp(t *testing.T, db *postgres.DB, householdID string, mont
 }
 
 // countRolloverContributions counts goal_contributions rows for this
-// household-month with source = 'budget_rollover' -- the same (household_id,
-// source_budget_month) pair goal_contributions_one_rollover_per_month is
-// built on, so this is what proves "at most one", not just "the one read got
-// back looks right".
+// household-month with source = 'budget_rollover' -- the same key
+// goal_contributions_one_rollover_per_month uses, so it proves "at most
+// one", not just that one read looks right.
 func countRolloverContributions(t *testing.T, db *postgres.DB, householdID string, month time.Time) int {
 	t.Helper()
 	var count int
@@ -155,9 +150,8 @@ func TestBudgetUpsertCreatesThenReplaces(t *testing.T) {
 }
 
 // TestBudgetGetUnbudgetedMonthIsErrNotFound pins Get's empty-state contract:
-// a month with no budgets row is domain.ErrNotFound, not a zero-valued
-// Budget, so the caller can translate it into the empty state rather than
-// misreading an unbudgeted month as a budget of nothing.
+// no budgets row is domain.ErrNotFound, not a zero-valued Budget, so a
+// caller can tell "never budgeted" from "budgeted with nothing in it".
 func TestBudgetGetUnbudgetedMonthIsErrNotFound(t *testing.T) {
 	db := openTestDB(t)
 	ctx := context.Background()
@@ -172,8 +166,8 @@ func TestBudgetGetUnbudgetedMonthIsErrNotFound(t *testing.T) {
 
 // TestBudgetUpsertIsOneTransaction is the shape guarding-partial-writes
 // exists for: a line whose category belongs to ANOTHER household must fail
-// the whole Upsert, and Get must show the month exactly as it was before the
-// call -- not a parent row updated with the old lines half-replaced.
+// the whole Upsert, and Get must show the month unchanged -- not a parent
+// row updated with the old lines half-replaced.
 func TestBudgetUpsertIsOneTransaction(t *testing.T) {
 	db := openTestDB(t)
 	ctx := context.Background()
@@ -220,20 +214,15 @@ func TestBudgetUpsertIsOneTransaction(t *testing.T) {
 }
 
 // TestBudgetUpsertDuplicateCategoryLineRollsBackAndStaysAtTheBoundary covers
-// the case TestBudgetUpsertIsOneTransaction above cannot: there, the foreign
-// category fails validateLineCategories before any write runs, so nothing
-// pins pgx.BeginFunc's rollback once writes have already started. Here, two
-// lines share one category this household genuinely owns -- dedup means
-// validateLineCategories's count check passes, so the transaction proceeds
-// to UpsertBudget and DeleteBudgetLines, and only the *second*
-// InsertBudgetLine fails, against budget_lines' own UNIQUE (budget_id,
-// category_id). That failure has to unwind a transaction whose DELETE has
-// already executed, not merely refuse to start one.
-//
-// It also pins the adapter boundary: the 23505 this hits must translate into
-// domain.ErrAlreadyExists, the same as TestSpaceRepoRejectsADuplicateKeyWithErrAlreadyExists
-// pins for spaces, and must never expose the raw *pgconn.PgError -- "no
-// database type crosses out of the adapter layer" (CLAUDE.md).
+// what TestBudgetUpsertIsOneTransaction cannot: a rollback that has to undo
+// writes already made, not just refuse to start. Two lines share one
+// category the household genuinely owns, so dedup lets the transaction reach
+// UpsertBudget and DeleteBudgetLines before the second InsertBudgetLine fails
+// budget_lines' UNIQUE (budget_id, category_id) -- the rollback must undo
+// that DELETE. It also pins the adapter boundary: the 23505 must map to
+// domain.ErrAlreadyExists (as for spaces, see
+// TestSpaceRepoRejectsADuplicateKeyWithErrAlreadyExists) and never leak the
+// raw *pgconn.PgError.
 func TestBudgetUpsertDuplicateCategoryLineRollsBackAndStaysAtTheBoundary(t *testing.T) {
 	db := openTestDB(t)
 	ctx := context.Background()
@@ -354,10 +343,10 @@ func TestBudgetExpectedIncomeNullRoundTrips(t *testing.T) {
 		t.Fatalf("ExpectedIncome = %+v, want nil, not a zero Money", got.ExpectedIncome)
 	}
 
-	// The other half of the convention, proven in the same test rather than a
-	// separate one: a real value must round-trip too, or a repository that
-	// always returns nil regardless of input would pass the assertion above
-	// for the wrong reason.
+	// The other half of the convention, proven here rather than in a
+	// separate test: a real value must round-trip too, or a repository that
+	// always returns nil would pass the assertion above for the wrong
+	// reason.
 	income := moneyOf(650000)
 	_, err = repo.Upsert(ctx, domain.Budget{
 		HouseholdID:    householdID,
@@ -384,11 +373,9 @@ func TestBudgetExpectedIncomeNullRoundTrips(t *testing.T) {
 // writes the contribution AND stamps the month.
 //
 // Month is passed mid-month (july(17)) and OccurredOn a different calendar
-// month entirely (august(3)) on purpose: a bug that skipped startOfMonth's
-// normalisation, or that wrote source_budget_month from OccurredOn instead
-// of Month -- exactly the failure Task 4's implementer flagged as the thing
-// most likely to silently break this -- cannot hide behind dates that
-// happen to already agree.
+// month (august(3)) on purpose: a bug that skipped startOfMonth's
+// normalisation, or wrote source_budget_month from OccurredOn instead of
+// Month, cannot hide behind dates that already agree.
 func TestRollOverToGoalWritesContributionAndStampTogether(t *testing.T) {
 	db := openTestDB(t)
 	ctx := context.Background()
@@ -444,11 +431,10 @@ func TestRollOverToGoalWritesContributionAndStampTogether(t *testing.T) {
 }
 
 // TestBudgetGetSurfacesRolloverAmountFromTheContributionRow pins GetBudget's
-// own LEFT JOIN (Finding 1 of the goals-branch review): nil before any
-// rollover, in lockstep with rolled_over_at/rollover_goal_id, and the exact
-// amount written to goal_contributions afterward -- read off that row, not
-// off anything this test could confuse with a live Spent/Remaining
-// recomputation, because Get never touches transactions at all.
+// own LEFT JOIN: nil before any rollover, then in lockstep with
+// rolled_over_at/rollover_goal_id, and the exact amount written to
+// goal_contributions -- read off that row, not off a live Spent/Remaining
+// recomputation, since Get never touches transactions.
 func TestBudgetGetSurfacesRolloverAmountFromTheContributionRow(t *testing.T) {
 	db := openTestDB(t)
 	ctx := context.Background()
@@ -520,10 +506,9 @@ func TestRollOverToGoalTwiceIsErrRolloverAlreadyDone(t *testing.T) {
 }
 
 // TestRollOverToGoalWithoutABudgetRowIsErrNotFound pins the ambiguous-zero-
-// rows case from the other side: a month with genuinely no budgets row at
-// all (a state Budget decision 4 makes reachable -- a closed month can have
-// spend and no caps) must be domain.ErrNotFound, never
-// domain.ErrRolloverAlreadyDone.
+// rows case from the other side: a month with genuinely no budgets row (a
+// closed month can have spend and no caps) must be domain.ErrNotFound,
+// never domain.ErrRolloverAlreadyDone.
 func TestRollOverToGoalWithoutABudgetRowIsErrNotFound(t *testing.T) {
 	db := openTestDB(t)
 	ctx := context.Background()
@@ -553,13 +538,11 @@ func TestRollOverToGoalWithoutABudgetRowIsErrNotFound(t *testing.T) {
 }
 
 // TestRollOverThenDeleteThenRollOverAgainSucceeds is THE round trip: roll
-// over, confirm the stamp; delete the rollover contribution, confirm the
-// stamp is FULLY gone (both columns, not just one); roll over again, confirm
-// it succeeds with exactly one contribution surviving. A test that only
-// asserted the second RollOverToGoal's success would pass even if the first
-// delete had left a stray duplicate contribution behind -- this is why the
-// test also checks the stamp is gone in between, and that there is exactly
-// one contribution at the end, not two.
+// over and confirm the stamp; delete the contribution and confirm the stamp
+// is FULLY gone (both columns); roll over again and confirm it succeeds
+// with exactly one contribution surviving. The stamp and count checks
+// matter: a test that only asserted the second call's success would still
+// pass even if the delete had left a stray duplicate contribution behind.
 func TestRollOverThenDeleteThenRollOverAgainSucceeds(t *testing.T) {
 	db := openTestDB(t)
 	ctx := context.Background()
@@ -612,16 +595,14 @@ func TestRollOverThenDeleteThenRollOverAgainSucceeds(t *testing.T) {
 	}
 }
 
-// TestRollOverToGoalPartialIndexMapsToErrRolloverAlreadyDone is not in the
-// task brief's own enumerated list, but the brief's own Step 3 is explicit:
-// "a 23505 on goal_contributions_one_rollover_per_month also maps to
-// domain.ErrRolloverAlreadyDone ... Check the constraint name, not just the
-// SQLSTATE". Nothing else in this file can ever reach that INSERT, because
-// the conditional UPDATE always wins first when the stamp agrees with the
-// contribution row -- so this test manufactures the one state where they
-// disagree (the stamp cleared by hand, the rollover contribution left in
-// place) to drive the second RollOverToGoal's INSERT into the partial unique
-// index deliberately, without needing two genuinely concurrent transactions.
+// TestRollOverToGoalPartialIndexMapsToErrRolloverAlreadyDone pins that a
+// 23505 on goal_contributions_one_rollover_per_month also maps to
+// domain.ErrRolloverAlreadyDone -- checked by constraint name, not just
+// SQLSTATE. The conditional UPDATE always wins first when the stamp agrees
+// with the contribution row, so nothing else in this file can reach that
+// INSERT; this test manufactures the one state where they disagree (stamp
+// cleared by hand, contribution left in place) to drive the INSERT into the
+// partial unique index without two genuinely concurrent transactions.
 func TestRollOverToGoalPartialIndexMapsToErrRolloverAlreadyDone(t *testing.T) {
 	db := openTestDB(t)
 	ctx := context.Background()
@@ -640,11 +621,10 @@ func TestRollOverToGoalPartialIndexMapsToErrRolloverAlreadyDone(t *testing.T) {
 		t.Fatalf("first RollOverToGoal: %v", err)
 	}
 
-	// Simulate the stamp having been cleared without its contribution going
-	// with it -- exactly the "strand" state DeleteContribution's own
-	// transaction exists to prevent, manufactured here by hand so the second
-	// RollOverToGoal's conditional UPDATE succeeds this time, and its INSERT
-	// is the one that has to hit the partial index instead.
+	// Simulate the stamp cleared without its contribution -- the "strand"
+	// state DeleteContribution's transaction exists to prevent -- so the
+	// second RollOverToGoal's conditional UPDATE succeeds this time and its
+	// INSERT hits the partial index instead.
 	if _, err := db.Pool().Exec(ctx,
 		`UPDATE budgets SET rolled_over_at = NULL, rollover_goal_id = NULL WHERE household_id = $1 AND month = $2`,
 		householdID, july(1)); err != nil {

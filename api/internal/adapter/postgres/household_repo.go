@@ -20,13 +20,10 @@ func (r *HouseholdRepo) Get(ctx context.Context, householdID string) (domain.Hou
 		row.ShowSecondaryCurrency, row.SecondaryCurrency, row.FxRateMode), nil
 }
 
-// Update persists every field on h. The generated UpdateHousehold query used
-// to accept only family_name, primary_currency, show_secondary_currency and
-// fx_rate_mode -- silently discarding a caller's Name or SecondaryCurrency
-// while still returning a nil error, which is indistinguishable from a
-// successful full write. The query (queries/identity.sql) was widened to set
-// name and secondary_currency too, so the port's full-struct signature is now
-// honest: nothing you pass in Update is dropped.
+// Update persists every field on h. Don't let the generated query narrow
+// back to a subset of columns: that would silently drop a caller's Name or
+// SecondaryCurrency while still returning a nil error, indistinguishable
+// from a full successful write.
 func (r *HouseholdRepo) Update(ctx context.Context, h domain.Household) (domain.Household, error) {
 	row, err := r.q.UpdateHousehold(ctx, sqlcgen.UpdateHouseholdParams{
 		ID:                    uuid(h.ID),
@@ -45,9 +42,9 @@ func (r *HouseholdRepo) Update(ctx context.Context, h domain.Household) (domain.
 }
 
 // Create writes h. h.ID and h.FXRateMode are ignored: the database assigns
-// the id, and fx_rate_mode keeps its column default ('auto'), which the CHECK
-// constraint makes the only safe value to assume at creation time -- see
-// usecase.HouseholdRepository.Create's doc comment.
+// the id, and fx_rate_mode keeps its column default ('auto'), the only value
+// the CHECK constraint makes safe to assume at creation -- see
+// usecase.HouseholdRepository.Create.
 func (r *HouseholdRepo) Create(ctx context.Context, h domain.Household) (domain.Household, error) {
 	row, err := r.q.CreateHousehold(ctx, sqlcgen.CreateHouseholdParams{
 		Name:                  h.Name,

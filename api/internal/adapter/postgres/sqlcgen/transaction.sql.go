@@ -68,16 +68,13 @@ type CreateCategoryParams struct {
 // request's read could land between this one's read and its write.
 //
 // It does not close the window between two concurrent transactions: under
-// READ COMMITTED, two INSERTs that each begin before the other commits both
-// see the same pre-insert MAX(sort_order) and can both compute and commit
-// the same value -- there is no UNIQUE constraint on sort_order to make the
-// second one fail. Closing that window would need either an advisory lock
-// or a unique constraint, both rejected here: sort_order has no correctness
-// requirement, only a display one, so a tied value is cosmetic (two
-// categories drawn in the same slot, ListCategories' own ORDER BY sort_order,
-// name breaking the tie deterministically rather than leaving it to
-// whatever order Postgres happens to scan rows in) -- not a bug worth a lock
-// around every category creation.
+// READ COMMITTED, two INSERTs that each begin before the other commits can
+// both see the same pre-insert MAX(sort_order) and commit the same value --
+// there is no UNIQUE constraint on sort_order to stop it. That's left
+// unfixed on purpose: sort_order has no correctness requirement, only a
+// display one, so a tied value is cosmetic (ListCategories' own ORDER BY
+// sort_order, name breaks the tie deterministically) -- not worth an
+// advisory lock or a unique constraint around every category creation.
 //
 // A name collision (including against an archived row, which keeps its slot
 // in UNIQUE (household_id, name)) surfaces as a 23505 that
@@ -244,10 +241,10 @@ type GetTransactionRow struct {
 //
 // before_from_opening and before_to_opening are computed here, next to the
 // dates they compare, so the rule lives in one place. Strict < against
-// opening_balance_as_of, mirroring the >= the balance sum uses in
-// queries/account.sql: the opening balance is the figure at the START of
-// its day (spec 2026-07-30, decision 1), so only a transaction dated
-// strictly before it is already inside that figure and excluded.
+// opening_balance_as_of mirrors the >= the balance sum uses in
+// queries/account.sql (spec 2026-07-30-hearth-finance-fixes): the opening
+// balance is the figure at the START of its day, so only a transaction
+// dated strictly before it is already inside that figure and excluded.
 func (q *Queries) GetTransaction(ctx context.Context, arg GetTransactionParams) (GetTransactionRow, error) {
 	row := q.db.QueryRow(ctx, getTransaction, arg.HouseholdID, arg.ID)
 	var i GetTransactionRow
@@ -444,20 +441,19 @@ type ListTransactionsRow struct {
 	BeforeToOpening   *bool
 }
 
-// ListTransactions serves the ledger and all five of its filters.
+// ListTransactions serves the ledger and all five of its filters. Each is
+// written as `(sqlc.narg(x)::type IS NULL OR column = ...)`, so an unset
+// filter is a no-op inside one prepared statement rather than a separate
+// query per combination -- thirty-two hand-written variants would drift,
+// and a concatenated string would be an injection surface.
 //
-// Each filter is written as `(sqlc.narg(x)::type IS NULL OR column = ...)`, so
-// an unset filter is a no-op inside one prepared statement rather than a
-// separate query per combination. Thirty-two hand-written variants would drift
-// from each other, and a concatenated string would be an injection surface.
+// The account filter matches EITHER side: a transfer belongs in the ledger
+// of both accounts it touches.
 //
-// The account filter matches EITHER side: a transfer belongs in the ledger of
-// both accounts it touches.
-//
-// The keyset predicate is the row-value comparison (occurred_on, id) < (cursor
-// date, cursor id), which matches transactions_household_date_idx exactly.
-// Comparing the pair rather than the date alone is what makes two transactions
-// on the same day page correctly.
+// The keyset predicate is the row-value comparison (occurred_on, id) <
+// (cursor date, cursor id), matching transactions_household_date_idx
+// exactly. Comparing the pair, not just the date, is what makes two
+// transactions on the same day page correctly.
 //
 // LIMIT is $N + 1 in the caller, not here: the extra row is how the caller
 // learns another page exists without counting the table.
@@ -694,13 +690,11 @@ type SeedCategoriesParams struct {
 // and both insert. ON CONFLICT DO NOTHING against UNIQUE (household_id, name)
 // makes the loser of that race a no-op instead of a duplicate-key error.
 //
-// Thirteen literal VALUES rows, not unnest($2::text[], $3::text[], $4::int[]):
-// sqlc's query analyzer does not carry the catalog entry for the multi-array
-// form of unnest (real Postgres resolves it specially, not as an ordinary
-// unnest(anyarray) overload), and rejects the query outright with "function
-// unnest(unknown, unknown, unknown) does not exist". One round trip either
-// way; the row count is pinned to len(domain.StarterCategories()) because
-// this is a literal list, not a loop.
+// Thirteen literal VALUES rows, not unnest($2::text[], $3::text[],
+// $4::int[]): sqlc's analyzer doesn't carry the catalog entry for unnest's
+// multi-array form (real Postgres resolves it specially) and rejects the
+// query outright. One round trip either way; the row count is pinned to
+// len(domain.StarterCategories()) since this is a literal list, not a loop.
 func (q *Queries) SeedCategories(ctx context.Context, arg SeedCategoriesParams) error {
 	_, err := q.db.Exec(ctx, seedCategories,
 		arg.HouseholdID,

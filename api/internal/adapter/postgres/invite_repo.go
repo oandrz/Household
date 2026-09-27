@@ -33,10 +33,10 @@ func (r *InviteRepo) Create(ctx context.Context, householdID, email, name string
 	id, err := r.q.CreateInvite(ctx, sqlcgen.CreateInviteParams{
 		HouseholdID: uuid(householdID),
 		// text(), not nullableText(): Create's caller always has a real
-		// address -- CreateTelegram below is the repository's other path,
-		// for the invite with none -- and nullableText would turn "" into
-		// NULL, which invites_channel_matches_email then refuses against
-		// the default channel of 'email'.
+		// address (CreateTelegram below handles the no-address case).
+		// nullableText would turn "" into NULL, which
+		// invites_channel_matches_email refuses for the default 'email'
+		// channel.
 		Email:        text(email),
 		Name:         name,
 		Role:         string(role),
@@ -51,9 +51,9 @@ func (r *InviteRepo) Create(ctx context.Context, householdID, email, name string
 	return uuidToString(id), nil
 }
 
-// CreateTelegram writes an invite with no email column touched at all --
-// not even as an explicit NULL -- because CreateTelegramInvite's own INSERT
-// never names the column, letting it take its schema default. That is what
+// CreateTelegram writes an invite with no email column touched, not even
+// as an explicit NULL: CreateTelegramInvite's own INSERT never names the
+// column, so it takes its schema default -- what
 // invites_channel_matches_email requires of a 'telegram' row.
 func (r *InviteRepo) CreateTelegram(ctx context.Context, householdID, name string, role domain.Role,
 	caps domain.Capabilities, tokenHash []byte, invitedBy string, expiresAt time.Time) (string, error) {
@@ -142,13 +142,10 @@ func (r *InviteRepo) LiveInviteForEmail(ctx context.Context, householdID, email 
 	}, nil
 }
 
-// MarkAccepted deliberately does not go through translate. MarkInviteAccepted
-// is a guarded atomic update (accepted_at IS NULL AND expires_at > now()), so
-// zero rows means the invite was already accepted or has expired -- not that
-// no invite with this id ever existed. translate's generic
-// pgx.ErrNoRows -> domain.ErrNotFound mapping would misreport that as "no
-// such invite"; the task's constraints call for domain.ErrInviteAlreadyAccepted
-// instead, so that mapping is applied directly here.
+// MarkAccepted does not go through translate. MarkInviteAccepted is a
+// guarded update (accepted_at IS NULL AND expires_at > now()), so zero rows
+// means already accepted or expired, not "no such invite" -- so this maps
+// pgx.ErrNoRows to domain.ErrInviteAlreadyAccepted directly instead.
 func (r *InviteRepo) MarkAccepted(ctx context.Context, inviteID string) error {
 	_, err := r.q.MarkInviteAccepted(ctx, uuid(inviteID))
 	if err == nil {
@@ -160,16 +157,13 @@ func (r *InviteRepo) MarkAccepted(ctx context.Context, inviteID string) error {
 	return fmt.Errorf("mark invite accepted: %w", err)
 }
 
-// Accept runs the guarded MarkInviteAccepted update, the user insert, and the
-// membership insert in a single transaction, so a household of two is never
-// left with an invite that can neither be accepted nor retried.
+// Accept runs the guarded MarkInviteAccepted update, the user insert and the
+// membership insert in one transaction, so an invite is never left
+// half-accepted -- neither acceptable again nor retryable.
 //
-// MarkInviteAccepted runs first, before either insert: it is what makes a
-// concurrent second acceptance of the same invite fail cheaply, as
-// domain.ErrInviteAlreadyAccepted, before any row is written -- rather than
-// failing with a raw unique-constraint error from CreateUser colliding on the
-// invite's email address, which the first, successful acceptance already
-// claimed.
+// MarkInviteAccepted runs first: it makes a concurrent second acceptance
+// fail cheaply as domain.ErrInviteAlreadyAccepted before any row is written,
+// instead of on CreateUser's unique-email collision with the first acceptance.
 func (r *InviteRepo) Accept(ctx context.Context, inviteID, email, passwordHash, displayName string,
 	householdID string, role domain.Role, caps domain.Capabilities) (usecase.AcceptedInvite, error) {
 	tx, err := r.pool.Begin(ctx)
@@ -270,10 +264,10 @@ func (r *InviteRepo) ListPending(ctx context.Context, householdID string, now ti
 	return out, nil
 }
 
-// Delete is one guarded statement on the common path. Only when it removed
-// nothing does a second, equally household-scoped read decide which of
-// InviteRepository.Delete's two refusals applies -- so neither statement can
-// confirm that another household's invite id exists.
+// Delete is one guarded statement on the common path. Only when it removes
+// nothing does a second, household-scoped read decide which of its two
+// refusals applies -- so neither statement can confirm another household's
+// invite id exists.
 func (r *InviteRepo) Delete(ctx context.Context, householdID, inviteID string) error {
 	_, err := r.q.DeleteUnacceptedInvite(ctx, sqlcgen.DeleteUnacceptedInviteParams{
 		ID:          uuid(inviteID),
@@ -301,10 +295,9 @@ func (r *InviteRepo) Delete(ctx context.Context, householdID, inviteID string) e
 }
 
 // RecordKnock reports domain.ErrNotFound for every case its guarded UPDATE
-// does not match -- unknown token, email channel, accepted, expired, or
-// already knocked. That is deliberately one answer: the caller turns it
-// into the bot's one bland reply, and any difference between these cases
-// would be something a chat could probe for.
+// misses -- unknown token, email channel, accepted, expired, or already
+// knocked. That is deliberate: distinguishing them would let a chat probe
+// for which case applies.
 func (r *InviteRepo) RecordKnock(ctx context.Context, tokenHash []byte, chatID int64,
 	username, code string, now time.Time) error {
 	_, err := r.q.RecordInviteKnock(ctx, sqlcgen.RecordInviteKnockParams{
@@ -323,31 +316,24 @@ func (r *InviteRepo) RecordKnock(ctx context.Context, tokenHash []byte, chatID i
 	return nil
 }
 
-// ReplaceToken is the single write behind "get a new link", which is also
-// "Not them": one statement replaces the token and clears the knock
-// together, so there is never an instant where a fresh link carries a
-// stale knock. It returns the chat that had knocked (0 when nobody had),
-// read back inside the same UPDATE -- see ReplaceInviteToken's own SQL
-// comment for why that is safe to trust, and
-// TestReplaceInviteTokenReturnsThePreviousKnockChatID for the proof against
-// a real database.
+// ReplaceToken is "get a new link" / "Not them": one statement replaces the
+// token and clears the knock together, so a fresh link never carries a
+// stale knock. It returns the previous knock chat id (0 if none), read
+// back in the same UPDATE -- see ReplaceInviteToken's own SQL comment and
+// TestReplaceInviteTokenReturnsThePreviousKnockChatID.
 //
-// Household-scoped and channel-scoped in the guarded UPDATE itself, so an
-// id from another household matches nothing there and reports
-// domain.ErrNotFound, the same answer an id that never existed gets -- the
-// fallback read below never runs for that case, so it never has the chance
-// to confirm the id exists elsewhere.
+// The guarded UPDATE is household- and channel-scoped, so a wrong-household
+// id matches nothing and reports domain.ErrNotFound, the same as an id
+// that never existed -- the fallback read below never runs for that case,
+// so it can't confirm the id exists elsewhere.
 //
-// An email invite also matches nothing in the guarded UPDATE, and the
-// caller cannot tell that apart from "no such invite" without reading
-// further -- so on a miss this reads the row back, scoped by household and
-// accepted_at IS NULL exactly as the guarded UPDATE was, to report
-// domain.ErrInviteNotTelegram for the case an owner can actually act on.
-// That same accepted_at IS NULL scoping is what keeps an already-accepted
-// Telegram invite from reaching that channel check at all: it reads as
-// domain.ErrNotFound too, because "get a new link" is not something an
-// accepted invite offers, the same way Withdraw's own fallback read
-// distinguishes its two failure modes.
+// On any other miss (an email invite, or an already-accepted Telegram
+// invite), the fallback read re-checks with the same household and
+// accepted_at IS NULL scoping. An email invite reports
+// domain.ErrInviteNotTelegram; an already-accepted invite reports
+// domain.ErrNotFound too, since an accepted invite has no link left to
+// replace (the same second-read shape Delete uses to tell its own two
+// refusals apart).
 func (r *InviteRepo) ReplaceToken(ctx context.Context, householdID, inviteID string,
 	tokenHash []byte, expiresAt time.Time) (int64, error) {
 	previous, err := r.q.ReplaceInviteToken(ctx, sqlcgen.ReplaceInviteTokenParams{
@@ -376,26 +362,25 @@ func (r *InviteRepo) ReplaceToken(ctx context.Context, householdID, inviteID str
 	if channel != string(domain.ChannelTelegram) {
 		return 0, domain.ErrInviteNotTelegram
 	}
-	// The fallback read found a live (accepted_at IS NULL) Telegram invite
-	// with this id in this household, yet the guarded UPDATE above still
-	// matched nothing -- a state that should be unreachable given the two
-	// queries share the same WHERE conditions. Fail closed rather than
-	// report success for a write that never happened (CLAUDE.md: fail
-	// closed on values you did not construct).
+	// The fallback read found a live Telegram invite matching this id and
+	// household, yet the guarded UPDATE above -- which shares the same WHERE
+	// conditions -- still matched nothing. That should be unreachable, so
+	// fail closed rather than report success for a write that never
+	// happened (CLAUDE.md: fail closed on values you did not construct).
 	return 0, domain.ErrNotFound
 }
 
-// Admit is Let in (spec decision 5): the user, the membership, the
-// telegram_accounts row and the acceptance stamp, in one transaction.
-// Either all four happen or none do.
+// Admit is "Let in": the user, the membership, the telegram_accounts row
+// and the acceptance stamp, all in one transaction. Either all four happen
+// or none do.
 //
-// Do not compose this from separate calls. A failure between them would
-// leave a user with no membership and no email -- no unique constraint to
-// make a retry fail loudly, so each retry would silently orphan another
-// one. This is the same rule Accept's own doc comment gives.
+// Do not compose this from separate calls: a failure between them would
+// leave a user with no membership and no email, with no unique constraint
+// to make a retry fail loudly -- each retry would silently orphan another
+// user. This is the same rule Accept's own doc comment gives.
 //
-// ClaimKnockedInvite runs first, for the reason Accept's guard does: it is
-// what makes a second, concurrent Let in fail cheaply, before any row is
+// ClaimKnockedInvite runs first, for the reason Accept's guard does: it
+// makes a concurrent second Let in fail cheaply, before any row is
 // written, rather than failing on the telegram_accounts unique index with
 // an error nobody can map.
 func (r *InviteRepo) Admit(ctx context.Context, householdID, inviteID string, now time.Time) (usecase.AdmittedInvite, error) {
@@ -431,10 +416,9 @@ func (r *InviteRepo) Admit(ctx context.Context, householdID, inviteID string, no
 		return usecase.AdmittedInvite{}, err
 	}
 
-	// email and passwordHash are both nil, not "": this member was let in
-	// from a Telegram knock, never typed a password, and Accept's own "" <->
-	// SQL NULL convention (StoredUser's doc comment) applies the same way
-	// here as it does to every other credential-less member.
+	// email and passwordHash are nil, not "": this member never had an
+	// email or password, and the "" <-> SQL NULL convention (StoredUser's
+	// doc comment) applies here the same as for every credential-less member.
 	userRow, err := q.CreateUser(ctx, sqlcgen.CreateUserParams{
 		Email:         nil,
 		PasswordHash:  nil,
@@ -456,11 +440,10 @@ func (r *InviteRepo) Admit(ctx context.Context, householdID, inviteID string, no
 	}
 
 	// knock_chat_id is nullable at the schema level, but invites_knock_is_whole
-	// (migration 00021) ties it to knocked_at: ClaimKnockedInvite's own guard
-	// requires knocked_at IS NOT NULL, so it is never nil here in practice.
-	// int64Or is used anyway rather than a bare dereference, because a
-	// pointer this code did not itself just check must never be trusted
-	// blindly (CLAUDE.md: fail closed on values you did not construct).
+	// (migration 00021) ties it to knocked_at, and ClaimKnockedInvite's guard
+	// requires knocked_at IS NOT NULL -- so it is never nil here in practice.
+	// int64Or is used anyway: a pointer this code did not itself just check
+	// must never be trusted blindly (CLAUDE.md: fail closed).
 	chatID := int64Or(claimed.KnockChatID)
 	if err := q.CreateTelegramAccount(ctx, sqlcgen.CreateTelegramAccountParams{
 		UserID:       userRow.ID,
@@ -469,21 +452,19 @@ func (r *InviteRepo) Admit(ctx context.Context, householdID, inviteID string, no
 	}); err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == pgUniqueViolation {
-			// The chat bound itself to a different account somewhere else
-			// between the knock and this click -- the re-check spec
-			// decision 15 asks for, closed by the same UNIQUE the knock-time
-			// check cannot see across. translate would flatten this to the
-			// generic domain.ErrAlreadyExists, because neither of
-			// telegram_accounts' two UNIQUEs is a named entry in its
-			// uniqueConstraintErrors map (that map exists for exactly this
-			// case: an unlisted name falls through to the generic sentinel).
-			// The specific domain.ErrChatAlreadyBound the caller needs is
-			// mapped explicitly here instead of adding a table entry,
-			// because TelegramAccountRepository.Create's own contract
-			// deliberately keeps the generic sentinel for its
-			// two UNIQUEs -- "the caller knows which side it was asking
-			// about... and chooses the sentence, rather than a repository
-			// guessing at intent" -- and this is that caller choosing.
+			// The chat bound itself to a different account between the
+			// knock and this click. A chat linked to any Hearth account
+			// cannot be let in, so Let in re-checks inside its transaction;
+			// the same UNIQUE the knock-time check cannot see across is
+			// what catches it here. translate would flatten this to the
+			// generic domain.ErrAlreadyExists, since neither of telegram_accounts'
+			// two UNIQUEs is in uniqueConstraintErrors (an unlisted name
+			// falls through to that generic sentinel on purpose).
+			// domain.ErrChatAlreadyBound is mapped explicitly here instead
+			// of adding a table entry, because
+			// TelegramAccountRepository.Create's own contract keeps the
+			// generic sentinel for its two UNIQUEs -- the caller knows
+			// which side it was asking about, so it chooses the sentence.
 			return usecase.AdmittedInvite{}, domain.ErrChatAlreadyBound
 		}
 		return usecase.AdmittedInvite{}, fmt.Errorf("create telegram account for invite admission: %w", err)
@@ -504,13 +485,12 @@ func (r *InviteRepo) Admit(ctx context.Context, householdID, inviteID string, no
 }
 
 // admitFailureReason runs only after ClaimKnockedInvite's guarded UPDATE
-// matched nothing, to tell its five collapsed conditions apart -- the same
-// fallback-read shape Delete already uses via InviteAcceptedInHousehold.
-// Household-scoped, so an id from another household reports
-// domain.ErrNotFound rather than confirming it exists elsewhere. It reads
-// through q, the same transaction-scoped queries ClaimKnockedInvite just
-// ran through, so it sees the identical snapshot rather than opening a
-// second connection mid-transaction.
+// matches nothing, to tell its five collapsed conditions apart -- the same
+// fallback-read shape Delete uses via InviteAcceptedInHousehold.
+// Household-scoped, so a cross-household id reports domain.ErrNotFound
+// rather than confirming it exists elsewhere. It reads through q, the same
+// transaction-scoped queries, so it sees the identical snapshot instead of
+// opening a second connection mid-transaction.
 func (r *InviteRepo) admitFailureReason(ctx context.Context, q *sqlcgen.Queries, householdID, inviteID string) error {
 	accepted, err := q.InviteAcceptedInHousehold(ctx, sqlcgen.InviteAcceptedInHouseholdParams{
 		ID:          uuid(inviteID),
@@ -527,8 +507,8 @@ func (r *InviteRepo) admitFailureReason(ctx context.Context, q *sqlcgen.Queries,
 	}
 	// Not accepted, yet ClaimKnockedInvite still matched nothing: either
 	// nobody has knocked, the knock was cleared by a fresh link, or the
-	// invite has expired. Admit has nothing more specific to say for any of
-	// those than "nobody is waiting" -- the same one-answer-for-several-
-	// causes shape RecordKnock's own doc comment explains.
+	// invite has expired. Admit has nothing more specific to say than
+	// "nobody is waiting" -- the same one-answer-for-several-causes shape
+	// RecordKnock's own doc comment explains.
 	return domain.ErrInviteNotKnocked
 }

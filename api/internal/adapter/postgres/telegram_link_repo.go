@@ -33,9 +33,8 @@ func (r *TelegramLinkRepo) Create(ctx context.Context, userID string, nonceHash 
 }
 
 // Consume goes through translate, so an unknown, expired or already-consumed
-// nonce all surface as domain.ErrNotFound. Keeping the three indistinguishable
-// is deliberate: the bot answers all of them with one message, so none of them
-// can be told apart by probing.
+// nonce all surface as domain.ErrNotFound -- deliberately: the bot answers
+// all three with one message, so none can be told apart by probing.
 func (r *TelegramLinkRepo) Consume(ctx context.Context, nonceHash []byte, chatID int64, chatUsername string) (usecase.TelegramLinkRedemption, error) {
 	row, err := r.q.ConsumeTelegramLinkRequest(ctx, sqlcgen.ConsumeTelegramLinkRequestParams{
 		NonceHash:    nonceHash,

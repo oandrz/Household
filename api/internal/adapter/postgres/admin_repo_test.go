@@ -111,10 +111,9 @@ func TestFeatureFlagRepoSeparatesGlobalFromHouseholdOverrides(t *testing.T) {
 	}
 }
 
-// TestExtendingASessionKeepsItsAdminGrant is the test the spec asks for by
-// name. ExtendSession writes one column today; the day someone widens it to a
-// whole-row update, every live admin grant would silently reset and nothing
-// else in the suite would notice.
+// TestExtendingASessionKeepsItsAdminGrant guards ExtendSession's one-column
+// write: the day someone widens it to a whole-row update, every live admin
+// grant would silently reset and nothing else in the suite would notice.
 func TestExtendingASessionKeepsItsAdminGrant(t *testing.T) {
 	ctx := context.Background()
 	db := openTestDB(t)

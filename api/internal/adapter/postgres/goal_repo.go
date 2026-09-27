@@ -30,9 +30,8 @@ func NewGoalRepo(db *DB) *GoalRepo {
 // var _ pins GoalRepo to usecase.GoalProgressReader at compile time, the
 // narrower port VisionService depends on -- the same reason account_repo.go
 // pins AccountRepo to AccountLookup and category_repo.go pins CategoryRepo
-// to CategoryLookup. VisionService itself does not exist yet (a later
-// task), so without this line a signature drift from the port would go
-// unnoticed until that task lands.
+// to CategoryLookup: a signature drift from the port fails here, next to
+// the repository, rather than at main.go's wiring.
 var _ usecase.GoalProgressReader = (*GoalRepo)(nil)
 
 func (r *GoalRepo) List(ctx context.Context, householdID string, includeArchived bool) ([]usecase.GoalRecord, error) {
@@ -68,17 +67,15 @@ func (r *GoalRepo) Get(ctx context.Context, householdID, goalID string) (usecase
 }
 
 // Create writes the goal row and, when startingBalanceMinor is non-zero, its
-// opening contribution -- both inside one pgx.BeginFunc, so a goal can never
-// exist without the opening contribution its own creation promised. This
-// closes the reachable half of the atomicity claim: a duplicate-name failure
-// on the goal insert rolls back before the contribution insert is ever
-// attempted, so no orphaned contribution can point at a goal that was never
-// written (TestGoalCreateThatFailsWritesNothingAtAll). The other direction --
-// a goal surviving a failed contribution insert -- has no reachable failure
-// to inject: the only way that insert fails is the CHECK on
-// amount_minor <> 0, and this method never sends a zero-amount insert at all
-// (see the `startingBalanceMinor != 0` guard below), so it is guarded by
-// construction rather than by a test.
+// opening contribution, both inside one pgx.BeginFunc: a goal can never
+// exist without the opening contribution its creation promised. A
+// duplicate-name failure on the goal insert rolls back before the
+// contribution insert runs, so no orphaned contribution can point at an
+// unwritten goal (TestGoalCreateThatFailsWritesNothingAtAll). The reverse
+// can't happen either: the only way the contribution insert fails is the
+// CHECK on amount_minor <> 0, which this method never triggers (see the
+// `startingBalanceMinor != 0` guard below) -- guarded by construction, not
+// by a test.
 func (r *GoalRepo) Create(ctx context.Context, g domain.Goal, startingBalanceMinor int64, createdOn time.Time) (domain.Goal, error) {
 	var result domain.Goal
 	err := pgx.BeginFunc(ctx, r.pool, func(tx pgx.Tx) error {
@@ -124,11 +121,10 @@ func (r *GoalRepo) Create(ctx context.Context, g domain.Goal, startingBalanceMin
 	return result, nil
 }
 
-// Update replaces name, target amount, target month and planned monthly --
+// Update replaces name, target amount, target month and planned monthly.
 // UpdateGoal's own SQL comment explains why currency and archived_at need no
-// SET clause here: currency is not mutable, and RETURNING hands both columns
-// back exactly as they already were, which is what gives "read back off the
-// existing row regardless of what the caller passed" for free.
+// SET clause: currency is not mutable, and RETURNING hands both columns back
+// exactly as they already were.
 func (r *GoalRepo) Update(ctx context.Context, g domain.Goal) (domain.Goal, error) {
 	row, err := r.q.UpdateGoal(ctx, sqlcgen.UpdateGoalParams{
 		HouseholdID:         uuid(g.HouseholdID),
@@ -164,11 +160,10 @@ func (r *GoalRepo) SetArchived(ctx context.Context, householdID, goalID string, 
 }
 
 // AddContribution writes one row and echoes back c.Amount.Currency for the
-// returned domain.Money: goal_contributions carries no currency column of
-// its own (00007_goals.sql's own comment -- a contribution is its goal's
-// currency by construction), so the row this insert returns has nothing to
-// read a currency back from. The port's own doc comment is what makes this
-// safe: "c.Amount's currency must equal the goal's -- the service checks."
+// returned domain.Money: goal_contributions has no currency column of its
+// own (00007_goals.sql -- a contribution is its goal's currency by
+// construction), so nothing comes back to read one from. Safe because the
+// port's own doc comment requires c.Amount's currency to equal the goal's.
 func (r *GoalRepo) AddContribution(ctx context.Context, c domain.GoalContribution) (domain.GoalContribution, error) {
 	row, err := r.q.InsertGoalContribution(ctx, sqlcgen.InsertGoalContributionParams{
 		GoalID:            uuid(c.GoalID),
@@ -187,17 +182,15 @@ func (r *GoalRepo) AddContribution(ctx context.Context, c domain.GoalContributio
 }
 
 // DeleteContribution removes one row and, when it was a budget_rollover,
-// clears that month's rolled_over_at/rollover_goal_id on budgets in the same
-// transaction -- GoalRepository.DeleteContribution's own doc comment: leaving
-// the stamp would strand the household with money gone from the goal, a
-// month still claiming it rolled over, and a 409 on every retry.
+// clears that month's rolled_over_at/rollover_goal_id in the same
+// transaction: leaving the stamp would strand the household with money gone
+// from the goal, a month still claiming it rolled over, and a 409 on every
+// retry.
 //
-// The stamp-clearing branch below cannot be exercised by any test in this
-// package: no budget_rollover contribution can exist until Task 5's
-// BudgetRepo.RollOverToGoal writes one (today it is a fail-loud stub, see
-// budget_repo.go). It is implemented here, correctly, so the port is whole;
-// Task 5's own round-trip test
-// (TestRollOverThenDeleteThenRollOverAgainSucceeds) is what proves it.
+// The stamp-clearing branch below is exercised by
+// TestRollOverThenDeleteThenRollOverAgainSucceeds (budget_repo_test.go),
+// which deletes a budget_rollover contribution and confirms the stamp
+// clears.
 func (r *GoalRepo) DeleteContribution(ctx context.Context, householdID, goalID, contributionID string) error {
 	return pgx.BeginFunc(ctx, r.pool, func(tx pgx.Tx) error {
 		q := r.q.WithTx(tx)
@@ -275,14 +268,13 @@ func (r *GoalRepo) MonthContributionTotals(ctx context.Context, householdID stri
 	return out, nil
 }
 
-// ProgressByIDs implements usecase.GoalProgressReader -- the one thing
-// Vision needs from Goals. It deliberately returns no entry for an id it did
-// not find, rather than an error: a measure whose goal was deleted renders
-// as a label with no figure, and making that an error would turn an
-// ordinary page render into a failure. GoalProgressByIDs' own SQL comment
-// explains the household scoping and why archived_at is not filtered.
-// Percent is domain.GoalProgressPercent's own capped figure, the same one
-// GoalService.List puts on a goal card -- never a second formula.
+// ProgressByIDs implements usecase.GoalProgressReader, the one thing Vision
+// needs from Goals. A goal id not found gets no entry, not an error: a
+// deleted goal's measure renders as a label with no figure, not a broken
+// page. GoalProgressByIDs' own SQL comment covers the household scoping and
+// why archived_at isn't filtered. Percent is domain.GoalProgressPercent's
+// own capped figure -- the same one GoalService.List uses, never a second
+// formula.
 func (r *GoalRepo) ProgressByIDs(ctx context.Context, householdID string, goalIDs []string) (map[string]usecase.GoalProgress, error) {
 	if len(goalIDs) == 0 {
 		return map[string]usecase.GoalProgress{}, nil
@@ -331,10 +323,10 @@ func clampContributionLimit(limit int) int {
 
 // goalMoney builds a domain.Money from a goal's own currency column rather
 // than a Money literal, so a goal never leaves this adapter without its own
-// currency (the brief's own instruction) -- and a currency value this code
-// did not construct (corrupted data, or simply invalid before any ISO-code
-// CHECK exists on goals.currency) is refused here, fail-closed, rather than
-// carried up as a Money the usecase layer would trust.
+// currency. A currency value this code did not construct -- corrupted data,
+// or simply invalid before any ISO-code CHECK exists on goals.currency -- is
+// refused here, fail-closed, rather than carried up as a Money the usecase
+// layer would trust.
 func goalMoney(minor int64, currency string) (domain.Money, error) {
 	m, err := domain.NewMoney(minor, currency)
 	if err != nil {

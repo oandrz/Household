@@ -24,14 +24,14 @@ func at(sec int) time.Time { return time.Date(2026, 9, 5, 9, 0, sec, 0, time.UTC
 
 // newAgreementRepo opens a fresh database (one container per test, this
 // package's convention), one household, and one "Money" section created
-// THROUGH the repository at at(0). It returns the *postgres.DB as well as the
-// repository because these tests seed proposals, agreements and signatures
-// with raw SQL: the methods that write them are Task 6's.
+// THROUGH the repository at at(0). It returns the *postgres.DB as well as
+// the repository because these tests seed proposals, agreements and
+// signatures with raw SQL: the repository's own write methods can't
+// produce every status a test needs directly.
 //
-// openTestDB is schema_test.go:1029 and insertTestHousehold is
-// schema_test.go:1018; insertTestMembership (transaction_repo_test.go:38)
-// returns an OWNER's membership id, which is what every signing assertion
-// below depends on.
+// openTestDB and insertTestHousehold are in schema_test.go;
+// insertTestMembership (transaction_repo_test.go) returns an OWNER's
+// membership id, which is what every signing assertion below depends on.
 func newAgreementRepo(t *testing.T) (*postgres.AgreementRepo, *postgres.DB, string, string) {
 	t.Helper()
 	db := openTestDB(t)
@@ -133,12 +133,12 @@ func TestAgreementDocumentOrdersOpenByCreatedAtAndAcceptedByResolvedAt(t *testin
 	}
 }
 
-// Withdrawn proposals are excluded IN SQL and a removed agreement leaves the
-// live document while keeping its row (decision 9) -- but Proposal still
-// answers for the withdrawn one, which is the whole reason that method
-// exists. The signature assertions are here because this is the only place
-// the LEFT JOIN + array_agg is read: without the FILTER clause an unsigned
-// proposal comes back holding one NULL rather than nothing.
+// Withdrawn proposals are excluded IN SQL, and a removed agreement leaves
+// the live document while keeping its row -- but Proposal still answers
+// for the withdrawn one, which is the whole reason that method exists. The
+// signature assertions are here because this is the only place the LEFT
+// JOIN + array_agg is read: without the FILTER clause an unsigned proposal
+// comes back holding one NULL rather than nothing.
 func TestAgreementDocumentExcludesWithdrawnProposalsAndRemovedAgreements(t *testing.T) {
 	ctx := context.Background()
 	repo, db, h, sec := newAgreementRepo(t)
@@ -182,7 +182,8 @@ func TestAgreementDocumentExcludesWithdrawnProposalsAndRemovedAgreements(t *test
 	}
 }
 
-// Decision 19: the collision is named, not the generic ErrAlreadyExists. The
+// The collision is named (ErrAgreementSectionNameTaken), not the generic
+// ErrAlreadyExists, so the UI can say "you already have that section." The
 // second leg goes round Go entirely, pinning the const to the migration's
 // real constraint name rather than to what this package believes it is.
 func TestCreateSectionTwiceIsAgreementSectionNameTaken(t *testing.T) {
@@ -205,11 +206,12 @@ func TestCreateSectionTwiceIsAgreementSectionNameTaken(t *testing.T) {
 	}
 }
 
-// Decision 17's starter set: four names, one transaction, a second call a
-// no-op, and the read-back proving all four landed rather than two of four.
-// This household has no proposals or agreements, so it is also where the
-// port's "every slice non-nil" is asserted -- the service serialises these
-// onto the wire, and Go decodes null and [] identically.
+// The starter set is four fixed section names, seeded in one transaction;
+// a second call is a no-op, and the read-back proves all four landed
+// rather than two of four. This household has no proposals or agreements,
+// so it is also where the port's "every slice non-nil" is asserted -- the
+// service serialises these onto the wire, and Go decodes null and []
+// identically.
 func TestCreateSectionsIsIdempotentAndEverySliceIsNonNil(t *testing.T) {
 	ctx := context.Background()
 	repo, _, h, _ := newAgreementRepo(t) // "Money" already exists, created at at(0)
@@ -258,14 +260,14 @@ func TestCreateSectionsIsIdempotentAndEverySliceIsNonNil(t *testing.T) {
 	}
 }
 
-// Proposal is the one method in this task that takes an id scoped to
-// something other than the household itself (a proposal id, not a
-// household id) -- exactly the shape that leaks across households if the
-// WHERE clause is ever wrong. TestGetHidesABillFromAnotherHousehold
-// (bill_repo_test.go:599) is the same test for BillRepository.Get; this is
-// its AgreementRepo counterpart. A row belonging to another household must
-// be indistinguishable from one that does not exist, so the answer is
-// ErrNotFound, never a different sentinel and never the row itself.
+// Proposal is the one method here that takes an id scoped to something
+// other than the household itself (a proposal id, not a household id) --
+// exactly the shape that leaks across households if the WHERE clause is
+// ever wrong. TestGetHidesABillFromAnotherHousehold is the same test for
+// BillRepository.Get; this is its AgreementRepo counterpart. A row
+// belonging to another household must be indistinguishable from one that
+// does not exist, so the answer is ErrNotFound, never a different
+// sentinel and never the row itself.
 func TestProposalHidesAnotherHouseholdsProposal(t *testing.T) {
 	ctx := context.Background()
 	repo, db, mine, _ := newAgreementRepo(t)

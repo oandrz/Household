@@ -37,12 +37,11 @@ type ClaimKnockedInviteRow struct {
 }
 
 // The guard and the read in one statement: it stamps the invite accepted
-// only if it is a telegram invite, unaccepted, unexpired, and somebody has
-// knocked -- and returns everything the rest of InviteRepo.Admit's
-// transaction needs, so no separate read can see a different row than the
-// one this statement just claimed. Zero rows means one of those five
-// conditions failed; the caller (InviteRepo.Admit) tells them apart with
-// one more read, as Delete already does with InviteAcceptedInHousehold.
+// only if it's a telegram invite, unaccepted, unexpired, and knocked, and
+// returns everything InviteRepo.Admit's transaction needs, so no separate
+// read can see a different row. Zero rows means one of those conditions
+// failed; the caller tells them apart with one more read, as Delete does
+// with InviteAcceptedInHousehold.
 func (q *Queries) ClaimKnockedInvite(ctx context.Context, arg ClaimKnockedInviteParams) (ClaimKnockedInviteRow, error) {
 	row := q.db.QueryRow(ctx, claimKnockedInvite, arg.ID, arg.HouseholdID, arg.AcceptedAt)
 	var i ClaimKnockedInviteRow
@@ -758,11 +757,10 @@ type InviteChannelForReplaceParams struct {
 // tell "this invite has no email channel" apart from "no such invite in
 // this household" -- the same fallback-read shape
 // InviteAcceptedInHousehold gives DeleteUnacceptedInvite. accepted_at IS
-// NULL is part of the WHERE, not read back as its own column: a row that
-// fails to match here is either in another household, unknown, or already
-// accepted, and InviteRepo.ReplaceToken answers domain.ErrNotFound for all
-// three -- an accepted invite is not something "get a new link" acts on,
-// the same way it is not something Delete acts on.
+// NULL sits in the WHERE, not returned as a column: a non-match here means
+// another household, unknown, or already accepted, and
+// InviteRepo.ReplaceToken answers domain.ErrNotFound for all three, the
+// same as Delete.
 func (q *Queries) InviteChannelForReplace(ctx context.Context, arg InviteChannelForReplaceParams) (string, error) {
 	row := q.db.QueryRow(ctx, inviteChannelForReplace, arg.ID, arg.HouseholdID)
 	var channel string
@@ -948,12 +946,11 @@ SELECT id, household_id, key, name, visibility, position, is_builtin, required_c
 FROM spaces WHERE household_id = $1 ORDER BY position, key
 `
 
-// ORDER BY position, key: position alone has no tiebreaker, so two spaces
-// sharing a position (nothing stops that -- positions are assigned by
-// NextSpacePosition, not a unique constraint) sorted nondeterministically,
-// and the sidebar's order could change from one request to the next with no
-// write in between. key is unique per household, so it always breaks the tie
-// the same way.
+// ORDER BY position, key: position alone has no tiebreaker -- two spaces can
+// share one (NextSpacePosition assigns it, not a unique constraint) -- so
+// without key the sidebar's order could shift between requests with no
+// write in between. key is unique per household, so it always breaks the
+// tie the same way.
 func (q *Queries) ListSpaces(ctx context.Context, householdID pgtype.UUID) ([]Space, error) {
 	rows, err := q.db.Query(ctx, listSpaces, householdID)
 	if err != nil {
@@ -987,23 +984,21 @@ const lockHouseholdMemberships = `-- name: LockHouseholdMemberships :one
 SELECT id FROM households WHERE id = $1 FOR NO KEY UPDATE
 `
 
-// LockHouseholdMemberships takes a row lock on the household so that two
-// membership changes in it run one after the other. It returns the id only
-// because a query must return something; the lock is the point. Callers take
-// it first inside a transaction, THEN list the memberships and check them --
-// see MembershipRepository.UpdateWithCheck. Because the list is a new
-// statement run after the lock is held, it sees whatever the previous writer
-// committed; the second of two racing owners checks the first one's result.
+// LockHouseholdMemberships takes a row lock on the household so two
+// membership changes run one after the other. It returns the id only
+// because a query must return something -- the lock is the point. Callers
+// lock first, then list and check the memberships as a new statement (see
+// MembershipRepository.UpdateWithCheck), so a racing writer always sees
+// what the first one committed.
 //
-// Why the household row and not the membership rows: one row is one simple
-// queue for "anything changing who is in this household", and the list that
-// follows needs no reasoning about how Postgres re-reads a locked row.
-//
-// Why FOR NO KEY UPDATE and not FOR UPDATE: every insert into a table that
-// references households (transactions, bills, ...) takes FOR KEY SHARE on the
-// household row, which FOR UPDATE would block and FOR NO KEY UPDATE does not.
-// Two membership changes still exclude each other, because FOR NO KEY UPDATE
-// conflicts with itself -- which is all this lock is for.
+// It locks the household row, not the membership rows: one row is one
+// simple queue for anything changing who is in this household, and the
+// list that follows needs no reasoning about how Postgres re-reads a
+// locked row. FOR NO KEY UPDATE, not FOR UPDATE, because every insert into
+// a table referencing households (transactions, bills, ...) takes FOR KEY
+// SHARE on it, which FOR UPDATE would block; FOR NO KEY UPDATE still
+// excludes two membership changes from each other, since it conflicts with
+// itself.
 func (q *Queries) LockHouseholdMemberships(ctx context.Context, id pgtype.UUID) (pgtype.UUID, error) {
 	row := q.db.QueryRow(ctx, lockHouseholdMemberships, id)
 	err := row.Scan(&id)
@@ -1038,15 +1033,13 @@ DELETE FROM login_attempts WHERE at < $1
 `
 
 // PruneLoginAttempts deletes attempts older than the cutoff, including the
-// NULL-household_id rows an unknown-address sign-in attempt records.
-// ClearFailures cannot reach those: it is scoped WHERE household_id = $1, and
-// household_id = $1 never matches NULL. So the rows a member generates are the
-// only ones anything ever deleted, and the rows a stranger generates were
-// deleted by nothing at all.
+// NULL-household_id rows an unknown-address attempt records. ClearFailures
+// can't reach those -- it is scoped WHERE household_id = $1, which never
+// matches NULL -- so this is the only place those rows are ever deleted.
 //
-// The caller is responsible for a cutoff well outside
-// domain.LockoutPolicy.Window. Deleting a row still inside that window would
-// clear a live lockout -- a security regression dressed as a cleanup.
+// The caller must pick a cutoff well outside domain.LockoutPolicy.Window:
+// deleting a row still inside it would clear a live lockout, a security
+// regression dressed as cleanup.
 func (q *Queries) PruneLoginAttempts(ctx context.Context, at pgtype.Timestamptz) (int64, error) {
 	result, err := q.db.Exec(ctx, pruneLoginAttempts, at)
 	if err != nil {
@@ -1074,10 +1067,10 @@ type RecordInviteKnockParams struct {
 	KnockedAt         pgtype.Timestamptz
 }
 
-// One guarded UPDATE is the whole of "one knock per link" (spec decision
-// 2): knocked_at IS NULL is what makes the second tap -- and two taps at
-// the same instant -- lose. Every other condition is here for the same
-// reason it is in the SQL and not in Go: a caller cannot forget it.
+// One guarded UPDATE is the whole of "one knock per link": knocked_at IS
+// NULL is what makes the second tap -- and two taps at the same instant --
+// lose. Every other condition is here for the same reason it is in the SQL
+// and not in Go: a caller cannot forget it.
 func (q *Queries) RecordInviteKnock(ctx context.Context, arg RecordInviteKnockParams) (pgtype.UUID, error) {
 	row := q.db.QueryRow(ctx, recordInviteKnock,
 		arg.TokenHash,
@@ -1135,23 +1128,20 @@ type ReplaceInviteTokenParams struct {
 // One statement replaces the token and clears the knock together, so there
 // is never an instant where a fresh link carries a stale knock. It returns
 // the chat that had knocked, if any, so the caller can tell them their link
-// is dead -- from their side it simply stopped working. The subselect reads
-// the row as it stood when this statement began (READ COMMITTED's own
-// snapshot rule), before the UPDATE's own SET clears it, which
-// TestReplaceInviteTokenReturnsThePreviousKnockChatID proves against a real
-// database rather than trusting as documentation. No expires_at condition,
-// deliberately: an expired link is the main reason an owner asks for a new
-// one, so ReplaceToken must still work on it.
+// died. The subselect reads the row as it stood when this statement began
+// (READ COMMITTED's snapshot rule), before the UPDATE's own SET clears it --
+// proven against a real database by
+// TestReplaceInviteTokenReturnsThePreviousKnockChatID, not just documented.
+// No expires_at condition, deliberately: an expired link is the main reason
+// an owner asks for a new one, so this must still work on it.
 //
-// The UPDATE names its own target "target" and the subselect its own copy
-// "prior": without both aliases sqlc's analyzer (not real Postgres -- the
-// unaliased form runs fine by hand in psql) reports the outer WHERE's `id`
-// as ambiguous. COALESCE(..., 0) turns "nobody had knocked" into 0 inside
-// the query itself, matching InviteRepository.ReplaceToken's contract
-// exactly -- without it sqlc infers this column as a plain, non-nullable
-// int64, and scanning a genuine SQL NULL into that type fails at runtime
-// the first time an owner asks for a new link on an invite nobody has
-// tapped yet.
+// The UPDATE names its target "target" and the subselect its copy "prior":
+// without both aliases sqlc's analyzer (not real Postgres) reports the
+// outer WHERE's `id` as ambiguous. COALESCE(..., 0) turns "nobody had
+// knocked" into 0 inside the query, matching InviteRepository.ReplaceToken's
+// contract -- without it sqlc infers a non-nullable int64, and scanning a
+// genuine NULL into that fails at runtime the first time an owner asks for
+// a link nobody has tapped yet.
 func (q *Queries) ReplaceInviteToken(ctx context.Context, arg ReplaceInviteTokenParams) (int64, error) {
 	row := q.db.QueryRow(ctx, replaceInviteToken,
 		arg.ID,

@@ -41,12 +41,10 @@ func TestSignupRepoRoundTrip(t *testing.T) {
 }
 
 // TestSignupRepoCreateConsumedWritesAnInertCounterRow exercises
-// CreateConsumedSignup for real, against a real Postgres instance -- nothing
-// else in this package or in usecase's tests ever executes that SQL, since
-// signupDouble only simulates it. It confirms the fix-round property the
-// query exists for: the row is written already consumed, so it counts toward
-// CountForEmailSince (what fixes the rate-limit finding) but can never
-// provision anything.
+// CreateConsumedSignup against a real Postgres instance -- signupDouble only
+// simulates it, so nothing else runs this SQL. It confirms the row is
+// written already consumed: it counts toward CountForEmailSince (for rate
+// limiting) but can never provision anything.
 func TestSignupRepoCreateConsumedWritesAnInertCounterRow(t *testing.T) {
 	db := openTestDB(t)
 	repo := postgres.NewSignupRepo(db)
@@ -237,16 +235,15 @@ func TestSignupRepoProvisionCreatesTheWholeHousehold(t *testing.T) {
 	})
 }
 
-// This is the test the whole transaction exists for. A partial provision leaves
-// a users row occupying users.email's unique index with no membership under it,
-// which makes that address permanently unable to sign up again -- no retry
-// could ever create a second user with it.
+// This is the test the whole transaction exists for: a partial provision
+// would leave a users row occupying users.email's unique index with no
+// membership under it, permanently blocking that address from signing up
+// again.
 //
-// The failure is forced with a real constraint rather than a mock: an owner
-// holding fewer than every capability violates the memberships
-// owners_hold_all_capabilities CHECK, which fires *after* the household and the
-// user have already been inserted in the same transaction. That is exactly the
-// mid-transaction position a partial write would occupy.
+// The failure is forced with a real constraint, not a mock: an owner
+// holding fewer than every capability violates
+// owners_hold_all_capabilities, which fires after the household and user
+// rows are already inserted -- exactly where a partial write would land.
 func TestSignupRepoProvisionIsAllOrNothing(t *testing.T) {
 	db := openTestDB(t)
 	pool := db.Pool()
@@ -331,10 +328,9 @@ func TestSignupRepoProvisionRefusesAnExpiredSignup(t *testing.T) {
 	}
 }
 
-// Provision binds the chat inside its own transaction, from the row it is
-// claiming -- not from anything a caller passed in. A Telegram sign-up that
-// provisioned a household but left the chat unbound would be an account its
-// owner can never sign into again.
+// Provision binds the chat inside its own transaction, from the row it's
+// claiming, never from caller input -- a household provisioned with its
+// chat left unbound would be an account its owner can never sign into again.
 func TestSignupRepoProvisionBindsTheChatFromTheClaimedRow(t *testing.T) {
 	db := openTestDB(t)
 	pool := db.Pool()
@@ -411,11 +407,10 @@ func TestSignupRepoProvisionBindsNoChatForAnEmailSignup(t *testing.T) {
 	}
 }
 
-// The orphan test: if the binding insert fails, nothing survives. A
-// pre-existing row on the same chat_id makes the telegram_accounts_chat_id_key
-// unique constraint fire inside the transaction, after the household, the
-// user and the membership have already been inserted -- exactly the position
-// a partial write would occupy.
+// The orphan test: if the binding insert fails, nothing survives. A row
+// already on the same chat_id fires telegram_accounts_chat_id_key inside
+// the transaction, after the household, user and membership are already
+// inserted -- exactly where a partial write would land.
 func TestSignupRepoProvisionRollsBackWhenTheChatIsAlreadyBound(t *testing.T) {
 	db := openTestDB(t)
 	pool := db.Pool()
@@ -453,12 +448,11 @@ func TestSignupRepoProvisionRollsBackWhenTheChatIsAlreadyBound(t *testing.T) {
 		t.Fatal("Provision succeeded with an already-bound chat, want an error")
 	}
 
-	// The rollback properties come first and are checked unconditionally on
-	// any error shape: this is what the test's name promises, and what the
-	// task's mutation check (moving the bind outside the transaction) must
-	// break. A more specific assertion on the error text below must never
-	// gate these -- gating them would let a mutation that changes the error's
-	// shape but not its rollback behaviour hide a real regression here.
+	// The rollback checks come first and run unconditionally on any error
+	// shape -- what the test's name promises, and what a mutation moving the
+	// bind outside the transaction must break. The error-text assertion below
+	// must never gate them: gating would let a mutation that changes the
+	// error's shape, but not the rollback, hide a real regression.
 	t.Run("no household survived", func(t *testing.T) {
 		var count int
 		if err := pool.QueryRow(ctx,

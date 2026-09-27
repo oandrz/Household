@@ -9,13 +9,12 @@ import (
 )
 
 // TestFailuresSinceForEmailIsolatesByAddress proves
-// LoginAttemptRepository.FailuresSinceForEmail, the one method whose doc
-// comment makes a security promise: it must return only the failures for the
-// requested email, only the ones inside the window, and only the unsuccessful
-// ones -- the same three axes TestLoginAttemptsRespectTheWindow already
-// covers for FailuresSince, but here scoped by address rather than by
-// household, since this is the path sign-in uses for an email that matches
-// no user (so a stranger's countdown looks identical to a member's).
+// LoginAttemptRepository.FailuresSinceForEmail's security promise: it
+// returns only failures for the requested email, inside the window, and
+// unsuccessful -- the same three axes TestLoginAttemptsRespectTheWindow
+// covers for FailuresSince, but scoped by address rather than household,
+// since this is the path sign-in uses when the email matches no user, so a
+// stranger's countdown looks identical to a member's.
 func TestFailuresSinceForEmailIsolatesByAddress(t *testing.T) {
 	db := openTestDB(t)
 	ctx := context.Background()

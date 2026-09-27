@@ -5,11 +5,10 @@ import (
 	"unicode/utf8"
 )
 
-// initialOf used to be strings.ToUpper(name[:1]) -- a *byte* slice. For any
-// name starting outside ASCII that takes the first byte of a multi-byte UTF-8
-// rune, producing an invalid fragment that renders as the replacement
-// character. There is no profile-edit endpoint, so the wrong initial was
-// permanent. Two known adults never hit it; a public sign-up form does.
+// Don't slice name[:1] for the initial -- that takes the first *byte*, not
+// rune, corrupting any name starting outside ASCII into the replacement
+// character. There's no profile-edit endpoint to fix it, and a public
+// sign-up form will hit this where the two known adults never did.
 func TestInitialOfHandlesNonASCIINames(t *testing.T) {
 	for _, tc := range []struct {
 		name        string
@@ -39,8 +38,6 @@ func TestInitialOfHandlesNonASCIINames(t *testing.T) {
 	}
 }
 
-// The fragment the old implementation produced, spelled out, so this test
-// documents the defect rather than only the fix.
 func TestInitialOfNeverReturnsInvalidUTF8(t *testing.T) {
 	for _, name := range []string{"Émile", "Дмитрий", "李明", "🙂nonymous"} {
 		got := initialOf(name)

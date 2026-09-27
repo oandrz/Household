@@ -12,19 +12,15 @@ import (
 )
 
 // jul2026 is this file's own copy of the usecase test package's month
-// helper -- that package is a different package this one cannot import, so
-// the convention (first of the calendar month, midnight UTC) is repeated
-// here rather than shared.
+// helper: that package can't be imported from here, so the convention
+// (first of the calendar month, midnight UTC) is repeated rather than shared.
 func jul2026() time.Time { return time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC) }
 
 // newRetroRepo opens a fresh test database and one household, the same way
-// every other *_repo_test.go in this package does through openTestDB and
-// insertTestHousehold. It also returns the *postgres.DB itself: a literal
-// `newRetroRepo(t) (repo, householdID)` cannot give seedSecondHousehold
-// below anywhere to find the same database without global state keyed by
-// *testing.T, which this package has no precedent for and which "do not
-// invent a second seeding path" argues against just as much as a second
-// SQL statement would.
+// every other *_repo_test.go in this package does (openTestDB,
+// insertTestHousehold). It also returns the *postgres.DB itself, since
+// seedSecondHousehold below needs the same database and this package has
+// no precedent for global state keyed by *testing.T.
 func newRetroRepo(t *testing.T) (*postgres.RetroRepo, *postgres.DB, string) {
 	t.Helper()
 	db := openTestDB(t)
@@ -34,9 +30,8 @@ func newRetroRepo(t *testing.T) (*postgres.RetroRepo, *postgres.DB, string) {
 
 // seedSecondHousehold inserts a second household into the SAME database a
 // prior newRetroRepo(t) call opened, using the one seeding helper this
-// package already has for the job (insertTestHousehold) -- the same helper
-// TestGoalGetFromAnotherHouseholdIsErrNotFound and its siblings already use
-// for "another household" fixtures.
+// package already has (insertTestHousehold) -- the same helper
+// TestGoalGetFromAnotherHouseholdIsErrNotFound already uses.
 func seedSecondHousehold(t *testing.T, db *postgres.DB) string {
 	t.Helper()
 	return insertTestHousehold(t, db)
@@ -79,13 +74,12 @@ func TestRetroUpdateRefusesAStaleVersionAndWritesNothing(t *testing.T) {
 	}
 }
 
-// Update's zero-row UPDATE has two possible causes, and the caller needs to
-// know which: this test is the "the retro is simply gone" half.
-// TestRetroUpdateRefusesAStaleVersionAndWritesNothing above is the "the
-// version moved" half. Both start from a zero-row UpdateRetro; only the
-// ByMonth lookup Update runs afterward tells them apart, and this test is
-// what proves that lookup actually distinguishes them rather than always
-// guessing ErrRetroChanged.
+// Update's zero-row UPDATE has two possible causes: this is the "retro is
+// simply gone" half, and TestRetroUpdateRefusesAStaleVersionAndWritesNothing
+// is the "version moved" half. Both start from a zero-row UpdateRetro; only
+// the ByMonth lookup afterward tells them apart, and this test proves that
+// lookup actually distinguishes them instead of always guessing
+// ErrRetroChanged.
 func TestRetroUpdateOnADeletedRetroIsNotFound(t *testing.T) {
 	ctx := context.Background()
 	repo, _, householdID := newRetroRepo(t)
@@ -157,13 +151,12 @@ func TestRetroByMonthIsScopedToItsHousehold(t *testing.T) {
 	}
 }
 
-// RetroRepository.Create's own contract: the caller normalises the month
-// before calling, and the repository stores and returns it exactly as the
-// first-of-month, midnight-UTC value a later caller (RetroService.List's
-// month.Equal comparisons) is entitled to rely on without re-normalising.
-// This is the one place that proves the database round-trip actually holds
-// that promise, rather than merely returning a value close enough that
-// startOfMonth would paper over a drift.
+// RetroRepository.Create's contract: the caller normalises the month
+// first, and the repository stores and returns it exactly as that
+// first-of-month, midnight-UTC value -- RetroService.List's month.Equal
+// comparisons rely on that without re-normalising. This is the one test
+// that proves the round-trip actually holds the promise, not just a value
+// close enough that startOfMonth would paper over.
 func TestRetroCreateRoundTripsMonthAsNormalisedUTC(t *testing.T) {
 	ctx := context.Background()
 	repo, _, householdID := newRetroRepo(t)
@@ -180,10 +173,9 @@ func TestRetroCreateRoundTripsMonthAsNormalisedUTC(t *testing.T) {
 	}
 }
 
-// List returns every retro newest month first, each carrying its own action
-// count -- List's own doc comment on usecase.RetroRepository. Quote is left
-// for RetroService.List to overwrite (RetroSummary's own doc comment), so
-// this test asserts nothing about it.
+// List returns every retro newest month first, each carrying its own
+// action count (see usecase.RetroRepository.List). Quote is left for
+// RetroService.List to overwrite, so this test asserts nothing about it.
 func TestRetroListOrdersNewestMonthFirstWithActionCounts(t *testing.T) {
 	ctx := context.Background()
 	repo, _, householdID := newRetroRepo(t)
@@ -215,11 +207,10 @@ func TestRetroListOrdersNewestMonthFirstWithActionCounts(t *testing.T) {
 }
 
 // ActionCount and OpenActionCount must disagree the moment even one action
-// is ticked -- this is the gap Overview's "Next retro" card shipped with
-// (task-15-report.md): the card read ActionCount, so a fully-ticked retro
-// still claimed outstanding work on the home page. Three actions, two
-// ticked, is enough to prove the open subquery filters on done_at rather
-// than repeating the total's count(*).
+// is ticked. Don't feed Overview's "Next retro" card ActionCount: a
+// fully-ticked retro would still claim outstanding work on the home page.
+// Three actions, two ticked, is enough to prove the open subquery filters
+// on done_at rather than repeating the total's count(*).
 func TestRetroListReportsOpenActionCountSeparatelyFromTheTotal(t *testing.T) {
 	ctx := context.Background()
 	retros, db, householdID := newRetroRepo(t)
@@ -259,14 +250,13 @@ func TestRetroListReportsOpenActionCountSeparatelyFromTheTotal(t *testing.T) {
 	}
 }
 
-// Complete is idempotent: finishing an already finished retro keeps the
-// FIRST completion timestamp, the same COALESCE shape GoalRepository's
-// SetArchived already uses, rather than moving it forward to whatever
-// timestamp the second call happens to carry. Both calls are checked
-// against the actual `at` each one passed -- not just against each other --
-// because comparing only second against first would pass just as happily
-// against coalesce(completed_at, now()) silently ignoring the caller's `at`
-// altogether, which is not what the port promises.
+// Complete is idempotent: finishing an already-finished retro keeps the
+// FIRST completion timestamp (the same COALESCE shape GoalRepository's
+// SetArchived uses), not whatever the second call happens to carry. Both
+// calls are checked against the actual `at` each passed, not just against
+// each other -- comparing only second against first would pass just as
+// happily against coalesce(completed_at, now()) silently ignoring the
+// caller's `at`, which the port doesn't promise.
 func TestRetroCompleteTwiceKeepsTheFirstTimestamp(t *testing.T) {
 	ctx := context.Background()
 	repo, _, householdID := newRetroRepo(t)
@@ -296,11 +286,10 @@ func TestRetroCompleteTwiceKeepsTheFirstTimestamp(t *testing.T) {
 }
 
 // A version outside int32's range must never be silently truncated into a
-// value that happens to match the real one. retros.version is a Postgres
-// `integer`, and int32(4294967297) == 1 -- so without versionParam's guard,
-// this exact draft (created at version 1, never saved by anyone) would be
-// overwritten by a client sending a version number nobody legitimately
-// arrived at.
+// value that happens to match the real one: retros.version is a Postgres
+// `integer`, and int32(4294967297) == 1, so without versionParam's guard
+// this draft (created at version 1) would be overwritten by a version
+// number nobody legitimately arrived at.
 func TestRetroUpdateWithOutOfInt32RangeVersionIsRefused(t *testing.T) {
 	ctx := context.Background()
 	repo, _, householdID := newRetroRepo(t)
@@ -326,11 +315,10 @@ func TestRetroUpdateWithOutOfInt32RangeVersionIsRefused(t *testing.T) {
 	}
 }
 
-// Another household must not be able to edit this one's retro. An id alone
-// is not enough proof of ownership -- UpdateRetro's WHERE also requires
-// household_id, and this is the test that would catch its absence: without
-// that clause, any household holding (or guessing) a retro id could
-// overwrite another household's month.
+// Another household must not be able to edit this one's retro. An id
+// alone is not proof of ownership -- UpdateRetro's WHERE also requires
+// household_id; without that clause, any household holding or guessing a
+// retro id could overwrite another household's month.
 func TestRetroUpdateIsScopedToItsHousehold(t *testing.T) {
 	ctx := context.Background()
 	repo, db, householdID := newRetroRepo(t)
@@ -381,11 +369,9 @@ func TestRetroCompleteIsScopedToItsHousehold(t *testing.T) {
 	}
 }
 
-// Another household must not be able to delete this one's draft. This is
-// the one of the three household-scoping tests mutation-checked by hand
-// (task-5-report.md): removing household_id from DeleteDraftRetro's WHERE
-// clause turns this red, because the delete then succeeds instead of
-// reporting ErrNotFound.
+// Another household must not be able to delete this one's draft. Removing
+// household_id from DeleteDraftRetro's WHERE turns this red, since the
+// delete then succeeds instead of reporting ErrNotFound.
 func TestRetroDeleteDraftIsScopedToItsHousehold(t *testing.T) {
 	ctx := context.Background()
 	repo, db, householdID := newRetroRepo(t)

@@ -71,11 +71,10 @@ func TestTelegramLinkCountsOnlyThisChatsRedemptions(t *testing.T) {
 }
 
 // TestTelegramLinkRepoPruneLeavesLiveRows mirrors
-// TestSignupRepoPruneLeavesLiveRows exactly, for the same table shape: one
-// row consumed (and therefore prunable once old), one row left live (never
-// prunable no matter how old, because it might still be redeemed). Both are
-// aged past the cutoff by the same direct UPDATE the signups test uses, so
-// only consumed-ness decides the outcome, not age alone.
+// TestSignupRepoPruneLeavesLiveRows: one row consumed (prunable once old),
+// one left live (never prunable, however old, since it might still be
+// redeemed). Both are aged past the cutoff the same way, so only
+// consumed-ness decides the outcome.
 func TestTelegramLinkRepoPruneLeavesLiveRows(t *testing.T) {
 	ctx := context.Background()
 	db := openTestDB(t)
@@ -137,11 +136,9 @@ func TestTelegramAccountByChatIDIsNotFoundWhenUnbound(t *testing.T) {
 	}
 }
 
-// TestTelegramAccountByChatIDResolvesTheBoundUser exercises the success path:
-// TelegramAccountRepository deliberately has no Create (the binding is written
-// inside SignupRepository.Provision's transaction, per its port doc comment),
-// so the binding row is inserted directly, the way telegram_schema_test.go
-// exercises the schema's own constraints.
+// TestTelegramAccountByChatIDResolvesTheBoundUser exercises the success
+// path. It inserts the binding row by raw SQL, like
+// telegram_schema_test.go does, so it tests ByChatID on its own.
 func TestTelegramAccountByChatIDResolvesTheBoundUser(t *testing.T) {
 	ctx := context.Background()
 	db := openTestDB(t)

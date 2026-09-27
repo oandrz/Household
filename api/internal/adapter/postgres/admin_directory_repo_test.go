@@ -109,11 +109,10 @@ func TestSearchHouseholdsMatchesEveryFieldCaseInsensitively(t *testing.T) {
 	f := newDirectoryFixture(t)
 	ctx := context.Background()
 	now := time.Now()
-	// The household's own name deliberately does not contain "christ" --
-	// "Andreas & Christine" would, since "Christine" contains it as a
-	// substring, which would make h.name ILIKE '%christ%' true and (per
-	// HouseholdListing.Match's own doc comment) suppress the
-	// member match this case exists to prove.
+	// The household's own name deliberately excludes "christ": "Andreas &
+	// Christine" would match h.name ILIKE '%christ%' and, per
+	// HouseholdListing.Match's doc comment, suppress the member match this
+	// case exists to prove.
 	h := f.household(t, "Andreas & Kris", "Oentoro")
 	f.member(t, h.ID, "christine@hearth.family", "Christine", domain.RoleOwner, domain.AllCapabilities())
 	other := f.household(t, "Tan", "Tan")
@@ -128,10 +127,9 @@ func TestSearchHouseholdsMatchesEveryFieldCaseInsensitively(t *testing.T) {
 		{"OENTORO", h.ID, ""},
 		{"CHRISTINE@", h.ID, "Christine"},
 		{"christ", h.ID, "Christine"},
-		// "ris" hits both: the household's own name ("Kris") and a member's
-		// display name ("Christine"). The household match must win -- Match
-		// stays nil -- proving HouseholdMatched suppresses a member match
-		// rather than the two being reported together.
+		// "ris" hits both the household's own name ("Kris") and a member's
+		// ("Christine"). The household match must win -- Match stays nil --
+		// proving HouseholdMatched suppresses the member match, not reports both.
 		{"ris", h.ID, ""},
 		{"wei@example", other.ID, "Wei"},
 	}

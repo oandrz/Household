@@ -10,10 +10,9 @@ import (
 )
 
 // The role is the guard that actually holds: a mistake in the adapter's SQL
-// still cannot write, because Postgres refuses on the other side of the wire.
-// Everything else this feature does is defence in depth on top of this, so
-// this is the test that must never be allowed to go green for the wrong
-// reason -- see the spec's decision 1.
+// still cannot write, because Postgres refuses on the other side of the
+// wire. Everything else this feature does is defence in depth on top of
+// this -- this test must never go green for the wrong reason.
 func TestReadOnlyRoleCanReadAndCannotWrite(t *testing.T) {
 	adminURL := testsupport.StartPostgres(t)
 	ctx := context.Background()
@@ -42,10 +41,10 @@ func TestReadOnlyRoleCanReadAndCannotWrite(t *testing.T) {
 		if err == nil {
 			t.Fatal("INSERT succeeded as hearth_readonly")
 		}
-		// Assert on WHY it failed. A NOT NULL violation on some column this
-		// INSERT forgot would also be a non-nil error, and this subtest would
-		// then pass whether or not the role can write -- which would also
-		// make Step 6's mutation check meaningless.
+		// Assert on WHY it failed: a NOT NULL violation on a column this
+		// INSERT forgot would also be a non-nil error, making this subtest
+		// pass whether or not the role can write -- and making a mutation
+		// check on the GRANT meaningless.
 		message := err.Error()
 		if !strings.Contains(message, "permission denied") &&
 			!strings.Contains(message, "read-only transaction") {

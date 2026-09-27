@@ -9,11 +9,11 @@ import (
 )
 
 // TestReadingAnUnknownEnumValueIsRefused pins the fail-closed rule for enum
-// columns: a value no writer in this codebase could have stored is refused on
-// read, not carried up as a domain value that a guard or a switch would then
-// misread. No database is involved on purpose -- the CHECK constraints are
-// exactly what stop a real table from producing these rows, so the conversion
-// itself is the unit under test.
+// columns: a value no writer here could have stored is refused on read, not
+// carried up as a domain value a guard or switch would then misread. No
+// database is involved on purpose -- the CHECK constraints are what stop a
+// real table producing these rows, so the conversion itself is the unit
+// under test.
 func TestReadingAnUnknownEnumValueIsRefused(t *testing.T) {
 	cases := []struct {
 		name string

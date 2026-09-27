@@ -32,15 +32,12 @@ WHERE vision_id = $1
 ORDER BY position;
 
 -- CreateVision is the version-0 path: a first save for a household-year.
--- ON CONFLICT DO NOTHING rather than an upsert, so a zero-row result means
--- "someone else created it while this editor was typing" and the repository
--- can answer domain.ErrVisionChanged instead of silently overwriting a whole
--- year of pillars.
---
--- Both parent writes MUST return the post-write version: VisionRepo.Save
--- hands it straight back as the token the next save will send, so a RETURNING
--- list that gave back the version it read would make every subsequent save
--- conflict against itself. Do not trim `version` from either RETURNING.
+-- ON CONFLICT DO NOTHING (not an upsert) so a zero-row result means another
+-- editor created it first, which the repository turns into
+-- domain.ErrVisionChanged. RETURNING must give the post-write version, not
+-- the version read: Save sends it back as the next save's token, so
+-- returning the read version would make every later save conflict with
+-- itself. Don't trim `version` from RETURNING here or in UpdateVision.
 -- name: CreateVision :one
 INSERT INTO visions (household_id, year, theme, description)
 VALUES ($1, $2, $3, $4)
@@ -75,12 +72,12 @@ VALUES ($1, $2, $3, $4, $5, $6);
 INSERT INTO vision_milestones (vision_id, position, year, title, note)
 VALUES ($1, $2, $3, $4, $5);
 
--- CountGoalsInHousehold answers how many of the given goal ids actually belong
--- to this household. VisionRepo.Save compares this against the number of
--- distinct ids it asked about, inside the same transaction as the write --
--- vision_measures' own FK only proves a goal exists somewhere, never that it
--- is this household's. The identical hole CountCategoriesInHousehold closes
--- for budget lines.
+-- CountGoalsInHousehold answers how many of the given goal ids actually
+-- belong to this household. Save compares this against the number of
+-- distinct ids it asked about, in the same transaction as the write -- the
+-- vision_measures FK only proves a goal exists somewhere, not that it is
+-- this household's. CountCategoriesInHousehold closes the same hole for
+-- budget lines.
 -- name: CountGoalsInHousehold :one
 SELECT count(*) FROM goals
 WHERE id = ANY(sqlc.arg(goal_ids)::uuid[]) AND household_id = $1;

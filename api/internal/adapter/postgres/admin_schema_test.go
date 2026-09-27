@@ -40,9 +40,8 @@ func TestPlatformAdminRowsFollowTheirUser(t *testing.T) {
 }
 
 // TestAuditRowsNeedOnlyAnActorAndAnAction proves the defaults on target,
-// detail and ip: a row can be inserted with only an actor and an action, so
-// a future writer that has nothing meaningful for one of these columns is
-// never forced to invent a value just to satisfy a NOT NULL with no default.
+// detail and ip: an insert needs only an actor and an action, so a future
+// writer is never forced to invent a value for a NOT NULL with no default.
 func TestAuditRowsNeedOnlyAnActorAndAnAction(t *testing.T) {
 	ctx := context.Background()
 	pool := openTestDB(t).Pool()

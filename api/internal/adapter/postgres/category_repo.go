@@ -9,17 +9,14 @@ import (
 	"github.com/andreasoentoro/hearth/api/internal/usecase"
 )
 
-// var _ pins CategoryRepo to usecase.CategoryLookup at compile time. Nothing
-// currently constructs a TransactionService with a real *CategoryRepo (that
-// wiring is Task 12's), so without this line a wrong Kind signature here
-// would not surface until then.
+// var _ pins CategoryRepo to usecase.CategoryLookup at compile time, so a
+// wrong Kind signature fails here, next to the repository, rather than at
+// main.go's wiring.
 var _ usecase.CategoryLookup = (*CategoryRepo)(nil)
 
-// seedSize is how many rows SeedCategories inserts. The query is thirteen
-// literal VALUES rows rather than an unnest of arrays -- sqlc's query
-// analyzer rejects the multi-array form of unnest outright, see the query's
-// own comment -- so the number of starter categories is fixed here, not
-// looped over.
+// seedSize is how many rows SeedCategories inserts: thirteen literal VALUES
+// rows, not a loop over an array, because sqlc's query analyzer rejects the
+// multi-array form of unnest (see the query's own comment).
 const seedSize = 13
 
 type CategoryRepo struct{ q *sqlcgen.Queries }
@@ -62,25 +59,22 @@ func (r *CategoryRepo) List(ctx context.Context, householdID string, includeArch
 
 // EnsureSeeded inserts the starter set for a household that has none.
 //
-// CountCategories has no archived_at filter, so "has none" counts archived
-// rows too: a household that archived its whole list still counts as
-// thirteen, and the count check below returns before ever reaching the
-// INSERT. That is what stops this sequential path from rebuilding over an
-// archived list -- not ON CONFLICT, which this path never even reaches. See
-// TestEnsureSeededDoesNotRebuildOverArchivedCategories's own comment.
+// CountCategories counts archived rows too, so a household that archived
+// its whole list already counts as seeded and the INSERT is never reached
+// -- that, not ON CONFLICT, is what stops this sequential path from
+// rebuilding over an archived list (see
+// TestEnsureSeededDoesNotRebuildOverArchivedCategories).
 //
-// ON CONFLICT DO NOTHING on SeedCategories protects the case the count check
-// cannot: two concurrent first requests can both read count == 0 before
-// either has inserted, and both then attempt the same thirteen rows. It is
-// also the only protection left for a caller that reaches SeedCategories
-// directly, bypassing this count entirely --
-// TestSeedCategoriesRespectsTheUniqueKeyEvenWhenEveryRowIsArchived exercises
-// exactly that. Removing the count would still be correct, only slower;
-// removing ON CONFLICT would not.
+// ON CONFLICT DO NOTHING on SeedCategories instead guards the concurrent
+// case: two first requests can both read count == 0 and both attempt the
+// same thirteen rows. It is also the only guard for a caller that reaches
+// SeedCategories directly
+// (TestSeedCategoriesRespectsTheUniqueKeyEvenWhenEveryRowIsArchived).
+// Removing the count would still be correct, only slower; removing ON
+// CONFLICT would not.
 //
-// starter must carry exactly seedSize entries -- in practice always
-// domain.StarterCategories() -- because SeedCategories has no room to insert
-// any other number.
+// starter must carry exactly seedSize entries -- SeedCategories has no room
+// to insert any other number.
 func (r *CategoryRepo) EnsureSeeded(ctx context.Context, householdID string, starter []domain.Category) error {
 	count, err := r.q.CountCategories(ctx, uuid(householdID))
 	if err != nil {
@@ -145,16 +139,13 @@ func (r *CategoryRepo) Kind(ctx context.Context, householdID, categoryID string)
 }
 
 // Create adds one category at the end of the household's sort order.
-// CreateCategory's own comment explains what computing that position in the
-// same INSERT does and does not close: it removes the round-trip window a
-// separate read-then-write would have, but not the window between two
-// concurrent transactions under READ COMMITTED, where two creates can still
-// commit the same sort_order. That residual tie is accepted as cosmetic --
-// see CreateCategory's comment for why -- rather than closed with a lock or
-// a unique constraint. A name collision -- including against an archived
-// row, which still occupies its slot in UNIQUE (household_id, name) --
-// surfaces as a 23505 that translate maps to domain.ErrCategoryNameTaken by
-// constraint name.
+// Computing that position in the same INSERT closes the round-trip window a
+// read-then-write would have, though not the race between two concurrent
+// READ COMMITTED transactions landing the same sort_order -- accepted as
+// cosmetic (CreateCategory's own comment says why). A name collision, live
+// or archived (UNIQUE (household_id, name) holds both), surfaces as a
+// 23505 that translate maps to domain.ErrCategoryNameTaken by constraint
+// name.
 func (r *CategoryRepo) Create(ctx context.Context, c domain.Category) (domain.Category, error) {
 	row, err := r.q.CreateCategory(ctx, sqlcgen.CreateCategoryParams{
 		HouseholdID: uuid(c.HouseholdID),
@@ -167,8 +158,8 @@ func (r *CategoryRepo) Create(ctx context.Context, c domain.Category) (domain.Ca
 	return toCategory(row)
 }
 
-// Rename changes the name only; RenameCategory's WHERE clause scopes the
-// UPDATE to householdID as well as categoryID, so a category id from another
+// Rename changes the name only. RenameCategory's WHERE clause scopes the
+// UPDATE to householdID as well as categoryID, so an id from another
 // household matches no row and translate turns that pgx.ErrNoRows into
 // domain.ErrNotFound. Same collision contract as Create.
 func (r *CategoryRepo) Rename(ctx context.Context, householdID, categoryID, name string) (domain.Category, error) {
@@ -184,10 +175,9 @@ func (r *CategoryRepo) Rename(ctx context.Context, householdID, categoryID, name
 }
 
 // SetArchived stamps or clears archived_at. SetCategoryArchived's own
-// COALESCE is the "first stamp wins" rule: archiving an already-archived row
-// keeps its original archived_at instead of moving it forward to now(), so
-// two calls -- including a retry -- never disagree about when a category was
-// actually archived.
+// COALESCE gives "first stamp wins": archiving an already-archived row keeps
+// its original archived_at rather than moving it to now(), so two calls --
+// including a retry -- never disagree about when it was archived.
 func (r *CategoryRepo) SetArchived(ctx context.Context, householdID, categoryID string, archived bool) (domain.Category, error) {
 	row, err := r.q.SetCategoryArchived(ctx, sqlcgen.SetCategoryArchivedParams{
 		ID:          uuid(categoryID),
@@ -200,12 +190,11 @@ func (r *CategoryRepo) SetArchived(ctx context.Context, householdID, categoryID 
 	return toCategory(row)
 }
 
-// toCategory refuses a kind this code did not write. categories.kind carries
-// a CHECK, but a CHECK is the schema's promise, not this adapter's: a value
-// read from a column goes through domain.ParseCategoryKind, so an impossible
-// row fails here instead of reaching TransactionService's kind check as
-// something that is neither expense nor income. Same rule as toBill's cadence
-// and toGoalContribution's source.
+// toCategory refuses a kind this code did not write: a CHECK on
+// categories.kind is the schema's promise, not this adapter's, so the value
+// still goes through domain.ParseCategoryKind -- an impossible row fails
+// here, not at TransactionService's kind check as neither expense nor
+// income. Same rule as toBill's cadence and toGoalContribution's source.
 func toCategory(c sqlcgen.Category) (domain.Category, error) {
 	kind, err := domain.ParseCategoryKind(c.Kind)
 	if err != nil {

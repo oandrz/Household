@@ -62,11 +62,10 @@ func TestGoalCreateWritesTheOpeningContribution(t *testing.T) {
 	}
 }
 
-// TestGoalCreateThatFailsWritesNothingAtAll is the reachable half of the
-// atomicity claim (see this file's own package doc and the brief's own
-// comment on this test): a goal insert that fails on a name collision must
-// leave no orphaned contribution row anywhere for the household, even though
-// the failed Create asked for a non-zero starting balance.
+// TestGoalCreateThatFailsWritesNothingAtAll proves the reachable half of
+// GoalRepo.Create's atomicity claim: a goal insert that fails on a name
+// collision must leave no orphaned contribution row for the household, even
+// though the failed Create asked for a non-zero starting balance.
 func TestGoalCreateThatFailsWritesNothingAtAll(t *testing.T) {
 	db := openTestDB(t)
 	ctx := context.Background()
@@ -457,13 +456,11 @@ func TestGoalDeleteContributionFromAnotherHouseholdIsErrNotFound(t *testing.T) {
 	}
 }
 
-// TestGoalListOrdersDatedGoalsFirstThenDateless is not in the brief's own
-// enumerated test list, but GoalRepository.List's doc comment pins this
-// ordering by name specifically so an ORDER BY cannot silently choose the
-// wrong NULL placement -- "DESC NULLS LAST" is two words away from "DESC",
-// Postgres's own default null-ordering for DESC being NULLS FIRST (the
-// opposite of what the port requires). Left unprotected, that mutation would
-// pass every other test in this file, since none of them lists more than one
+// TestGoalListOrdersDatedGoalsFirstThenDateless pins the NULL placement
+// GoalRepository.List's doc comment specifies: dated goals first, then
+// dateless, which needs an explicit "DESC NULLS LAST" -- Postgres defaults
+// DESC to NULLS FIRST, the opposite. Without this test, dropping NULLS LAST
+// would pass every other test here, since none of them lists more than one
 // goal at a time.
 func TestGoalListOrdersDatedGoalsFirstThenDateless(t *testing.T) {
 	db := openTestDB(t)
@@ -509,10 +506,9 @@ func TestGoalListOrdersDatedGoalsFirstThenDateless(t *testing.T) {
 }
 
 // TestGoalListContributionsRespectsALowLimit proves the limit parameter is
-// actually threaded into the query, not merely defaulted -- the other tests
-// in this file all call ListContributions with limit 0 (which the port
-// treats as "50", see the doc comment) and would not notice a limit that was
-// silently ignored.
+// threaded into the query, not merely defaulted: every other test here calls
+// ListContributions with limit 0 (the port's default of 50) and wouldn't
+// notice a limit that was silently ignored.
 func TestGoalListContributionsRespectsALowLimit(t *testing.T) {
 	db := openTestDB(t)
 	ctx := context.Background()
@@ -546,12 +542,11 @@ func TestGoalListContributionsRespectsALowLimit(t *testing.T) {
 }
 
 // TestDeleteManualContributionLeavesEveryStampAlone pins
-// GoalRepository.DeleteContribution's own doc comment from the other
-// direction: deleting a MANUAL contribution on a goal that also holds a
-// budget_rollover contribution must leave that rollover's stamp completely
-// untouched -- ClearBudgetRollover only ever runs for a deleted row whose OWN
-// source is budget_rollover, never merely because the same goal has one
-// somewhere.
+// GoalRepository.DeleteContribution from the other direction: deleting a
+// MANUAL contribution on a goal that also holds a budget_rollover
+// contribution must leave that rollover's stamp untouched.
+// ClearBudgetRollover only runs for a deleted row whose OWN source is
+// budget_rollover, never because the same goal happens to have one.
 func TestDeleteManualContributionLeavesEveryStampAlone(t *testing.T) {
 	db := openTestDB(t)
 	ctx := context.Background()
@@ -596,12 +591,11 @@ func TestDeleteManualContributionLeavesEveryStampAlone(t *testing.T) {
 	}
 }
 
-// TestDeleteRolloverClearsOnlyItsOwnMonth pins why the contribution carries
-// source_budget_month at all rather than ClearBudgetRollover keying off
-// rollover_goal_id alone: two different months rolled into the SAME goal must
+// TestDeleteRolloverClearsOnlyItsOwnMonth pins why a contribution carries
+// source_budget_month at all, rather than ClearBudgetRollover keying off
+// rollover_goal_id alone: two different months rolled into the SAME goal
 // carry independent stamps, and deleting one month's rollover must never
-// touch the other's -- clearing by goal id alone would unstamp both (the
-// task brief's own reasoning for this test).
+// touch the other's -- clearing by goal id alone would unstamp both.
 func TestDeleteRolloverClearsOnlyItsOwnMonth(t *testing.T) {
 	db := openTestDB(t)
 	ctx := context.Background()
@@ -700,12 +694,11 @@ func TestGoalProgressByIDsIsAMissNotAnErrorForAnUnknownID(t *testing.T) {
 }
 
 // TestGoalProgressByIDsReportsAnArchivedGoalsProgress pins the other half of
-// the port's contract (usecase.GoalProgressReader's doc comment, spec
-// decision 8): archiving is not deletion anywhere else in this product, so
-// an archived goal must still count as found and keep its real figure.
-// Only a real DELETE fires goals.id's ON DELETE SET NULL into
-// vision_measures.goal_id -- without this test, nothing stops a future
-// editor "helpfully" adding an archived_at IS NULL filter to the query.
+// usecase.GoalProgressReader.ProgressByIDs's contract: archiving is not
+// deletion anywhere else in this product, so an archived goal must still
+// count as found and keep its real figure. Only a real DELETE unlinks a
+// measure via goals.id's ON DELETE SET NULL -- without this test, nothing
+// stops a future editor "helpfully" adding an archived_at filter.
 func TestGoalProgressByIDsReportsAnArchivedGoalsProgress(t *testing.T) {
 	db := openTestDB(t)
 	ctx := context.Background()

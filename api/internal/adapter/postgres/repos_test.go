@@ -38,9 +38,8 @@ func TestUserRepoRoundTrip(t *testing.T) {
 
 // TestFindOrphanedChild proves the query behind seed.go's duplicate-child
 // guard against a real Postgres query planner: it finds a credential-less
-// user with no membership row at all, but not one that still has a
-// membership, and not one that has an email or a password even if its
-// display name matches.
+// user with no membership at all, but not one with a membership, and not
+// one with an email or password even if its display name matches.
 func TestFindOrphanedChild(t *testing.T) {
 	db := openTestDB(t)
 	ctx := context.Background()
@@ -126,10 +125,10 @@ func TestMembershipRepoRejectsAnInvalidCapabilitySet(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected the database constraint to reject marriage for a limited member")
 	}
-	// A constraint violation must not be mistranslated as "not found": that
-	// would report data that is present and invalid as if it were absent.
-	// translate special-cases only pgx.ErrNoRows today; this guards against a
-	// regression that widened the mapping.
+	// A constraint violation must not be mistranslated as "not found," which
+	// would report present, invalid data as if it were absent. translate
+	// only special-cases pgx.ErrNoRows today; this guards against that
+	// widening.
 	if errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("constraint violation must not translate to domain.ErrNotFound, got %v", err)
 	}
@@ -233,12 +232,11 @@ func TestSpaceRepoListsInPositionOrder(t *testing.T) {
 	}
 }
 
-// TestSpaceRepoRejectsADuplicateKeyWithErrAlreadyExists proves the database's
-// own UNIQUE (household_id, key) constraint -- the backstop for the race
-// usecase.HouseholdService.CreateSpace's list-then-compare pre-check cannot
-// close on its own -- surfaces as domain.ErrAlreadyExists rather than an
-// opaque wrapped driver error. translate's pgconn.PgError/23505 case is what
-// this exercises.
+// TestSpaceRepoRejectsADuplicateKeyWithErrAlreadyExists proves the
+// database's own UNIQUE (household_id, key) constraint -- the backstop for
+// the race usecase.HouseholdService.CreateSpace's list-then-compare
+// pre-check can't close on its own -- surfaces as domain.ErrAlreadyExists,
+// not an opaque driver error (translate's pgconn.PgError/23505 case).
 func TestSpaceRepoRejectsADuplicateKeyWithErrAlreadyExists(t *testing.T) {
 	db := openTestDB(t)
 	ctx := context.Background()

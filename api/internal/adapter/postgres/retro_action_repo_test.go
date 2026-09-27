@@ -15,9 +15,8 @@ import (
 
 // newRetroActionRepo opens a fresh test database, one household, and both
 // repositories an action test needs: RetroActionRepo to exercise, and
-// RetroRepo because every action belongs to a retro that must exist first --
-// mirroring newRetroRepo's own reasoning for why it hands back a
-// *postgres.DB rather than just an id.
+// RetroRepo because every action belongs to a retro that must exist first
+// (mirrors newRetroRepo's own reasoning).
 func newRetroActionRepo(t *testing.T) (*postgres.RetroActionRepo, *postgres.RetroRepo, string) {
 	t.Helper()
 	actions, retros, _, householdID := newRetroActionFixture(t)
@@ -25,10 +24,9 @@ func newRetroActionRepo(t *testing.T) (*postgres.RetroActionRepo, *postgres.Retr
 }
 
 // newRetroActionFixture is newRetroActionRepo plus the *postgres.DB itself,
-// for the tests below that also need seedSecondHousehold or a real
-// membership row (insertTestMembership, transaction_repo_test.go) neither of
-// which newRetroActionRepo's three-value signature -- fixed by the brief's
-// own first test -- has room to return.
+// for tests below that also need seedSecondHousehold or a real membership
+// row (insertTestMembership) -- newRetroActionRepo's three-value signature
+// stays fixed since earlier tests already depend on it.
 func newRetroActionFixture(t *testing.T) (*postgres.RetroActionRepo, *postgres.RetroRepo, *postgres.DB, string) {
 	t.Helper()
 	db := openTestDB(t)
@@ -192,13 +190,12 @@ func TestOpenInMonthReturnsOnlyThatMonthsUntickedActions(t *testing.T) {
 	}
 }
 
-// RetroActionRepository.ForRetro's own contract (and 00009_retros.sql's comment
-// on why retro_actions carries no position column) is insertion order:
-// created_at, id. ListRetroActions computes this with a GROUP BY, whose
-// output order Postgres does not guarantee is insertion order on its own --
-// the ORDER BY clause is what makes it so, and every other test in this file
-// puts at most one action in a retro, so none of them would notice that
-// clause going missing. This is the one that would.
+// ForRetro's contract is insertion order: created_at, id (see
+// RetroActionRepository and 00009_retros.sql on the missing position
+// column). ListRetroActions computes this via GROUP BY, whose output order
+// Postgres doesn't guarantee without the ORDER BY clause -- every other
+// test here puts at most one action per retro, so this is the one that
+// would catch that clause going missing.
 func TestForRetroReturnsActionsInInsertionOrder(t *testing.T) {
 	ctx := context.Background()
 	actions, retros, householdID := newRetroActionRepo(t)
@@ -329,13 +326,11 @@ func TestAddActionIsScopedToItsHousehold(t *testing.T) {
 	}
 }
 
-// A membership that is real, but belongs to a different household, must be
-// refused exactly like a membership id that does not exist at all --
-// usecase.RetroActionRepository.Add's own doc comment says "a membership of
-// this household", not merely "a membership". This is what proves
-// AddRetroActionAssignee's household_id clause is doing real work rather
-// than the retro_action_assignees.membership_id foreign key alone, which
-// would happily accept this id.
+// A membership that is real but belongs to a different household must be
+// refused exactly like one that doesn't exist -- Add's own doc comment says
+// "a membership of this household", not merely "a membership". This proves
+// AddRetroActionAssignee's household_id clause does real work, since the
+// membership_id foreign key alone would happily accept this id.
 func TestAddActionRefusesAnAssigneeFromAnotherHousehold(t *testing.T) {
 	ctx := context.Background()
 	actions, retros, db, householdID := newRetroActionFixture(t)
@@ -355,9 +350,8 @@ func TestAddActionRefusesAnAssigneeFromAnotherHousehold(t *testing.T) {
 	})
 	// errors.Is against the domain sentinel, not just "err != nil" -- a raw
 	// pgx driver error leaking out of Add would satisfy err != nil too, and
-	// this package's own Liskov rule is that no such error is allowed to
-	// escape it (CLAUDE.md: "a missing row becomes domain.ErrNotFound at
-	// that boundary, never pgx.ErrNoRows further up").
+	// this package's Liskov rule (CLAUDE.md) is that no such error may
+	// escape it.
 	if !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("err = %v, want ErrNotFound (Add accepted an assignee that is a membership of a different household)", err)
 	}
@@ -371,11 +365,10 @@ func TestAddActionRefusesAnAssigneeFromAnotherHousehold(t *testing.T) {
 	}
 }
 
-// carried_from gets the identical treatment: retro_actions.carried_from's
-// foreign key only proves the id exists SOMEWHERE in retro_actions, not
-// that it belongs to this household, so an id naming another household's
-// action must be refused exactly like a bad assignee -- the whole write
-// failing, no orphan action left behind.
+// carried_from gets identical treatment: its foreign key only proves the
+// id exists somewhere in retro_actions, not that it belongs to this
+// household, so an id naming another household's action must be refused
+// like a bad assignee -- the whole write fails, no orphan action left.
 func TestAddActionRefusesACarriedFromFromAnotherHousehold(t *testing.T) {
 	ctx := context.Background()
 	actions, retros, db, householdID := newRetroActionFixture(t)
@@ -451,15 +444,12 @@ func TestAddActionCarriedFromWithinTheSameHouseholdSucceeds(t *testing.T) {
 	}
 }
 
-// A CarriedFrom that does not even parse as a UUID must be refused, not
-// silently stored as NULL. nullableUUID/uuid swallow a Scan error into the
-// zero pgtype.UUID{} -- the same value a genuinely absent CarriedFrom
-// produces -- so without a check before the transaction opens, this
-// malformed value would take AddRetroAction's "$2 IS NULL" branch and the
-// action would be written with carried_from NULL, its provenance quietly
-// dropped instead of refused. "" (not carried) is the legitimate case this
-// must not disturb -- TestAddActionKeepsBothAssignees and friends exercise
-// that path with no CarriedFrom set at all.
+// A CarriedFrom that doesn't parse as a UUID must be refused, not silently
+// stored as NULL. nullableUUID/uuid swallow a Scan error into the zero
+// pgtype.UUID{} -- the same value a genuinely absent CarriedFrom produces --
+// so without a check first, the malformed value would take AddRetroAction's
+// "$2 IS NULL" branch and silently drop its provenance. "" (not carried)
+// must keep working; TestAddActionKeepsBothAssignees exercises that path.
 func TestAddActionRefusesAMalformedCarriedFrom(t *testing.T) {
 	ctx := context.Background()
 	actions, retros, householdID := newRetroActionRepo(t)

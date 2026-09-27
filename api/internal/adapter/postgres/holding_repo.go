@@ -14,18 +14,17 @@ import (
 )
 
 // HoldingRepo, HoldingEventRepo and HoldingValuationRepo are three narrow
-// repositories over three tables rather than one object with fifteen methods,
-// following the same interface-segregation rule the other nine repositories
-// here follow. They share this file because they share a migration and a set
-// of converters; they do not share an interface.
+// repositories over three tables, not one object with fifteen methods -- the
+// same interface-segregation rule the other nine repositories follow here.
+// They share this file for a common migration and converters, not an
+// interface.
 type HoldingRepo struct{ q *sqlcgen.Queries }
 
 func NewHoldingRepo(db *DB) *HoldingRepo { return &HoldingRepo{q: sqlcgen.New(db.Pool())} }
 
-// The var _ lines pin each repository to its port at compile time, so a
-// signature drift is caught here rather than in whichever task first wires
-// the service up -- the reason account_repo.go pins AccountRepo to
-// AccountLookup.
+// The var _ lines pin each repository to its port at compile time, catching
+// a signature drift here rather than downstream in main.go's wiring -- the
+// same reason account_repo.go pins AccountRepo to AccountLookup.
 var (
 	_ usecase.HoldingRepository          = (*HoldingRepo)(nil)
 	_ usecase.HoldingEventRepository     = (*HoldingEventRepo)(nil)
@@ -137,11 +136,11 @@ func (r *HoldingRepo) CountForHousehold(ctx context.Context, householdID string)
 	return n, nil
 }
 
-// toHolding runs the instrument column through the domain's own parser rather
-// than casting it. The CHECK constraint and the parser are deliberately
-// redundant: a value that somehow got past the database must still not be
-// carried further, which is this codebase's fail-closed rule for anything
-// arriving from a column.
+// toHolding parses the instrument column with the domain's own parser
+// instead of casting it. The CHECK constraint and the parser are
+// deliberately redundant: a value that slipped past the database still must
+// not be carried further -- this codebase's fail-closed rule for column
+// values.
 func toHolding(id, householdID, accountID pgtype.UUID, name, instrument, unit, currency string,
 	archivedAt pgtype.Timestamptz) (domain.Holding, error) {
 	kind, err := domain.ParseInstrumentKind(instrument)
@@ -160,10 +159,9 @@ func toHolding(id, householdID, accountID pgtype.UUID, name, instrument, unit, c
 	}, nil
 }
 
-// HoldingEventRepo keeps the pool alongside the pool-backed *sqlcgen.Queries,
-// like GoalRepo and BudgetRepo, because InsertWithFold and DeleteWithFold each
-// begin their own transaction -- something a *sqlcgen.Queries built once at
-// construction time cannot do on its own.
+// HoldingEventRepo keeps the pool alongside *sqlcgen.Queries, like GoalRepo
+// and BudgetRepo: InsertWithFold and DeleteWithFold each open their own
+// transaction, which a Queries built once at construction can't do.
 type HoldingEventRepo struct {
 	q    *sqlcgen.Queries
 	pool *pgxpool.Pool
@@ -247,20 +245,17 @@ func (r *HoldingEventRepo) Insert(ctx context.Context, e domain.HoldingEvent) (d
 	})
 }
 
-// InsertWithFold is Insert with the holding's invariant held across the write.
+// InsertWithFold is Insert with the holding's invariant held across the
+// write: it locks the holding row, lists that holding's events in the same
+// transaction, and hands them to fold -- the caller's rule, which is
+// domain.Holding.Position. The insert only happens if fold accepts, and the
+// lock holds until commit, so a second writer blocks and folds against the
+// FIRST writer's result, never a stale copy.
 //
-// It locks the holding row, lists that holding's events inside the same
-// transaction, and hands them to fold -- the caller's own rule, which is
-// domain.Holding.Position. Only if fold accepts does the insert happen, and
-// the lock is not released until the transaction commits. A second writer
-// blocks on the lock and therefore folds the FIRST one's result, not a stale
-// copy of it.
-//
-// Without this, two sales of 30 from a holding of 50 each fold against the
-// same 50 and both commit, leaving events that cannot be folded at all -- a
-// page that throws every time it loads, fixable only from the page that is
-// broken. The fold stays in the domain; this method owns the transaction and
-// the lock, never the rule.
+// Without the lock, two sales of 30 from a holding of 50 could both fold
+// against the same 50 and commit, leaving events that can never be folded
+// again -- a page that throws on every load. The fold itself stays in the
+// domain; this method owns only the transaction and the lock.
 func (r *HoldingEventRepo) InsertWithFold(
 	ctx context.Context,
 	e domain.HoldingEvent,
@@ -572,10 +567,8 @@ type valuationRow struct {
 	Note, Currency             string
 }
 
-// toValuation carries the same "currency comes from the holding" convention
-// toHoldingEvent does, and for the same reason: holding_valuations has no
-// currency column, because a price is denominated in its holding's currency
-// by construction.
+// toValuation takes its currency from the join for the same reason
+// toHoldingEvent does.
 func toValuation(row valuationRow) (domain.Valuation, error) {
 	price, err := domain.NewMoney(row.UnitPriceMinor, row.Currency)
 	if err != nil {
@@ -726,10 +719,9 @@ func (r *HoldingIncomeRepo) Delete(ctx context.Context, householdID, holdingID, 
 	return nil
 }
 
-// incomeRow is the shape every holding_income query returns, with the currency
-// joined from its holding -- the same convention eventRow and valuationRow
-// carry, for the same reason: the table has no currency column because a
-// payment is denominated in its holding's currency by construction.
+// incomeRow is the shape every holding_income query returns, with the
+// currency joined from its holding -- the same convention eventRow and
+// valuationRow carry, for the reason toHoldingEvent gives.
 type incomeRow struct {
 	ID, HoldingID, HouseholdID pgtype.UUID
 	Kind                       string

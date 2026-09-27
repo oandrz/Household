@@ -21,12 +21,10 @@ func (r *MagicLinkRepo) Create(ctx context.Context, userID string, tokenHash []b
 
 // Consume goes through translate like every other lookup here, so a used or
 // unknown token surfaces as domain.ErrNotFound. ConsumeMagicLink's guard
-// (consumed_at IS NULL AND expires_at > now()) is structurally the same
-// "zero rows is ambiguous" shape as MarkInviteAccepted's, and domain.ErrTokenExpired
-// reads like it was meant for exactly this path -- but the task's global
-// constraints call out only the invite guard for the ErrNotFound carve-out,
-// so this repository does not add a second one on its own authority. Flagged
-// in the task report as a mapping Task 12 may want to reconsider.
+// (consumed_at IS NULL AND expires_at > now()) is the same "zero rows is
+// ambiguous" shape as MarkInviteAccepted's, but this repository does not
+// carve out its own domain.ErrTokenExpired here: AuthService.ConsumeMagicLink
+// maps ErrNotFound to ErrTokenExpired itself, one layer up.
 func (r *MagicLinkRepo) Consume(ctx context.Context, tokenHash []byte) (string, error) {
 	id, err := r.q.ConsumeMagicLink(ctx, tokenHash)
 	if err != nil {

@@ -26,10 +26,8 @@ func NewAdminDirectoryRepo(db *DB) *AdminDirectoryRepo {
 	return &AdminDirectoryRepo{pool: db.Pool(), q: sqlcgen.New(db.Pool())}
 }
 
-// Compile-time confirmation that AdminDirectoryRepo satisfies its port, the
-// same check convert.go keeps for every other repository -- kept here
-// rather than added to convert.go because this task's scope is this file
-// and its SQL and test alone.
+// AdminDirectoryRepo must satisfy usecase.AdminDirectoryRepository; this
+// fails the build if it drifts.
 var _ usecase.AdminDirectoryRepository = (*AdminDirectoryRepo)(nil)
 
 // Metrics runs the four counts at REPEATABLE READ so the four tiles
@@ -51,9 +49,8 @@ func (r *AdminDirectoryRepo) Metrics(ctx context.Context, activeSince, signupsSi
 		return usecase.DirectoryMetrics{}, translate(err, "count active households")
 	}
 	// Named CountSignupsSinceForAdmin, not CountSignupsSince: queries/signup.sql
-	// already has a single-column CountSignupsSince used for per-address rate
-	// limiting, and sqlc rejects a duplicate query name across files even
-	// though the two return different shapes.
+	// already uses that name for per-address rate limiting, and sqlc rejects
+	// a duplicate query name across files even when the return shapes differ.
 	signups, err := q.CountSignupsSinceForAdmin(ctx, timestamptz(signupsSince))
 	if err != nil {
 		return usecase.DirectoryMetrics{}, translate(err, "count signups")
@@ -102,13 +99,12 @@ func (r *AdminDirectoryRepo) SearchHouseholds(ctx context.Context, q string, lim
 			LastActiveAt:    timePtrOf(row.LastActiveAt),
 			PrimaryCurrency: row.PrimaryCurrency,
 		}
-		// For a non-empty search the lateral join names the first member
-		// whose name or email matched, if any; it is a *reason the row
-		// appeared* only when the household's own fields did not match, so
-		// Match is set only then -- MatchName can be non-nil on a row the
-		// household's own name or family name already matched (e.g. a
-		// household and one of its members share a substring), and that row
-		// must not report a member match too.
+		// The lateral join names the first member whose name or email
+		// matched, but that is only the *reason the row appeared* when the
+		// household's own fields didn't match -- so Match is set only then.
+		// MatchName can be non-nil even when the household's own name
+		// matched too (e.g. it shares a substring with a member's), and that
+		// row must not report a member match.
 		if !row.HouseholdMatched && row.MatchName != nil {
 			listing.Match = &usecase.MemberMatch{Name: *row.MatchName, Email: row.MatchEmail}
 		}
