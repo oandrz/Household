@@ -152,6 +152,14 @@ load-bearing — read them before writing a service or a repository.
 - Write every non-obvious decision down **at the point someone would try to
   change it**. Where a trade-off was accepted, say so and why — the lockout and
   magic-link comments are the pattern.
+- **Comments state the rule, not where it came from.** Never cite a plan
+  number ("decision 7", "Task 12", "milestone 2") or a line number
+  ("bill.go:202"); write the rule itself, and name a symbol instead of a
+  line. `make lint-comments` fails on both. `ADR N` and `LEARNING pattern N`
+  are fine: they are lasting documents.
+- Keep every *why* once and short. Delete comments that restate the code and
+  stories of earlier shapes; keep a past mistake only as a warning someone
+  needs ("Don't X: Y").
 - Tests read as documentation: the name states the behaviour, the body shows it.
 - No cleverness in security-sensitive code. Obvious and boring wins.
 
