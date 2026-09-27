@@ -128,13 +128,13 @@ func TestAddRejectsAZeroValueMoneyOnEitherSide(t *testing.T) {
 	var zero domain.Money
 	sgd, _ := domain.NewMoney(100, "SGD")
 
-	if _, err := zero.Add(zero); !errors.Is(err, domain.ErrInvalidMoney) {
-		t.Fatalf("err = %v, want ErrInvalidMoney (zero.Add(zero))", err)
+	if _, err := zero.Add(zero); !errors.Is(err, domain.ErrMoneyWithoutCurrency) {
+		t.Fatalf("err = %v, want ErrMoneyWithoutCurrency (zero.Add(zero))", err)
 	}
-	if _, err := sgd.Add(zero); !errors.Is(err, domain.ErrInvalidMoney) {
-		t.Fatalf("err = %v, want ErrInvalidMoney (sgd.Add(zero))", err)
+	if _, err := sgd.Add(zero); !errors.Is(err, domain.ErrMoneyWithoutCurrency) {
+		t.Fatalf("err = %v, want ErrMoneyWithoutCurrency (sgd.Add(zero))", err)
 	}
-	if _, err := zero.Add(sgd); !errors.Is(err, domain.ErrInvalidMoney) {
-		t.Fatalf("err = %v, want ErrInvalidMoney (zero.Add(sgd))", err)
+	if _, err := zero.Add(sgd); !errors.Is(err, domain.ErrMoneyWithoutCurrency) {
+		t.Fatalf("err = %v, want ErrMoneyWithoutCurrency (zero.Add(sgd))", err)
 	}
 }

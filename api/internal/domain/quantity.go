@@ -61,13 +61,13 @@ func (q Quantity) Nano() int64 { return q.nano }
 // in integers -- the same commitment Money.Add and Rate.Apply make.
 func (q Quantity) Value(unitPrice Money) (Money, error) {
 	if unitPrice.Currency == "" {
-		return Money{}, fmt.Errorf("%w: a Money zero value has no currency", ErrInvalidMoney)
+		return Money{}, fmt.Errorf("%w: a Money zero value has no currency", ErrMoneyWithoutCurrency)
 	}
 	// A unit price is a price. A negative one would make a holding contribute
 	// negative market value, which is a debt -- and a debt is an account type,
 	// not a holding. Fail closed rather than quietly producing that figure.
 	if unitPrice.Amount < 0 {
-		return Money{}, fmt.Errorf("%w: a unit price cannot be negative, got %d", ErrInvalidMoney, unitPrice.Amount)
+		return Money{}, fmt.Errorf("%w: a unit price cannot be negative, got %d", ErrNegativeAmount, unitPrice.Amount)
 	}
 
 	out, ok := mulDivRoundHalfAway(q.nano, unitPrice.Amount, QuantityScale)
@@ -163,7 +163,7 @@ func (m Money) Mul(q Quantity) (Money, error) { return q.Value(m) }
 // Quantity.Value needs, and for the same reason.
 func (m Money) Prorate(part, whole Quantity) (Money, error) {
 	if m.Currency == "" {
-		return Money{}, fmt.Errorf("%w: a Money zero value has no currency", ErrInvalidMoney)
+		return Money{}, fmt.Errorf("%w: a Money zero value has no currency", ErrMoneyWithoutCurrency)
 	}
 	// A cost pool is never negative here: a holding event refuses a negative
 	// amount, and a disposal's cost is capped at the pool it leaves. So a
@@ -173,7 +173,7 @@ func (m Money) Prorate(part, whole Quantity) (Money, error) {
 	// need it. The day a caller genuinely needs to prorate a negative, drop
 	// this refusal WITH a test.
 	if m.Amount < 0 {
-		return Money{}, fmt.Errorf("%w: cannot prorate a negative amount, got %d", ErrInvalidMoney, m.Amount)
+		return Money{}, fmt.Errorf("%w: cannot prorate a negative amount, got %d", ErrNegativeAmount, m.Amount)
 	}
 	if whole.nano <= 0 {
 		return Money{}, fmt.Errorf("%w: %d", ErrProrateWholeNotPositive, whole.nano)

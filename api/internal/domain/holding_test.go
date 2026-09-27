@@ -190,8 +190,8 @@ func TestProrateRefusesAnEmptyWhole(t *testing.T) {
 // is exactly what "no cleverness in security-sensitive code" is about.
 func TestProrateRefusesANegativeAmount(t *testing.T) {
 	pool := sgdAmount(t, -100)
-	if _, err := pool.Prorate(units(t, 1), units(t, 2)); !errors.Is(err, domain.ErrInvalidMoney) {
-		t.Fatalf("error = %v, want ErrInvalidMoney", err)
+	if _, err := pool.Prorate(units(t, 1), units(t, 2)); !errors.Is(err, domain.ErrNegativeAmount) {
+		t.Fatalf("error = %v, want ErrNegativeAmount", err)
 	}
 }
 
@@ -506,8 +506,8 @@ func TestValuationCarriesTheSameCrossCurrencyRuleAsAnEvent(t *testing.T) {
 }
 
 func TestValuationRefusesANegativeUnitPrice(t *testing.T) {
-	if err := valuation(t, 1, -1).Validate("SGD", "SGD"); !errors.Is(err, domain.ErrInvalidMoney) {
-		t.Fatalf("error = %v, want ErrInvalidMoney", err)
+	if err := valuation(t, 1, -1).Validate("SGD", "SGD"); !errors.Is(err, domain.ErrNegativeAmount) {
+		t.Fatalf("error = %v, want ErrNegativeAmount", err)
 	}
 }
 

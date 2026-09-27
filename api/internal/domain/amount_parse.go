@@ -19,32 +19,32 @@ import (
 func ParseAmount(text string, minorUnits int) (int64, error) {
 	s := strings.ReplaceAll(strings.TrimSpace(text), ",", "")
 	if s == "" || minorUnits < 0 || minorUnits > 6 {
-		return 0, fmt.Errorf("%w: %q", ErrInvalidMoney, text)
+		return 0, fmt.Errorf("%w: %q", ErrInvalidAmount, text)
 	}
 	whole, frac, hasPoint := strings.Cut(s, ".")
 	if whole == "" {
 		whole = "0"
 	}
 	if hasPoint && frac == "" {
-		return 0, fmt.Errorf("%w: %q", ErrInvalidMoney, text)
+		return 0, fmt.Errorf("%w: %q", ErrInvalidAmount, text)
 	}
 	if len(frac) > minorUnits {
-		return 0, fmt.Errorf("%w: %q has more decimal places than the currency allows (%d)", ErrInvalidMoney, text, minorUnits)
+		return 0, fmt.Errorf("%w: %q has more decimal places than the currency allows (%d)", ErrInvalidAmount, text, minorUnits)
 	}
 	frac += strings.Repeat("0", minorUnits-len(frac))
 	digits := whole + frac
 	if len(digits) > 18 {
-		return 0, fmt.Errorf("%w: %q is too large", ErrInvalidMoney, text)
+		return 0, fmt.Errorf("%w: %q is too large", ErrInvalidAmount, text)
 	}
 	var n int64
 	for _, ch := range digits {
 		if ch < '0' || ch > '9' {
-			return 0, fmt.Errorf("%w: %q", ErrInvalidMoney, text)
+			return 0, fmt.Errorf("%w: %q", ErrInvalidAmount, text)
 		}
 		n = n*10 + int64(ch-'0')
 	}
 	if n <= 0 {
-		return 0, fmt.Errorf("%w: %q must be greater than zero", ErrInvalidMoney, text)
+		return 0, fmt.Errorf("%w: %q must be greater than zero", ErrInvalidAmount, text)
 	}
 	return n, nil
 }

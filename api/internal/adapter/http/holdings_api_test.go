@@ -795,3 +795,59 @@ func decodeID(t *testing.T, rec *httptest.ResponseRecorder, key string) string {
 	}
 	return body[key].ID
 }
+
+// TestANegativeHoldingAmountIsNamedAsNegative: every money field on the
+// holdings surface refuses a negative figure, and the refusal must say that
+// -- not "That currency code is not valid.", which is what the shared
+// ErrInvalidMoney sentinel used to answer for all of them.
+func TestANegativeHoldingAmountIsNamedAsNegative(t *testing.T) {
+	env := newTestEnv(t)
+	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
+
+	account := newHoldingAccount(t, env, session, csrf, "Brokerage", "investment")
+	newHolding := func(currency string) string {
+		t.Helper()
+		rec := env.authed(t, http.MethodPost, "/api/v1/holdings", map[string]any{
+			"accountId": account, "name": "Gold " + currency, "instrument": "gold",
+			"unit": "gram", "currency": currency,
+		}, session, csrf)
+		if rec.Code != http.StatusCreated {
+			t.Fatalf("create holding: %d (body = %s)", rec.Code, rec.Body.String())
+		}
+		var created struct {
+			Holding holdingBody `json:"holding"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &created); err != nil || created.Holding.ID == "" {
+			t.Fatalf("decode holding: %v (body = %s)", err, rec.Body.String())
+		}
+		return created.Holding.ID
+	}
+	sgd := newHolding("SGD") // the seed household's primary currency
+	usd := newHolding("USD") // foreign, so a primary amount is required
+
+	for _, probe := range []struct {
+		name, path, code string
+		body             map[string]any
+	}{
+		{"event amount", "/api/v1/holdings/" + sgd + "/events", "NEGATIVE_AMOUNT", map[string]any{
+			"kind": "acquisition", "quantity": "1", "amountMinor": -500, "occurredOn": "2026-07-02",
+		}},
+		{"valuation unit price", "/api/v1/holdings/" + sgd + "/valuations", "NEGATIVE_AMOUNT", map[string]any{
+			"unitPriceMinor": -1, "asOf": "2026-07-02",
+		}},
+		// Income folds negative into its own "must be positive" rule, whose
+		// message explains that a fee is entered positive.
+		{"income amount", "/api/v1/holdings/" + sgd + "/income", "INCOME_AMOUNT_NOT_POSITIVE", map[string]any{
+			"kind": "income", "amountMinor": -500, "receivedOn": "2026-07-02",
+		}},
+		{"primary amount", "/api/v1/holdings/" + usd + "/events", "NEGATIVE_AMOUNT", map[string]any{
+			"kind": "acquisition", "quantity": "1", "amountMinor": 500,
+			"primaryAmountMinor": -700, "occurredOn": "2026-07-02",
+		}},
+	} {
+		rec := env.authed(t, http.MethodPost, probe.path, probe.body, session, csrf)
+		if rec.Code != http.StatusUnprocessableEntity || !bodyHasCode(rec, probe.code) {
+			t.Errorf("%s: got %d %s, want 422 %s", probe.name, rec.Code, rec.Body.String(), probe.code)
+		}
+	}
+}
