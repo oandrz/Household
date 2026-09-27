@@ -112,12 +112,10 @@ lint-dead: ## Report unreachable Go code, staticcheck findings, and unused front
 # comments are searched: // in Go, and -- in the SQL queries and in sqlcgen,
 # which copies those into its query strings, whether the comment has the
 # whole line to itself or trails code on the same line (a struct field's
-# `// ... (decision 21)` is exactly how this codebase carried these before
-# the sweep). A reference split across comment lines ("decision" / "// 7")
-# would escape a plain per-line grep -- that has already happened once in
-# this sweep -- so scripts/lint-comments.sh joins each run of consecutive
-# whole-line comments into one block before matching. A product word in a
-# string or a name is not history.
+# `// ... (decision 21)` is the shape these references most often took). A
+# reference split across two comment lines ("decision" / "// 7") escapes a
+# per-line grep, so scripts/lint-comments.sh joins each comment block before
+# matching. A product word in a string or a name is not history.
 lint-comments: ## Fail on plan numbers and line numbers in backend comments
 	@scripts/lint-comments.sh
 

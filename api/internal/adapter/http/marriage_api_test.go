@@ -791,7 +791,7 @@ func TestAddRetroActionWithABlankBodyIs400(t *testing.T) {
 
 // assertParseableJSONBody checks two things: the status is exactly
 // wantStatus, AND the body parses as JSON -- matching what apiFetch
-// (web/src/lib/apiFetch.ts) does on an ok response. Both are load-bearing:
+// (web/src/api/client.ts) does on an ok response. Both are load-bearing:
 // a handler that resolved the wrong {id} still answers a *parseable* JSON
 // body, just MapDomainError's 4xx envelope instead of the success shape.
 // Checking parseability alone would call that a pass; the status check is

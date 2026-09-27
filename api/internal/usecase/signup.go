@@ -51,7 +51,7 @@ const (
 // already provisioned a household. Deliberately not domain.ErrAlreadyExists:
 // that sentinel's copy ("That already exists.") tells the holder of a spent
 // link nothing useful, and its doc comment scopes it to a unique-constraint
-// race between concurrent writers.
+// violation.
 var ErrSignupAlreadyUsed = errors.New("this sign-up link has already been used")
 
 type SignupDeps struct {

@@ -2942,11 +2942,9 @@ type fakeBillRepo struct {
 	payments []usecase.BillPaymentRecord
 	n, payN  int
 
-	// err, when set, is returned unconditionally by every method below
-	// except UndoPayment, which has its own dedicated force-failure hook
-	// (RecordPayment still checks err, but shares this one) -- a single
-	// shared err would otherwise make "the list call failed"
-	// indistinguishable from "the payment call failed."
+	// err, when set, is returned by every method below, RecordPayment
+	// included. UndoPayment ignores it and returns undoErr instead, so a
+	// test can make only the undo fail.
 	err error
 
 	// lastWrite is the PaymentWrite RecordPayment most recently received --

@@ -1670,12 +1670,12 @@ person to ask whether the test could ever have gone red in the first place.
   wrong after the next edit above it. Comment lines were 39.5% of
   `usecase`'s production code and 35.3% of `domain`'s. The sweep rewrote
   each reference as the rule it stood for and trimmed the rest: history
-  references 446 → 0, Go comment lines 20,138 → 17,456 (−13%), `usecase`
+  references 446 → 0, Go comment lines 20,276 → 17,589 (−13%), `usecase`
   35.0% and `domain` 32.4% afterwards, `queries/*.sql` comment lines
   1,096 → 1,020. It was proven comments-only by a token comparison against
   the branch base (code tokens, tool-read comments and SQL outside
   comments all identical, every exported doc comment still present, each
-  check first seen to fail on a planted change; 290 of 351 `.go` files
+  check first seen to fail on a planted change; 292 of 351 `.go` files
   and 13 of 17 SQL files changed, and only 6 test failure messages, each
   approved by name). What stops it coming back: `make lint-comments`
   fails on those references in any backend comment, and `CLAUDE.md` says
@@ -1785,6 +1785,12 @@ never mounted, and a reordering of two statements that do not interact.
   '{{.ID}}'` per socket/context, before believing anything else. When the
   engines disagree with the ports, run every stack command with an explicit
   `--context`.
+- A third angle on the same trap: with colima stopped, the comment sweep's
+  final `make test` gate fell through to a Docker Desktop instance already
+  running the dev stack and flaked with a different testcontainers error each
+  run (`port "5432/tcp" not found`, then `reaper … No such container`); the
+  fix was pointing `DOCKER_HOST` at that same Docker Desktop and setting
+  `TESTCONTAINERS_RYUK_DISABLED=true`, which passed.
 
 - The Transactions ledger's Kind filter (All / Expense / Income) is a real
   `<fieldset>` of `<input type="radio">`s, built keyboard-reachable on

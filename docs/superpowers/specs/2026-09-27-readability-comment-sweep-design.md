@@ -1,6 +1,6 @@
 # Readability item 0 — the backend comment sweep — design
 
-Date: 2026-09-27 · Status: approved in brainstorming, awaiting spec review ·
+Date: 2026-09-27 · Status: implemented on refactor/comment-sweep ·
 Route: Plan (`superpowers:writing-plans`, then `superpowers:executing-plans`,
 then `/code-review`)
 

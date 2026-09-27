@@ -320,9 +320,11 @@ const (
 	maxTransactionLimit     = 200
 )
 
-// startOfMonth normalises any instant to the first day of its month, in UTC.
-// occurred_on is a date column and this product stores no timezone per
-// household, so a month is a calendar month and not a range of instants.
+// startOfMonth returns midnight UTC on the first of t's month, reading the
+// year and month in t's own location, exactly like the usecase package's
+// startOfMonth. occurred_on is a date column and this product stores no
+// timezone per household, so a month is a calendar month and not a range of
+// instants.
 func startOfMonth(t time.Time) time.Time {
 	return time.Date(t.Year(), t.Month(), 1, 0, 0, 0, 0, time.UTC)
 }

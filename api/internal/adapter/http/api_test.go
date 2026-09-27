@@ -72,8 +72,8 @@ func (noopMailer) SendSignupForExistingAccount(context.Context, string, string) 
 // Unlike telegram_api_test.go's unused* doubles, it must not panic:
 // InviteService.NewLink calls SendLinkCancelled for real when a test's
 // invite was knocked before the route runs, and that courtesy send is
-// best-effort by design (NewLink's doc comment), so silent success is
-// correct here.
+// best-effort by design (the comment inside InviteService.NewLink), so
+// silent success is correct here.
 type noopInviteChats struct{}
 
 func (noopInviteChats) SendSignIn(context.Context, int64, string) error { return nil }

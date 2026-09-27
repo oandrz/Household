@@ -97,7 +97,7 @@ func (s *MemberService) Update(ctx context.Context, householdID, membershipID st
 	// deliberately not rolled back: undoing a valid change to compensate would
 	// trade a small window (a stale session lives a little longer) for a
 	// worse one (a write that reports success and then silently reverts
-	// itself). See auth.go for the same documented asymmetry.
+	// itself). sendMagicLinkAsync (auth.go) makes the same trade.
 	if err := s.revokeCredentials(ctx, written.UserID); err != nil {
 		slog.Error("failed to revoke credentials after a membership update",
 			"error", err, "household_id", householdID, "membership_id", membershipID)

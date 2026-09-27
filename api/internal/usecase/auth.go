@@ -390,10 +390,9 @@ func (s *AuthService) RequestMagicLink(ctx context.Context, email string) error 
 // sendMagicLinkAsync fires the email off the request path and returns
 // immediately, for one reason seen from two sides:
 //
-//   - Timing: the synchronous SMTP conversation plus the token's DB write
-//     make the known-address branch far slower than the couple-reads-only
-//     unknown/rate-limited branches -- more than the SignIn decoy
-//     machinery guards against.
+//   - Timing: a synchronous SMTP conversation would make the known-address
+//     branch far slower than the couple-reads-only unknown/rate-limited
+//     branches -- more than the SignIn decoy machinery guards against.
 //   - Correctness: the contract is "always nil, always silent," so a down
 //     or rejecting relay must not surface as an error on the known-address
 //     branch alone -- that would be a discrete membership oracle, cheaper

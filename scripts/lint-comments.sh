@@ -1,12 +1,11 @@
 #!/usr/bin/env bash
 # Joins each run of consecutive whole-line comments into one block before
 # matching, so a reference split across lines ("decision" / "// 7") cannot
-# escape a plain per-line grep -- that has already happened once in this
-# sweep. A comment trailing code on the same line (a struct field like
-# `Kind string `json:"kind"` // ... (decision 21)`, the exact shape this
-# codebase used before the sweep) can never itself span two lines, so it is
-# matched against its own text directly instead of feeding the block
-# machine. The join needs a per-line state machine (function calls, a
+# escape a plain per-line grep. A comment trailing code on the same line (a
+# struct field like `Kind string `json:"kind"` // ... (decision 21)`, the
+# shape these references most often took) can never itself span two lines,
+# so it is matched against its own text directly instead of feeding the
+# block machine. The join needs a per-line state machine (function calls, a
 # file-boundary reset, per-line offsets so a split reference is blamed on
 # the line the match starts on) that would be unreadable once every $ in it
 # had to be doubled for Make's own variable syntax, so it lives here instead
@@ -121,7 +120,7 @@ out=$(awk -v pat1="$PAT1" -v pat2="$PAT2" '
 
 if [ -n "$out" ]; then
   echo "$out"
-  echo "lint-comments: state the rule, not a plan number or a line number (CLAUDE.md, Comments)"
+  echo "lint-comments: state the rule, not a plan number or a line number (CLAUDE.md: \"Comments state the rule, not where it came from\")"
   exit 1
 fi
 echo "lint-comments passed"

@@ -55,7 +55,7 @@ var uniqueConstraintErrors = map[string]error{
 	// a 409.
 	"transactions_household_idempotency_key": domain.ErrIdempotencyKeyInUse,
 
-	// agreement_sections' UNIQUE (household_id, name), 00015_agreements.sql.
+	// agreement_sections' UNIQUE (household_id, name), 00014_agreements.sql.
 	// AgreementRepository.CreateSection's contract: the unique index decides
 	// the collision, never a pre-read, so the screen can say "you already
 	// have a section called that". Sections are never deleted, so a name is
