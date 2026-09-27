@@ -130,7 +130,7 @@ func (s *AgreementService) compose(ctx context.Context, householdID string) (Agr
 		return AgreementsView{}, agreementLookups{}, err
 	}
 	lk := agreementLookups{
-		all:          membershipsFrom(views), // member.go:130
+		all:          membershipsFrom(views), // defined in member.go
 		names:        make(map[string]string, len(views)),
 		liveBody:     make(map[string]string, len(doc.Agreements)),
 		sectionNames: make(map[string]string, len(doc.Sections)),

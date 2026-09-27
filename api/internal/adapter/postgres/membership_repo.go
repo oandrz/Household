@@ -3,14 +3,26 @@ package postgres
 import (
 	"context"
 
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+
 	"github.com/andreasoentoro/hearth/api/internal/adapter/postgres/sqlcgen"
 	"github.com/andreasoentoro/hearth/api/internal/domain"
 	"github.com/andreasoentoro/hearth/api/internal/usecase"
 )
 
-type MembershipRepo struct{ q *sqlcgen.Queries }
+// MembershipRepo keeps the pool alongside the pool-backed *sqlcgen.Queries,
+// like HoldingEventRepo, because UpdateWithCheck and DeleteWithCheck each
+// begin their own transaction -- something a *sqlcgen.Queries built once at
+// construction time cannot do on its own.
+type MembershipRepo struct {
+	q    *sqlcgen.Queries
+	pool *pgxpool.Pool
+}
 
-func NewMembershipRepo(db *DB) *MembershipRepo { return &MembershipRepo{q: sqlcgen.New(db.Pool())} }
+func NewMembershipRepo(db *DB) *MembershipRepo {
+	return &MembershipRepo{q: sqlcgen.New(db.Pool()), pool: db.Pool()}
+}
 
 func (r *MembershipRepo) List(ctx context.Context, householdID string) ([]usecase.MemberView, error) {
 	rows, err := r.q.ListMemberships(ctx, uuid(householdID))
@@ -65,18 +77,104 @@ func (r *MembershipRepo) Create(ctx context.Context, m domain.Membership) (domai
 	return toMembership(row.ID, row.HouseholdID, row.UserID, row.Role, row.Capabilities)
 }
 
-func (r *MembershipRepo) Update(ctx context.Context, householdID, membershipID string, role domain.Role, caps domain.Capabilities) error {
-	return translate(r.q.UpdateMembership(ctx, sqlcgen.UpdateMembershipParams{
-		HouseholdID:  uuid(householdID),
-		ID:           uuid(membershipID),
-		Role:         string(role),
-		Capabilities: caps.Strings(),
-	}), "update membership")
+// UpdateWithCheck changes one membership with the household's rules held
+// across the write.
+//
+// It locks the household row, lists the household's memberships inside the
+// same transaction, and hands them to check -- the caller's own rule, which is
+// domain.ValidateMembershipChange. Only if check accepts does the update
+// happen, and the lock is not released until the transaction commits. A
+// second writer blocks on the lock and therefore checks the FIRST one's
+// result, not a stale copy of it.
+//
+// Without this, two owners demoting each other at the same moment each see
+// "another owner remains", both commit, and the household is left with no
+// owner at all -- nobody who can manage members, invites or settings. The
+// rule stays in the domain; this method owns the transaction and the lock.
+func (r *MembershipRepo) UpdateWithCheck(
+	ctx context.Context,
+	householdID, membershipID string,
+	role domain.Role, caps domain.Capabilities,
+	check func([]domain.Membership) error,
+) error {
+	return pgx.BeginFunc(ctx, r.pool, func(tx pgx.Tx) error {
+		q := r.q.WithTx(tx)
+		current, err := lockAndListMembershipsTx(ctx, q, householdID)
+		if err != nil {
+			return err
+		}
+		if err := check(current); err != nil {
+			return err
+		}
+		n, err := q.UpdateMembership(ctx, sqlcgen.UpdateMembershipParams{
+			HouseholdID:  uuid(householdID),
+			ID:           uuid(membershipID),
+			Role:         string(role),
+			Capabilities: caps.Strings(),
+		})
+		if err != nil {
+			return translate(err, "update membership")
+		}
+		// An UPDATE that matched nothing is not success: the membership is
+		// not this household's, and the caller must be told so.
+		if n == 0 {
+			return domain.ErrNotFound
+		}
+		return nil
+	})
 }
 
-func (r *MembershipRepo) Delete(ctx context.Context, householdID, membershipID string) error {
-	return translate(r.q.DeleteMembership(ctx, sqlcgen.DeleteMembershipParams{
-		HouseholdID: uuid(householdID),
-		ID:          uuid(membershipID),
-	}), "delete membership")
+// DeleteWithCheck is UpdateWithCheck's guarantee for removing a membership.
+// check receives the memberships as they are before the removal.
+func (r *MembershipRepo) DeleteWithCheck(
+	ctx context.Context,
+	householdID, membershipID string,
+	check func([]domain.Membership) error,
+) error {
+	return pgx.BeginFunc(ctx, r.pool, func(tx pgx.Tx) error {
+		q := r.q.WithTx(tx)
+		current, err := lockAndListMembershipsTx(ctx, q, householdID)
+		if err != nil {
+			return err
+		}
+		if err := check(current); err != nil {
+			return err
+		}
+		n, err := q.DeleteMembership(ctx, sqlcgen.DeleteMembershipParams{
+			HouseholdID: uuid(householdID),
+			ID:          uuid(membershipID),
+		})
+		if err != nil {
+			return translate(err, "delete membership")
+		}
+		if n == 0 {
+			return domain.ErrNotFound
+		}
+		return nil
+	})
+}
+
+// lockAndListMembershipsTx is the shared first half of the two guarded
+// writes: take the household's membership lock, then read its memberships.
+// The ORDER matters. The list is a new statement run after the lock is held,
+// so it sees whatever an earlier writer committed while this one waited.
+func lockAndListMembershipsTx(ctx context.Context, q *sqlcgen.Queries, householdID string) ([]domain.Membership, error) {
+	// No row means no such household: translate turns that into
+	// domain.ErrNotFound, which is also the honest answer for its members.
+	if _, err := q.LockHouseholdMemberships(ctx, uuid(householdID)); err != nil {
+		return nil, translate(err, "lock household memberships")
+	}
+	rows, err := q.ListMemberships(ctx, uuid(householdID))
+	if err != nil {
+		return nil, translate(err, "list memberships")
+	}
+	out := make([]domain.Membership, len(rows))
+	for i, row := range rows {
+		m, err := toMembership(row.ID, row.HouseholdID, row.UserID, row.Role, row.Capabilities)
+		if err != nil {
+			return nil, err
+		}
+		out[i] = m
+	}
+	return out, nil
 }

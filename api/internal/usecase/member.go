@@ -46,29 +46,33 @@ func (s *MemberService) List(ctx context.Context, householdID string) ([]MemberV
 	return s.d.Members.List(ctx, householdID)
 }
 
-// Update changes a member's role and/or capabilities. The full membership
-// list is loaded first so domain.ValidateMembershipChange can weigh the
-// change against the whole household -- the last-owner rule is not a
-// property of one membership in isolation. A successful change revokes the
-// member's sessions: a capability or role change that stayed effective in an
-// already-open tab would defeat the point of granting or revoking it.
+// Update changes a member's role and/or capabilities.
+// domain.ValidateMembershipChange weighs the change against the whole
+// household -- the last-owner rule is not a property of one membership in
+// isolation -- and it runs INSIDE the write's own transaction, on the
+// memberships read under the household's lock, not as a separate read before
+// it: two owners demoting each other are each legal alone and illegal
+// together, and checking then writing lets both through. The rule stays here;
+// UpdateWithCheck supplies the lock.
+//
+// A successful change revokes the member's sessions: a capability or role
+// change that stayed effective in an already-open tab would defeat the point
+// of granting or revoking it.
 func (s *MemberService) Update(ctx context.Context, householdID, membershipID string, role domain.Role, caps domain.Capabilities) error {
-	views, err := s.d.Members.List(ctx, householdID)
+	// The check records whose credentials to revoke from the same locked read
+	// it validated, so the revocation below targets exactly the member the
+	// change was applied to.
+	var targetUserID string
+	err := s.d.Members.UpdateWithCheck(ctx, householdID, membershipID, role, caps,
+		func(current []domain.Membership) error {
+			if err := domain.ValidateMembershipChange(current, membershipID, role, caps); err != nil {
+				return err
+			}
+			userID, err := userIDOf(current, membershipID)
+			targetUserID = userID
+			return err
+		})
 	if err != nil {
-		return err
-	}
-	all := membershipsFrom(views)
-
-	if err := domain.ValidateMembershipChange(all, membershipID, role, caps); err != nil {
-		return err
-	}
-
-	target, err := findMemberView(views, membershipID)
-	if err != nil {
-		return err
-	}
-
-	if err := s.d.Members.Update(ctx, householdID, membershipID, role, caps); err != nil {
 		return err
 	}
 
@@ -81,7 +85,7 @@ func (s *MemberService) Update(ctx context.Context, householdID, membershipID st
 	// reverts itself, which is worse than either outcome alone and would
 	// need its own failure handling anyway). See auth.go for the same style
 	// of documented, deliberate asymmetry.
-	if err := s.revokeCredentials(ctx, target.Membership.UserID); err != nil {
+	if err := s.revokeCredentials(ctx, targetUserID); err != nil {
 		slog.Error("failed to revoke credentials after a membership update",
 			"error", err, "household_id", householdID, "membership_id", membershipID)
 		return fmt.Errorf("%w: %v", ErrSessionRevocationFailed, err)
@@ -103,26 +107,24 @@ func (s *MemberService) revokeCredentials(ctx context.Context, userID string) er
 }
 
 // Remove deletes a membership, refusing to leave the household without an
-// owner (domain.ValidateMembershipRemoval). A successful removal revokes the
-// removed member's sessions, exactly as Update does, so a removed member's
-// open tab stops working immediately rather than riding out its session TTL.
+// owner (domain.ValidateMembershipRemoval). As in Update, the rule runs inside
+// DeleteWithCheck's transaction under the household's lock, so a removal
+// cannot race a concurrent demotion or removal of the other owner. A
+// successful removal revokes the removed member's sessions, exactly as Update
+// does, so a removed member's open tab stops working immediately rather than
+// riding out its session TTL.
 func (s *MemberService) Remove(ctx context.Context, householdID, membershipID string) error {
-	views, err := s.d.Members.List(ctx, householdID)
+	var targetUserID string
+	err := s.d.Members.DeleteWithCheck(ctx, householdID, membershipID,
+		func(current []domain.Membership) error {
+			if err := domain.ValidateMembershipRemoval(current, membershipID); err != nil {
+				return err
+			}
+			userID, err := userIDOf(current, membershipID)
+			targetUserID = userID
+			return err
+		})
 	if err != nil {
-		return err
-	}
-	all := membershipsFrom(views)
-
-	if err := domain.ValidateMembershipRemoval(all, membershipID); err != nil {
-		return err
-	}
-
-	target, err := findMemberView(views, membershipID)
-	if err != nil {
-		return err
-	}
-
-	if err := s.d.Members.Delete(ctx, householdID, membershipID); err != nil {
 		return err
 	}
 
@@ -132,7 +134,7 @@ func (s *MemberService) Remove(ctx context.Context, householdID, membershipID st
 	// removed member's prior session(s) may stay live a little longer than
 	// intended) for a larger one (a removal that silently un-happens, which
 	// is worse than either outcome alone).
-	if err := s.revokeCredentials(ctx, target.Membership.UserID); err != nil {
+	if err := s.revokeCredentials(ctx, targetUserID); err != nil {
 		slog.Error("failed to revoke credentials after a membership removal",
 			"error", err, "household_id", householdID, "membership_id", membershipID)
 		return fmt.Errorf("%w: %v", ErrSessionRevocationFailed, err)
@@ -140,29 +142,28 @@ func (s *MemberService) Remove(ctx context.Context, householdID, membershipID st
 	return nil
 }
 
-// membershipsFrom projects a member list down to the plain memberships
-// domain.ValidateMembershipChange and domain.ValidateMembershipRemoval
-// operate on -- both take []domain.Membership, not []MemberView, because the
-// last-owner rule cares about role and capabilities, not the joined user.
+// userIDOf finds the user behind a membership ID in the list the check was
+// handed. It returns domain.ErrNotFound for a miss, matching what
+// ValidateMembershipChange/ValidateMembershipRemoval already return for the
+// same target -- by the time it is called, validation has just confirmed the
+// ID exists in the same list, so a miss here would be the identical case.
+func userIDOf(memberships []domain.Membership, membershipID string) (string, error) {
+	for _, m := range memberships {
+		if m.ID == membershipID {
+			return m.UserID, nil
+		}
+	}
+	return "", domain.ErrNotFound
+}
+
+// membershipsFrom projects a member list down to the plain memberships the
+// domain rules operate on -- they take []domain.Membership, not
+// []MemberView, because rules like the last-owner rule care about role and
+// capabilities, not the joined user. AgreementService uses it.
 func membershipsFrom(views []MemberView) []domain.Membership {
 	out := make([]domain.Membership, len(views))
 	for i, v := range views {
 		out[i] = v.Membership
 	}
 	return out
-}
-
-// findMemberView locates the MemberView for a membership ID within an
-// already-loaded list. It returns domain.ErrNotFound for a miss, matching
-// what ValidateMembershipChange/ValidateMembershipRemoval already return for
-// the same target -- by the time this is called, either validation has just
-// confirmed the ID exists in the same list, or a caller invoked it directly,
-// and either way an absent target is the identical "not found" case.
-func findMemberView(views []MemberView, membershipID string) (MemberView, error) {
-	for _, v := range views {
-		if v.Membership.ID == membershipID {
-			return v, nil
-		}
-	}
-	return MemberView{}, domain.ErrNotFound
 }

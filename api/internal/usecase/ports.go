@@ -130,8 +130,29 @@ type MembershipRepository interface {
 	// belonged to two households.
 	ByUser(ctx context.Context, userID string) (domain.Membership, error)
 	Create(ctx context.Context, m domain.Membership) (domain.Membership, error)
-	Update(ctx context.Context, householdID, membershipID string, role domain.Role, caps domain.Capabilities) error
-	Delete(ctx context.Context, householdID, membershipID string) error
+	// UpdateWithCheck changes one membership's role and capabilities with a
+	// household-wide rule held ACROSS the write. The implementation locks the
+	// household, lists its memberships in the same transaction, calls check
+	// with them, and writes only if check returns nil -- so a second writer
+	// blocks and then checks the first one's result rather than a stale copy.
+	// A check error is returned unchanged and nothing is written.
+	//
+	// Listing, checking and writing as three separate calls is NOT
+	// equivalent: two owners demoting each other at the same moment would
+	// each see "another owner remains", both commit, and leave the household
+	// with no owner. check is the caller's own rule
+	// (domain.ValidateMembershipChange); this port owns the transaction and
+	// the lock, never the rule.
+	//
+	// There is deliberately no unguarded Update: every role change can
+	// affect the last-owner rule, so there is no safe way to skip the check.
+	// A membership that is not this household's is domain.ErrNotFound.
+	UpdateWithCheck(ctx context.Context, householdID, membershipID string, role domain.Role, caps domain.Capabilities, check func(current []domain.Membership) error) error
+	// DeleteWithCheck is the same guarantee for removing a membership. check
+	// receives the memberships as they are BEFORE the removal
+	// (domain.ValidateMembershipRemoval works out what would remain), and the
+	// same "no unguarded Delete" and domain.ErrNotFound rules apply.
+	DeleteWithCheck(ctx context.Context, householdID, membershipID string, check func(current []domain.Membership) error) error
 }
 
 type SessionRecord struct {

@@ -67,10 +67,34 @@ INSERT INTO memberships (household_id, user_id, role, capabilities)
 VALUES ($1, $2, $3, $4)
 RETURNING id, household_id, user_id, role, capabilities;
 
--- name: UpdateMembership :exec
+-- LockHouseholdMemberships takes a row lock on the household so that two
+-- membership changes in it run one after the other. It returns the id only
+-- because a query must return something; the lock is the point. Callers take
+-- it first inside a transaction, THEN list the memberships and check them --
+-- see MembershipRepository.UpdateWithCheck. Because the list is a new
+-- statement run after the lock is held, it sees whatever the previous writer
+-- committed; the second of two racing owners checks the first one's result.
+--
+-- Why the household row and not the membership rows: one row is one simple
+-- queue for "anything changing who is in this household", and the list that
+-- follows needs no reasoning about how Postgres re-reads a locked row.
+--
+-- Why FOR NO KEY UPDATE and not FOR UPDATE: every insert into a table that
+-- references households (transactions, bills, ...) takes FOR KEY SHARE on the
+-- household row, which FOR UPDATE would block and FOR NO KEY UPDATE does not.
+-- Two membership changes still exclude each other, because FOR NO KEY UPDATE
+-- conflicts with itself -- which is all this lock is for.
+-- name: LockHouseholdMemberships :one
+SELECT id FROM households WHERE id = $1 FOR NO KEY UPDATE;
+
+-- UpdateMembership and DeleteMembership report how many rows they touched so
+-- the repository can answer domain.ErrNotFound for a membership that is not
+-- this household's, instead of a silent success. Call them only through
+-- MembershipRepository.UpdateWithCheck / DeleteWithCheck, which hold the lock.
+-- name: UpdateMembership :execrows
 UPDATE memberships SET role = $3, capabilities = $4 WHERE household_id = $1 AND id = $2;
 
--- name: DeleteMembership :exec
+-- name: DeleteMembership :execrows
 DELETE FROM memberships WHERE household_id = $1 AND id = $2;
 
 -- name: CreateSession :one
