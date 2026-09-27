@@ -35,7 +35,7 @@ func TestParseAmountRefusesWhatTheCurrencyCannotHold(t *testing.T) {
 		{"9999999999999999999", 2},
 	}
 	for _, c := range bad {
-		if _, err := domain.ParseAmount(c.text, c.units); !errors.Is(err, domain.ErrInvalidMoney) {
+		if _, err := domain.ParseAmount(c.text, c.units); !errors.Is(err, domain.ErrInvalidAmount) {
 			t.Errorf("ParseAmount(%q, %d) should refuse, got %v", c.text, c.units, err)
 		}
 	}

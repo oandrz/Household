@@ -78,7 +78,7 @@ func (i HoldingIncome) Validate(holdingCurrency, primaryCurrency string) error {
 		return fmt.Errorf("%w: income is %s, holding is %s", ErrCurrencyMismatch, i.Amount.Currency, holdingCurrency)
 	}
 	if i.Amount.Amount < 0 {
-		return fmt.Errorf("%w: an income amount cannot be negative, got %d", ErrInvalidMoney, i.Amount.Amount)
+		return fmt.Errorf("%w: an income amount cannot be negative, got %d", ErrNegativeAmount, i.Amount.Amount)
 	}
 	// Zero is refused for the reason a zero-quantity event is: nothing changed
 	// hands, so there is nothing to record, and a row of zero only dilutes the

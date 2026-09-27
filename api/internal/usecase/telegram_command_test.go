@@ -130,7 +130,7 @@ func TestLogSpendParsesTheAmountInTheAccountsCurrency(t *testing.T) {
 	in := spend(1)
 	in.CategoryName = ""
 	in.AmountText = "12.5"
-	if _, err := svc.LogSpend(context.Background(), in); !errors.Is(err, domain.ErrInvalidMoney) {
+	if _, err := svc.LogSpend(context.Background(), in); !errors.Is(err, domain.ErrInvalidAmount) {
 		t.Fatalf("12.5 yen must be refused, got %v", err)
 	}
 	in.UpdateID, in.AmountText = 2, "1200"

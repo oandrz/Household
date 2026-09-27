@@ -306,6 +306,28 @@ var domainErrorResponses = []domainErrorResponse{
 		message:   "That currency code is not valid.",
 	},
 	{
+		// Every money field that cannot go below zero -- a holding event's
+		// amount, a unit price, an income amount, a primary-currency figure.
+		// Before this row existed they all wrapped ErrInvalidMoney and were
+		// told their currency code was wrong.
+		sentinels: []error{domain.ErrNegativeAmount},
+		status:    http.StatusUnprocessableEntity,
+		code:      "NEGATIVE_AMOUNT",
+		message:   "An amount cannot be negative.",
+	},
+	{
+		// ParseAmount's refusal. No HTTP route parses amount text today --
+		// the API takes minor units as integers -- so only the Telegram
+		// channel reaches it (explain() in adapter/telegram/commands.go).
+		// Mapped anyway so a future route that does parse text answers a
+		// 422 rather than a 500. Shares INVALID_AMOUNT with the transaction
+		// row below: the same field-level problem, a different sentence.
+		sentinels: []error{domain.ErrInvalidAmount},
+		status:    http.StatusUnprocessableEntity,
+		code:      "INVALID_AMOUNT",
+		message:   "That amount could not be read. Use digits, with no more decimal places than the currency has.",
+	},
+	{
 		sentinels: []error{domain.ErrInviteExpired},
 		status:    http.StatusGone,
 		code:      "INVITE_EXPIRED",

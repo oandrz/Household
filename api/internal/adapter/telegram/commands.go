@@ -473,7 +473,12 @@ func explain(err error) string {
 			return fmt.Sprintf("No %s called %q. One of: %s", re.What, re.Typed, list)
 		}
 	}
-	if errorsIs(err, domain.ErrInvalidMoney) {
+	// ErrInvalidAmount, not ErrInvalidMoney: /spend's amount text goes
+	// through domain.ParseAmount, and ErrInvalidMoney now means a currency
+	// problem only. Nothing a chat member types reaches a currency check --
+	// the account's own stored currency is used -- so an ErrInvalidMoney here
+	// is an internal fault and falls through to the logged generic reply.
+	if errorsIs(err, domain.ErrInvalidAmount) {
 		return "That amount could not be read. Use the account's currency, e.g. 84.50 (no more decimals than the currency has)."
 	}
 	if errorsIs(err, domain.ErrCategoryKindMismatch) {

@@ -67,7 +67,7 @@ func (q Quantity) Value(unitPrice Money) (Money, error) {
 	// negative market value, which is a debt -- and a debt is an account type,
 	// not a holding. Fail closed rather than quietly producing that figure.
 	if unitPrice.Amount < 0 {
-		return Money{}, fmt.Errorf("%w: a unit price cannot be negative, got %d", ErrInvalidMoney, unitPrice.Amount)
+		return Money{}, fmt.Errorf("%w: a unit price cannot be negative, got %d", ErrNegativeAmount, unitPrice.Amount)
 	}
 
 	out, ok := mulDivRoundHalfAway(q.nano, unitPrice.Amount, QuantityScale)
@@ -173,7 +173,7 @@ func (m Money) Prorate(part, whole Quantity) (Money, error) {
 	// need it. The day a caller genuinely needs to prorate a negative, drop
 	// this refusal WITH a test.
 	if m.Amount < 0 {
-		return Money{}, fmt.Errorf("%w: cannot prorate a negative amount, got %d", ErrInvalidMoney, m.Amount)
+		return Money{}, fmt.Errorf("%w: cannot prorate a negative amount, got %d", ErrNegativeAmount, m.Amount)
 	}
 	if whole.nano <= 0 {
 		return Money{}, fmt.Errorf("%w: %d", ErrProrateWholeNotPositive, whole.nano)

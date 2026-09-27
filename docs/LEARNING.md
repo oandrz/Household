@@ -4730,6 +4730,24 @@ route with a missing guard has no second line of defence.
   member, including children.
 - Nine `json.Decoder` calls with no size limit; three of them pre-auth.
 - Two sentinels answered 500 for ordinary user input.
+- **One sentinel, three meanings, one message (B3, fixed 2026-09-27).**
+  `domain.ErrInvalidMoney` was mapped to `422 INVALID_CURRENCY`, "That
+  currency code is not valid.", because the first thing to reach the HTTP
+  layer with it was a mistyped currency code. Later code reused the same
+  sentinel for two unrelated refusals: a **negative amount** (holding event,
+  unit price, income, primary-currency figure, prorate) and **unreadable
+  amount text** (`ParseAmount`, Telegram `/spend`). So a household entering
+  a negative purchase price was told to fix a currency field it never
+  touched. Confirmed over HTTP on all four holding money fields before the
+  fix. Each now has its own sentinel: `ErrNegativeAmount` → `422
+  NEGATIVE_AMOUNT`, `ErrInvalidAmount` → `422 INVALID_AMOUNT`, and Telegram's
+  `explain()` now keys its "could not be read" reply off `ErrInvalidAmount`.
+  `ErrInvalidMoney` means a currency problem only, and its doc comment says
+  so. Every test that asserted the old sentinel for a negative or a parse
+  failure was also asserting the wrong thing, and passed because the
+  sentinel was shared. **When you wrap an existing sentinel, read the
+  message its HTTP row answers with; if that sentence is wrong for your
+  case, you need a new sentinel, not a reused one.**
 - The session cookie never slid — the database row was extended, the cookie's
   expiry was frozen at sign-in.
 - `middleware.Recoverer` wrote a bare 500, the one response without the error

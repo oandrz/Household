@@ -124,7 +124,7 @@ func (e HoldingEvent) Validate(holdingCurrency, primaryCurrency string) error {
 		return fmt.Errorf("%w: event is %s, holding is %s", ErrCurrencyMismatch, e.Amount.Currency, holdingCurrency)
 	}
 	if e.Amount.Amount < 0 {
-		return fmt.Errorf("%w: an event amount cannot be negative, got %d", ErrInvalidMoney, e.Amount.Amount)
+		return fmt.Errorf("%w: an event amount cannot be negative, got %d", ErrNegativeAmount, e.Amount.Amount)
 	}
 
 	return validatePrimaryAmount(e.PrimaryAmount, holdingCurrency, primaryCurrency)
@@ -154,7 +154,7 @@ func validatePrimaryAmount(primary *Money, holdingCurrency, primaryCurrency stri
 			ErrCurrencyMismatch, primary.Currency, primaryCurrency)
 	}
 	if primary.Amount < 0 {
-		return fmt.Errorf("%w: a primary amount cannot be negative, got %d", ErrInvalidMoney, primary.Amount)
+		return fmt.Errorf("%w: a primary amount cannot be negative, got %d", ErrNegativeAmount, primary.Amount)
 	}
 	return nil
 }
@@ -185,7 +185,7 @@ func (v Valuation) Validate(holdingCurrency, primaryCurrency string) error {
 		return fmt.Errorf("%w: valuation is %s, holding is %s", ErrCurrencyMismatch, v.UnitPrice.Currency, holdingCurrency)
 	}
 	if v.UnitPrice.Amount < 0 {
-		return fmt.Errorf("%w: a unit price cannot be negative, got %d", ErrInvalidMoney, v.UnitPrice.Amount)
+		return fmt.Errorf("%w: a unit price cannot be negative, got %d", ErrNegativeAmount, v.UnitPrice.Amount)
 	}
 	return validatePrimaryAmount(v.PrimaryUnitPrice, holdingCurrency, primaryCurrency)
 }

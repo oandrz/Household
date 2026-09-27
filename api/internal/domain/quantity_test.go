@@ -180,8 +180,8 @@ func TestValueRefusesANegativeUnitPrice(t *testing.T) {
 	q, _ := domain.NewQuantity(domain.QuantityScale)
 	price, _ := domain.NewMoney(-1, "SGD")
 
-	if _, err := q.Value(price); !errors.Is(err, domain.ErrInvalidMoney) {
-		t.Fatalf("Value error = %v, want ErrInvalidMoney", err)
+	if _, err := q.Value(price); !errors.Is(err, domain.ErrNegativeAmount) {
+		t.Fatalf("Value error = %v, want ErrNegativeAmount", err)
 	}
 }
 

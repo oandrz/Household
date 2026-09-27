@@ -59,8 +59,22 @@ var (
 	// ErrInvalidRate: a rate whose numerator or denominator is not positive.
 	// Rates come from a provider this code does not construct, so Rate.Apply
 	// checks rather than trusts.
-	ErrInvalidRate                  = errors.New("rate is invalid")
-	ErrInvalidMoney                 = errors.New("money value is invalid")
+	ErrInvalidRate = errors.New("rate is invalid")
+	// ErrInvalidMoney is a currency problem: a code that is not an active ISO
+	// 4217 currency, one this product cannot select, or a Money zero value
+	// that has no currency at all. It is NOT the error for a bad amount --
+	// adapter/http/errors.go answers it with "That currency code is not
+	// valid.", so an amount refused with it tells the person to fix the wrong
+	// field. Amounts have their own two sentinels, directly below.
+	ErrInvalidMoney = errors.New("money value is invalid")
+	// ErrNegativeAmount: a money figure that can only be zero or more was
+	// negative -- a holding event's amount, a unit price, an income amount,
+	// a primary-currency figure, a cost pool being prorated.
+	ErrNegativeAmount = errors.New("an amount cannot be negative")
+	// ErrInvalidAmount is ParseAmount's refusal: text that is not a
+	// positive amount the currency can represent -- not a number, too many
+	// decimal places, too large, or zero.
+	ErrInvalidAmount                = errors.New("that is not an amount")
 	ErrOwnerMustHoldAllCapabilities = errors.New("an owner must hold every capability")
 
 	// ErrQuantityNegative is NewQuantity's refusal. A holding's quantity is how

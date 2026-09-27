@@ -188,7 +188,7 @@ func TestRefusalsAreExplainedAndInternalErrorsAreNot(t *testing.T) {
 	cases := map[error]string{
 		&usecase.ResolutionError{What: "account", Typed: "DBX", Candidates: []string{"DBS", "OCBC"}}:    `No account called "DBX". One of: DBS, OCBC`,
 		&usecase.ResolutionError{What: "account", Candidates: []string{"DBS", "OCBC"}, Ambiguous: true}: "Which account? Add @name — one of: DBS, OCBC",
-		domain.ErrInvalidMoney:  "That amount could not be read",
+		domain.ErrInvalidAmount: "That amount could not be read",
 		errors.New("pgx: boom"): "That could not be saved",
 	}
 	for err, want := range cases {
