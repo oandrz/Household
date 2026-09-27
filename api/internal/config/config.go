@@ -18,22 +18,20 @@ type Config struct {
 	DatabaseURL string
 	SMTPAddr    string
 	SMTPFrom    string
-	// SMTPUsername and SMTPPassword are optional: empty (the default) means
-	// no SMTP AUTH is attempted at all, which is what talking to Mailpit
-	// (development) needs. Set both together for a relay that requires
-	// authentication -- see SMTPTLSMode's doc comment for why "both or
-	// neither" is the only combination Load accepts.
+	// SMTPUsername and SMTPPassword are optional: empty means no SMTP AUTH,
+	// which is what talking to Mailpit (development) needs. Set both
+	// together for a relay that requires authentication -- Load's own check
+	// below says why it must be both or neither.
 	SMTPUsername string
 	SMTPPassword string
-	// SMTPTLSMode is one of "none", "opportunistic" or "mandatory",
-	// controlling whether the mailer requires, attempts, or never uses
-	// STARTTLS. It defaults to "none" in development (Mailpit speaks plain
-	// SMTP on the Compose network, and requiring TLS there would break it)
-	// and to "mandatory" everywhere else: no hosted relay accepts an
-	// unauthenticated, unencrypted connection, and the send is fire-and-
-	// forget (see usecase/auth.go's sendMagicLinkAsync), so a silently
-	// downgraded or rejected connection would otherwise never surface
-	// anywhere a caller or an operator could see it.
+	// SMTPTLSMode is one of "none", "opportunistic" or "mandatory" --
+	// "none" never uses STARTTLS, "opportunistic" tries it, "mandatory"
+	// requires it. It defaults to "none" in development, since Mailpit
+	// speaks plain SMTP and TLS would break it, and to "mandatory"
+	// elsewhere, since no hosted relay accepts an unauthenticated,
+	// unencrypted connection and the send is fire-and-forget
+	// (usecase/auth.go's sendMagicLinkAsync) -- a silently downgraded or
+	// rejected connection would otherwise go unseen.
 	SMTPTLSMode     string
 	AppBaseURL      string
 	Argon2Time      uint32
@@ -41,66 +39,61 @@ type Config struct {
 	Argon2Threads   uint8
 	// TelegramBotToken and TelegramBotUsername are optional and travel
 	// together: both set turns Telegram sign-in on, both empty leaves it off.
-	// One without the other is refused for the same reason SMTP_USERNAME and
-	// SMTP_PASSWORD are -- a half-configured channel misbehaves silently, and
-	// the symptom (links that are minted and never delivered) looks exactly
-	// like nobody using the feature.
+	// One without the other is refused, since a half-configured channel
+	// fails silently -- the symptom (minted, never-delivered links) looks
+	// exactly like nobody using the feature.
 	//
 	// The username is configured rather than read from Telegram's getMe at
-	// startup: no cleverness, and no startup dependency on Telegram being
-	// reachable.
+	// startup, to avoid a startup dependency on Telegram being reachable.
 	TelegramBotToken    string
 	TelegramBotUsername string
 	// MailpitAPIURL is Mailpit's HTTP API, http://mailpit:8025 in both
-	// Compose stacks. Optional: empty means the operator's outbound message
-	// inspector is unavailable and says so, rather than showing an empty
-	// list -- an empty list would read as "Hearth has sent no mail".
+	// Compose stacks. Optional: empty means the outbound message inspector
+	// is unavailable and says so, rather than showing an empty list that
+	// would read as "Hearth has sent no mail".
 	//
-	// A value that is set but unusable refuses the boot, for the same reason
-	// the SMTP and Telegram pairs do: a typo here would otherwise present on
-	// the box as a 502 on one admin screen, with nothing pointing back at the
-	// .env line that caused it.
+	// A value that is set but unusable refuses the boot, like the SMTP and
+	// Telegram pairs -- otherwise a typo here presents as a 502 on one
+	// admin screen, with nothing pointing back at the .env line.
 	MailpitAPIURL string
 	// DatabaseReadonlyURL is the DSN for hearth_readonly, the SELECT-only
 	// role the operator's database browse reads through
 	// (deploy/readonly-role.sql creates it). Optional: empty means the
 	// browse is unavailable and says which variable is missing.
 	//
-	// There is deliberately no fallback to DatabaseURL. A half-provisioned
-	// box degrades to "you cannot use this panel", never to "you are using
-	// it through the read-write connection".
+	// There is deliberately no fallback to DatabaseURL -- a half-provisioned
+	// box degrades to "you cannot use this panel", never to using the
+	// read-write connection instead.
 	//
-	// It is NOT validated here, unlike every other optional value in this
-	// file. net/url cannot tell a broken DSN from a legal keyword/value one
-	// ("host=db user=x" parses fine and is valid), and the only honest
-	// parser is pgxpool.ParseConfig, which belongs to the adapter layer --
-	// this package imports the standard library and nothing else, and that
-	// is worth more than moving one error message. postgres.OpenReadOnly
-	// refuses the boot on a value it cannot parse, and on one that connects
-	// as a role which can write.
+	// It is not validated here, unlike every other optional value in this
+	// file: net/url cannot tell a broken DSN from a legal keyword/value one,
+	// and the only honest parser, pgxpool.ParseConfig, belongs to the
+	// adapter layer, and keeping this package standard-library-only is
+	// worth more than moving one error message. postgres.OpenReadOnly
+	// refuses the boot on a value it cannot parse, or one that connects as
+	// a role which can write.
 	DatabaseReadonlyURL string
-	// OpenRouterAPIKey and OpenRouterModel turn free-text intent parsing on
-	// for the Telegram bot through OpenRouter (adapter/openrouter). They
-	// travel together: a key with no model has nothing to call, and a model
-	// with no key cannot call it. The model is never defaulted in code,
-	// because the free, tool-capable models OpenRouter offers change month
-	// to month; up to three, comma-separated, are tried in order. Empty is
-	// the default and means commands only.
+	// OpenRouterAPIKey and OpenRouterModel turn on free-text Telegram intent
+	// parsing (adapter/openrouter). They travel together: a key with no
+	// model has nothing to call, and a model with no key cannot call it.
+	// The model is never defaulted, since OpenRouter's free, tool-capable
+	// models change monthly -- up to three, comma-separated, are tried in
+	// order. Empty means commands only.
 	OpenRouterAPIKey string
 	OpenRouterModel  string
 	// NudgesAt and NudgesLocation turn the daily Telegram digest on: a local
 	// "HH:MM" and the IANA zone it is read in. Both or neither, and only
-	// with Telegram configured, since a digest with no channel is a
-	// misconfiguration rather than "off". One zone for the whole install
-	// is a known gap (the tracker names it): right for one household,
-	// wrong the day a second one signs up from another zone.
+	// with Telegram configured -- a digest with no channel is a
+	// misconfiguration, not "off". One zone for the whole install is a
+	// known gap (the tracker names it): right for one household, wrong once
+	// a second signs up from another zone.
 	NudgesAt       string
 	NudgesLocation *time.Location
 	// TrustedProxies are the networks allowed to tell the API who the client
-	// is, through the X-Real-IP header (TRUSTED_PROXY_CIDRS, comma-separated
+	// is, via the X-Real-IP header (TRUSTED_PROXY_CIDRS, comma-separated
 	// CIDRs). A request from anywhere else is keyed by the address that
-	// actually connected and its headers are ignored. Empty -- the default --
-	// trusts nobody; Load says why that is the safe way round.
+	// actually connected, headers ignored. Empty -- the default -- trusts
+	// nobody; Load says why that is the safe default.
 	TrustedProxies []netip.Prefix
 }
 
@@ -122,17 +115,17 @@ func (c Config) IntentParsingEnabled() bool { return c.OpenRouterAPIKey != "" }
 func (c Config) NudgesEnabled() bool { return c.NudgesAt != "" }
 
 // OutboxEnabled reports whether the outbound message inspector is configured.
-// When it is false the admin routes answer 503 and say which variable is
-// missing -- never 404, because everyone who can reach them has already
-// proved they are a platform admin with a live grant, and hiding the route
-// from them would cost them the one fact that tells them what to fix.
+// When it is false the admin routes answer 503 and name the missing
+// variable -- never 404, since everyone who reaches them has already proved
+// they are a platform admin with a live grant, and hiding the route would
+// cost them the one fact that tells them what to fix.
 func (c Config) OutboxEnabled() bool { return c.MailpitAPIURL != "" }
 
 // BrowseEnabled reports whether the operator's database browse is configured.
-// When it is false the admin routes answer 503 and name the variable -- never
-// 404, because everyone who can reach them has already proved they are a
-// platform admin with a live grant, and hiding the route from them would cost
-// them the one fact that says what to fix.
+// When it is false the admin routes answer 503 and name the variable --
+// never 404, since everyone who reaches them has already proved they are a
+// platform admin with a live grant, and hiding the route would cost them
+// the fact that says what to fix.
 func (c Config) BrowseEnabled() bool { return c.DatabaseReadonlyURL != "" }
 
 func Load() (Config, error) {
@@ -182,10 +175,10 @@ func Load() (Config, error) {
 	if cfg.SMTPFrom == "" {
 		return Config{}, fmt.Errorf("SMTP_FROM is required")
 	}
-	// Both or neither: a username with no password (or vice versa) is never
-	// a deployment anyone intends, and silently sending unauthenticated in
-	// that case would mask a misconfigured relay behind mail that appears to
-	// send fine right up until the relay actually starts rejecting it.
+	// Both or neither: a lone username or password is never an intended
+	// deployment, and silently sending unauthenticated would mask a
+	// misconfigured relay behind mail that appears to send fine, right up
+	// until the relay starts rejecting it.
 	if (cfg.SMTPUsername == "") != (cfg.SMTPPassword == "") {
 		return Config{}, fmt.Errorf("SMTP_USERNAME and SMTP_PASSWORD must both be set, or both left empty")
 	}
@@ -263,16 +256,15 @@ func Load() (Config, error) {
 	}
 	cfg.Argon2Threads = uint8(argon2Threads)
 
-	// TRUSTED_PROXY_CIDRS fails closed: unset trusts no proxy at all, so every
-	// request is keyed by the address that actually connected. The opposite
-	// default -- believe client-address headers from anyone -- is what chi's
-	// RealIP did, and it let any caller who reached the API directly choose
-	// the IP the sign-up limiter and the admin audit log see. Forgetting this
-	// variable now costs a limiter that counts every visitor as nginx: a loud
-	// 429 that someone reports. Forgetting it under the old default cost the
-	// limit itself, silently. A malformed entry refuses the boot rather than
-	// being skipped, because a skipped entry is that same shared bucket with
-	// nothing pointing back at the .env line.
+	// TRUSTED_PROXY_CIDRS fails closed: unset trusts no proxy, so every
+	// request is keyed by the address that actually connected. Don't trust
+	// client-address headers from anyone, the way chi's old RealIP default
+	// did: that let any direct caller choose the IP the sign-up limiter and
+	// admin audit log saw, breaking the limit silently. Forgetting this
+	// variable now costs a loud 429 instead (every visitor counted as
+	// nginx). A malformed entry refuses the boot rather than being skipped:
+	// a skipped entry is the same shared bucket, with nothing pointing back
+	// at the .env line.
 	trusted, err := parseTrustedProxies(os.Getenv("TRUSTED_PROXY_CIDRS"))
 	if err != nil {
 		return Config{}, err

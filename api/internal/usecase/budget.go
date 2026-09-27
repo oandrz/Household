@@ -609,11 +609,17 @@ func (s *BudgetService) History(ctx context.Context, householdID string, month, 
 	return out, nil
 }
 
-// startOfMonth truncates to the first of the month in UTC, the same
-// normalisation fakeBudgetRepo.budgetKey and the postgres adapter's
-// startOfMonth both apply -- Budget.Month is documented as "any instant in
-// the month", so comparing two months for equality must not depend on which
-// instant a caller happened to pass.
+// startOfMonth reads t.Year() and t.Month() in t's own location, without
+// converting to UTC first, and returns midnight UTC on the first of that
+// month. Every caller passes a UTC-located time today: the HTTP handlers
+// via time.Parse and clock.System, and the daily digest because
+// NudgeService.RunOnce re-anchors the local calendar date to UTC midnight
+// before Compose runs -- that step, not this one, is where the local zone
+// matters (see RunOnce's own comment).
+// It applies the same normalisation as budgetKey (the fakeBudgetRepo
+// double) and the postgres adapter's startOfMonth -- Budget.Month is
+// documented as "any instant in the month", so comparing two months for
+// equality must not depend on which instant a caller happened to pass.
 func startOfMonth(t time.Time) time.Time {
 	return time.Date(t.Year(), t.Month(), 1, 0, 0, 0, 0, time.UTC)
 }

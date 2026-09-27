@@ -140,10 +140,9 @@ func TestLoadRejectsMissingSMTPFrom(t *testing.T) {
 }
 
 // TestLoadDefaultsSMTPTLSModeToNoneInDevelopmentAndMandatoryOtherwise pins
-// the production-blocker fix: the mailer used to hardcode NoTLS
-// unconditionally, which no hosted relay accepts. The default must not break
-// Mailpit (plain SMTP, development) while still refusing to send unencrypted
-// by default everywhere else.
+// a production blocker: don't hardcode NoTLS, since no hosted relay accepts
+// it. The default must still protect Mailpit in development while refusing
+// unencrypted mail everywhere else.
 func TestLoadDefaultsSMTPTLSModeToNoneInDevelopmentAndMandatoryOtherwise(t *testing.T) {
 	setRequiredEnv(t)
 	t.Setenv("APP_ENV", "development")
@@ -347,13 +346,12 @@ func TestLoadAcceptsADatabaseReadonlyURL(t *testing.T) {
 	}
 }
 
-// Unlike MAILPIT_API_URL, Load does NOT reject an unusable value here, and
-// that is deliberate rather than an omission: net/url cannot tell a broken
-// DSN from a legal keyword/value one, and pgxpool.ParseConfig -- which can --
-// belongs to the adapter layer. postgres.OpenReadOnly is where a bad value
-// refuses the boot; TestOpenReadOnlyRefusesAnUnparseableURL is its test. This
-// test exists to record that the omission was decided, so that nobody
-// "fixes" it later with a url.Parse that rejects a legal DSN.
+// Unlike MAILPIT_API_URL, Load does not reject an unusable value here --
+// deliberately: net/url cannot tell a broken DSN from a legal keyword/value
+// one, and the parser that can, pgxpool.ParseConfig, belongs to the adapter
+// layer. postgres.OpenReadOnly refuses the boot on a bad value instead
+// (TestOpenReadOnlyRefusesAnUnparseableURL). This test records the gap as
+// decided, so nobody "fixes" it with a url.Parse that rejects a legal DSN.
 func TestLoadDoesNotItselfValidateTheReadonlyDSN(t *testing.T) {
 	setRequiredEnv(t)
 	t.Setenv("DATABASE_READONLY_URL", "host=postgres user=hearth_readonly dbname=hearth")
