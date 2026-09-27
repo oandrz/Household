@@ -190,6 +190,24 @@ func withAdminGrant(ctx context.Context, expiresAt *time.Time) context.Context {
 	return context.WithValue(ctx, adminGrantKey{}, expiresAt)
 }
 
+// sessionHashKey is the request-context key requireSession stores the
+// authenticated session's token hash under. Unexported, like adminGrantKey.
+type sessionHashKey struct{}
+
+// requestSessionHash reads the token hash of the session this request
+// authenticated with. The bool is false for any request that did not
+// authenticate with a session cookie -- a personal API token included --
+// so a caller that needs "the session speaking" cannot be handed a cookie
+// the request merely carried alongside some other credential.
+func requestSessionHash(r *http.Request) ([]byte, bool) {
+	hash, ok := r.Context().Value(sessionHashKey{}).([]byte)
+	return hash, ok && len(hash) > 0
+}
+
+func withSessionHash(ctx context.Context, hash []byte) context.Context {
+	return context.WithValue(ctx, sessionHashKey{}, hash)
+}
+
 // writeNotFound answers exactly what the router's own NotFound handler does,
 // so a hidden admin route and a genuinely absent one are byte-identical.
 func writeNotFound(w http.ResponseWriter) {

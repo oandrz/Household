@@ -14,10 +14,13 @@ type adminSessionRequest struct {
 // nothing to tell the caller that they do not already know, and the grant
 // lives on the session row rather than in the response.
 //
-// The grant is written against the token hash of the cookie this request
-// arrived with, not against the user, so re-authenticating in one browser
-// does not open the surface in another that happens to hold a second live
-// session for the same operator.
+// The grant is written against the session this request authenticated with,
+// not against the user, so re-authenticating in one browser does not open
+// the surface in another that happens to hold a second live session for the
+// same operator. That session comes from the request context, never from
+// re-reading the cookie header: a request can carry a cookie beside a
+// different credential, and the grant must land on the session that was
+// actually checked, whatever order the guards in front of this run in.
 func handleAdminSession(deps Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		scope, ok := RequestScope(r)
@@ -25,14 +28,13 @@ func handleAdminSession(deps Deps) http.HandlerFunc {
 			WriteError(w, http.StatusUnauthorized, "UNAUTHENTICATED", "Sign in required.", nil)
 			return
 		}
-		// The cookie is checked before the password, not after: a request
-		// with no session cookie can never be given a grant, so it must not
-		// spend one of the operator's re-auth attempts either. This is tidy
-		// ordering, not a second guard -- it only asks whether a cookie is
-		// present, not whether it is the credential the request authenticated
-		// with. Keeping tokens out is requirePlatformAdmin's job alone.
-		cookie, err := r.Cookie(sessionCookieName)
-		if err != nil || cookie.Value == "" {
+		// Checked before the password, so a request with no session behind
+		// it never spends one of the operator's re-auth attempts.
+		// requirePlatformAdmin already turns such a request away; this is
+		// the handler refusing to depend on that, not the line that keeps
+		// tokens out.
+		sessionHash, ok := requestSessionHash(r)
+		if !ok {
 			WriteError(w, http.StatusUnauthorized, "UNAUTHENTICATED", "Sign in required.", nil)
 			return
 		}
@@ -44,8 +46,9 @@ func handleAdminSession(deps Deps) http.HandlerFunc {
 			MapDomainError(w, r, err)
 			return
 		}
+
 		expiresAt := deps.Clock.Now().Add(adminGrantTTL)
-		if err := deps.Sessions.GrantAdmin(r.Context(), deps.Tokens.HashToken(cookie.Value), &expiresAt); err != nil {
+		if err := deps.Sessions.GrantAdmin(r.Context(), sessionHash, &expiresAt); err != nil {
 			MapDomainError(w, r, err)
 			return
 		}

@@ -21,8 +21,11 @@ const tokenTouchInterval = time.Hour
 //
 // Every failure -- wrong scheme, wrong prefix, unknown, expired, revoked,
 // membership gone -- answers the one 401 requireSession answers, so a probe
-// learns nothing from the difference. No admin grant is placed on the
-// context: that lives on a session row, so a token can never reach /admin.
+// learns nothing from the difference. No admin grant and no session hash is
+// placed on the context. That is NOT what keeps a token out of /admin --
+// POST /admin/session needs no grant, since it is how one is obtained.
+// requirePlatformAdmin refusing every AuthVia but session is the guard; see
+// its doc comment.
 func requireToken(deps Deps, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		raw, ok := strings.CutPrefix(r.Header.Get("Authorization"), bearerPrefix)

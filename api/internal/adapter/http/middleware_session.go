@@ -216,6 +216,7 @@ func requireSession(deps Deps) func(http.Handler) http.Handler {
 			// Scope (requireCapability, requireOwner, every handler) would
 			// otherwise gain a field that means nothing to it.
 			ctx = withAdminGrant(context.WithValue(ctx, scopeKey{}, scope), record.AdminGrantExpiresAt)
+			ctx = withSessionHash(ctx, hash)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}

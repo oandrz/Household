@@ -197,16 +197,39 @@ func TestAPlatformAdminsTokenCannotReachAdmin(t *testing.T) {
 		}
 	}
 
-	var attempts int
-	if err := env.db.Pool().QueryRow(context.Background(),
-		`SELECT count(*) FROM admin_reauth_attempts`).Scan(&attempts); err != nil {
-		t.Fatalf("count re-auth attempts: %v", err)
-	}
-	if attempts != 0 {
-		t.Fatalf("a token request must never reach the admin password check, but %d attempt(s) were recorded", attempts)
+	if n := env.reauthAttemptCount(t); n != 0 {
+		t.Fatalf("a token request must never reach the admin password check, but %d attempt(s) were recorded", n)
 	}
 	if n := env.auditRowCount(t); n != 0 {
 		t.Fatalf("a token request must stop at the guard, before the audit middleware, but %d audit row(s) were written", n)
+	}
+}
+
+// TestAnAdminsTokenBesideALiveSessionCookieGetsNoGrant covers the request the
+// test above cannot send: an admin's token AND a live session cookie, with
+// the right password. The token is the only credential requireSession
+// considers, so this request is a token request -- and it must not open the
+// admin surface for the session whose cookie happened to ride along.
+func TestAnAdminsTokenBesideALiveSessionCookieGetsNoGrant(t *testing.T) {
+	env := newTestEnv(t)
+	env.makePlatformAdmin(t, env.ownerEmail)
+	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
+	tok := env.mustCreateToken(t, session, csrf, "admin's token")
+
+	b, _ := json.Marshal(map[string]string{"password": env.ownerPassword})
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/session", bytes.NewReader(b))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+tok.Token)
+	req.AddCookie(session)
+	rec := httptest.NewRecorder()
+	env.router.ServeHTTP(rec, req)
+	assertErrorResponse(t, rec, http.StatusNotFound, "NOT_FOUND")
+
+	// The session the cookie belongs to must still have no grant.
+	rec = env.authedGet(t, "/api/v1/admin/flags", session)
+	assertErrorResponse(t, rec, http.StatusUnauthorized, "ADMIN_REAUTH_REQUIRED")
+	if n := env.reauthAttemptCount(t); n != 0 {
+		t.Fatalf("a token request must never reach the admin password check, but %d attempt(s) were recorded", n)
 	}
 }
 
