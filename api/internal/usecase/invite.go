@@ -52,7 +52,7 @@ var ErrInviteeAlreadyRegistered = errors.New("an account with that email address
 // the user it belongs to -- UserRepository.CreateWithMembership for the
 // child branch of Create, InviteRepository.Accept for Accept -- so a bare
 // MembershipRepository.Create call is never the right tool for this service
-// (see both ports' doc comments in ports.go for why a lone Create would
+// (see both ports' doc comments for why a lone Create would
 // reintroduce the orphaned-user defect this task fixed).
 type InviteDeps struct {
 	Invites    InviteRepository
@@ -154,15 +154,15 @@ func (s *InviteService) Create(ctx context.Context, householdID, invitedByUserID
 		if role != domain.RoleLimited {
 			return domain.ErrInviteRequiresEmail
 		}
-		// The user's own ID isn't known yet -- CreateWithMembership assigns
-		// it inside its transaction -- so this validates the role/capability
-		// shape with the same empty-userID placeholder Accept uses, before
-		// any write happens. CreateWithMembership itself does the user
-		// creation and the membership creation together, in one
-		// transaction: see its doc comment in ports.go for why that matters
-		// (a partial failure here would orphan a user with a NULL email --
-		// no unique constraint to make a retry fail loudly, so it would
-		// silently create another orphan each time).
+		// The user's own ID isn't known yet -- CreateWithMembership assigns it
+		// inside its transaction -- so this validates the role/capability
+		// shape with the same empty-userID placeholder Accept uses, before any
+		// write happens. CreateWithMembership itself does the user creation
+		// and the membership creation together, in one transaction: see
+		// UserRepository.CreateWithMembership's doc comment for why that
+		// matters (a partial failure here would orphan a user with a NULL
+		// email -- no unique constraint to make a retry fail loudly, so it
+		// would silently create another orphan each time).
 		membership, err := domain.NewMembership("", householdID, "", role, caps)
 		if err != nil {
 			return err
@@ -439,7 +439,7 @@ func checkInviteLive(details InviteDetails, now time.Time) error {
 // CreateMembership calls: a failure between those three steps would leave an
 // orphaned user occupying the unique email index, and the invite could then
 // never be accepted by anyone, ever (see InviteRepository.Accept's doc
-// comment in ports.go).
+// comment).
 func (s *InviteService) Accept(ctx context.Context, token, password, displayName string) (SignInResult, error) {
 	if err := validatePassword(password); err != nil {
 		return SignInResult{}, err

@@ -1,5 +1,5 @@
 -- ListBills returns one household's bills joined to the names the screen
--- displays -- the category (COALESCE'd to '' for uncategorised, the ports.go
+-- displays -- the category (COALESCE'd to '' for uncategorised, the "" <-> SQL
 -- NULL convention) and the pay-from account's nickname and currency. The
 -- currency join is load-bearing, not decoration: bills carries no currency
 -- column of its own (00008_bills.sql's own comment), so this is the only
@@ -67,11 +67,11 @@ LEFT JOIN categories c ON c.id = created.category_id;
 -- UpdateBill is an unconditional full-row SET -- every mutable column,
 -- including due_anchor_day, no COALESCE and no dynamic SQL. BillService turns
 -- a partial PATCH into a complete domain.Bill before this query ever runs
--- (ports.go's Update comment), so the anchor arrives already derived and this
--- adapter never computes a calendar day. archived_at has no SET clause here,
--- the same reason UpdateGoal excludes it: archiving is SetBillArchived's own
--- job. Scoped by household_id AND id together, same collision contract as
--- CreateBill, same join-via-CTE reason.
+-- (BillRepository.Update's doc comment), so the anchor arrives already derived
+-- and this adapter never computes a calendar day. archived_at has no SET
+-- clause here, the same reason UpdateGoal excludes it: archiving is
+-- SetBillArchived's own job. Scoped by household_id AND id together, same
+-- collision contract as CreateBill, same join-via-CTE reason.
 -- name: UpdateBill :one
 WITH updated AS (
     UPDATE bills

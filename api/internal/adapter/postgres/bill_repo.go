@@ -101,11 +101,11 @@ func (r *BillRepo) Create(ctx context.Context, in usecase.NewBillRow) (usecase.B
 // Update replaces every mutable column -- name, amount, cadence, next due
 // date, due anchor day, category, pay-from account, payer, autopay and
 // is_subscription. BillService is what turns a partial PATCH into a complete
-// domain.Bill; this port never merges (ports.go's own doc comment). Scoped by
-// household_id AND id together (UpdateBill's own SQL comment) -- an id from
-// another household matches no row and translate turns the resulting
-// pgx.ErrNoRows into domain.ErrNotFound. Same name-collision contract as
-// Create.
+// domain.Bill; this port never merges (BillRepository.Update's own doc
+// comment). Scoped by household_id AND id together (UpdateBill's own SQL
+// comment) -- an id from another household matches no row and translate turns
+// the resulting pgx.ErrNoRows into domain.ErrNotFound. Same name-collision
+// contract as Create.
 func (r *BillRepo) Update(ctx context.Context, b domain.Bill) (usecase.BillRecord, error) {
 	row, err := r.q.UpdateBill(ctx, sqlcgen.UpdateBillParams{
 		HouseholdID:        uuid(b.HouseholdID),

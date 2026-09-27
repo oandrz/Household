@@ -72,7 +72,7 @@ type Bill struct {
 	Cadence            Cadence
 	NextDue            *time.Time // nil only for a settled one-off
 	DueAnchorDay       int
-	CategoryID         string // "" when uncategorised, the ports.go NULL convention
+	CategoryID         string // "" when uncategorised, the "" <-> SQL NULL convention
 	PayFromAccountID   string
 	PaidByMembershipID string // "" when unattributed
 	Autopay            bool

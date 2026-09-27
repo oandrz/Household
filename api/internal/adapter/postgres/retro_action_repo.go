@@ -151,7 +151,7 @@ func (r *RetroActionRepo) ForRetro(ctx context.Context, householdID, retroID str
 
 // SetDone ticks or unticks one action. done=false leaves doneAt at its zero
 // value, which timestamptz's caller-side counterpart below turns into SQL
-// NULL -- SetDone's own contract (usecase/ports.go): clear the stamp, never
+// NULL -- RetroActionRepository.SetDone's own contract: clear the stamp, never
 // record a "not done" time.
 func (r *RetroActionRepo) SetDone(ctx context.Context, householdID, actionID string, done bool, at time.Time) error {
 	var doneAt pgtype.Timestamptz

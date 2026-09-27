@@ -521,13 +521,13 @@ func (s *BillService) Create(ctx context.Context, in NewBill, today time.Time) (
 		return BillView{}, domain.ErrForbidden
 	}
 
-	// "" is the "" <-> SQL NULL convention (PaidByMembershipID's own comment
-	// in ports.go): unattributed is always valid, so this only runs for a
-	// caller-supplied id. AccountService.Create's identical check on
+	// "" is the "" <-> SQL NULL convention (domain.Bill.PaidByMembershipID:
+	// "" when unattributed): unattributed is always valid, so this only runs
+	// for a caller-supplied id. AccountService.Create's identical check on
 	// OwnerMembershipID is the reason domain.ErrAccountOwnerNotInHousehold's
-	// own wording ("that member is not in this household") is already
-	// generic enough to share rather than duplicate as a bills-only
-	// sentinel -- see that sentinel's own comment in errors.go.
+	// own wording ("that member is not in this household") is already generic
+	// enough to share rather than duplicate as a bills-only sentinel -- see
+	// that sentinel's own comment in errors.go.
 	if in.PaidByMembershipID != "" {
 		ok, err := s.deps.Accounts.MembershipBelongsToHousehold(ctx, in.HouseholdID, in.PaidByMembershipID)
 		if err != nil {

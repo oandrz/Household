@@ -330,8 +330,8 @@ export function monthShortLabel(month: string): string {
 // "2026-07" -> "June" -- the calendar month immediately before the given
 // one. RetroDetail.tsx's own "Carried from June" label uses this rather than
 // resolving RetroAction.carriedFrom itself: that field is the id of the
-// SOURCE ACTION on the wire (RetroActionInput's own doc comment in
-// ports.go, "the id of last month's action when this one was carried"), an
+// SOURCE ACTION on the wire (usecase.RetroActionInput's own doc
+// comment, "the id of last month's action when this one was carried"), an
 // opaque UUID with no month in it at all. Resolvable anyway, because the
 // design's own decision 4 ("Only the immediately previous month is
 // offered") guarantees a carried action's source is always this retro's own

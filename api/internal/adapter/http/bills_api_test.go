@@ -271,10 +271,10 @@ func TestBillsWriteRoutesRequireCSRF(t *testing.T) {
 // --- behaviour tests ---------------------------------------------------
 
 // TestBillCreateRoundTripsThroughGet is the wire-level pin that a created
-// bill's own response and a follow-up GET describe the same row, joined
-// names included -- CategoryName and AccountName only exist because
-// BillRecord joins them (ports.go's own comment), so this is what proves
-// the join reaches the wire, not just the ids.
+// bill's own response and a follow-up GET describe the same row, joined names
+// included -- CategoryName and AccountName only exist because BillRecord joins
+// them (usecase.BillRecord's own doc comment), so this is what proves the join
+// reaches the wire, not just the ids.
 func TestBillsCreateRoundTripsThroughGet(t *testing.T) {
 	env := newTestEnv(t)
 	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)

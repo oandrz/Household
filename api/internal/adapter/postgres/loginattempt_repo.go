@@ -49,8 +49,8 @@ func (r *LoginAttemptRepo) ClearFailures(ctx context.Context, householdID string
 	return translate(r.q.ClearFailures(ctx, uuid(householdID)), "clear failures")
 }
 
-// Prune wraps PruneLoginAttempts. See LoginAttemptRepository.Prune's doc
-// comment in ports.go for the NULL-household_id rows this reaches that
+// Prune wraps PruneLoginAttempts. See usecase.LoginAttemptRepository.Prune's
+// doc comment for the NULL-household_id rows this reaches that
 // ClearFailures cannot, and the caller's obligation to pass a cutoff well
 // outside domain.LockoutPolicy.Window.
 func (r *LoginAttemptRepo) Prune(ctx context.Context, before time.Time) (int64, error) {

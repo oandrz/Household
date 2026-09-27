@@ -14,13 +14,13 @@ import (
 // StoredUser carries the password hash, which never leaves the usecase layer.
 //
 // users.password_hash is nullable in the database, and sqlc generates *string
-// for it — but PasswordHash here is a plain string by design, not an
-// unwritten gap the Postgres implementation has to paper over. The
-// convention, both directions: SQL NULL maps to "", and "" maps to SQL NULL.
-// A user created without credentials (e.g. an invited member with no
-// password yet) has PasswordHash == "", and Task 12 already treats that
-// empty string as "cannot sign in" — the repository must not turn a NULL
-// into any other sentinel.
+// for it — but PasswordHash here is a plain string by design, not an unwritten
+// gap the Postgres implementation has to paper over. The convention, both
+// directions: SQL NULL maps to "", and "" maps to SQL NULL. A user created
+// without credentials (e.g. an invited member with no password yet) has
+// PasswordHash == "", and AuthService.SignIn already treats that empty string
+// as "cannot sign in" — the repository must not turn a NULL into any other
+// sentinel.
 //
 // The embedded domain.User.Email follows the identical convention, for the
 // identical reason: users.email is also nullable (and citext UNIQUE, so

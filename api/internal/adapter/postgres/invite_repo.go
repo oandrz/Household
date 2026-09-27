@@ -480,7 +480,7 @@ func (r *InviteRepo) Admit(ctx context.Context, householdID, inviteID string, no
 			// The specific domain.ErrChatAlreadyBound the caller needs is
 			// mapped explicitly here instead of adding a table entry,
 			// because TelegramAccountRepository.Create's own contract
-			// (ports.go) deliberately keeps the generic sentinel for its
+			// deliberately keeps the generic sentinel for its
 			// two UNIQUEs -- "the caller knows which side it was asking
 			// about... and chooses the sentence, rather than a repository
 			// guessing at intent" -- and this is that caller choosing.

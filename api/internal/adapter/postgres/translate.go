@@ -26,7 +26,7 @@ const pgUniqueViolation = "23505"
 // "<table>_<columns>_key"; the two indexes were named in their migrations.
 var uniqueConstraintErrors = map[string]error{
 	// categories' UNIQUE (household_id, name), 00005_transactions.sql.
-	// CategoryRepository's own contract (usecase/ports.go) wants a sentinel
+	// CategoryRepository's own contract wants a sentinel
 	// specific to this constraint, not the generic ErrAlreadyExists: Create
 	// and Rename both hit it on a name collision, archived rows included,
 	// since archived_at is not part of the unique key.

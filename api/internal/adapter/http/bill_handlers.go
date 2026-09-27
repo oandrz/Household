@@ -317,7 +317,7 @@ func handleRestoreBill(deps Deps) http.HandlerFunc { return setBillArchived(deps
 //
 // No re-read is needed here either, for the same reason handleCreateBill's
 // own comment gives: BillRepository.SetArchived already returns the full
-// record (its own doc comment in ports.go), specifically so this handler
+// record (its own doc comment), specifically so this handler
 // never needs a second Get to build its response.
 func setBillArchived(deps Deps, archived bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
