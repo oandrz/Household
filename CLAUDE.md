@@ -119,8 +119,9 @@ No database, HTTP or third-party type crosses out of the adapter layer. A
 missing row becomes `domain.ErrNotFound` at that boundary, never `pgx.ErrNoRows`
 further up.
 
-`internal/usecase/ports.go` is the contract between the layers. Its doc comments
-are load-bearing — read them before writing a service or a repository.
+The `internal/usecase/ports*.go` files are the contract between the layers
+(`ports.go` lists them, one per product slice). Their doc comments are
+load-bearing — read them before writing a service or a repository.
 
 ### SOLID, as it applies here
 
@@ -146,8 +147,8 @@ are load-bearing — read them before writing a service or a repository.
   says.
 - Small, focused files beat clever ones. If understanding a function needs three
   other files open, the seam is in the wrong place.
-- Exported things carry their contract in a doc comment. `usecase/ports.go` is
-  the model.
+- Exported things carry their contract in a doc comment. The `usecase/ports*.go`
+  files are the model.
 - Write every non-obvious decision down **at the point someone would try to
   change it**. Where a trade-off was accepted, say so and why — the lockout and
   magic-link comments are the pattern.

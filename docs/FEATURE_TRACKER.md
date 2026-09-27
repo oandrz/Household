@@ -171,7 +171,7 @@ needed them to exist (see "Where things stand" below).
 > the third of the four platform-administration features named on
 > 2026-09-02 (after the audit screen, cut, and households and metrics,
 > built). It reads Mailpit's HTTP API through a new `MailOutbox` port
-> (`api/internal/usecase/ports.go`) and its one implementation,
+> (package `usecase`) and its one implementation,
 > `MailpitOutbox` (`api/internal/adapter/mail/mailpit_outbox.go`), which
 > speaks to exactly two upstream paths — a test fails on any third — because
 > Mailpit's own `link-check` endpoint visits every link it finds and would
@@ -1148,8 +1148,8 @@ requirement, not a nicety:
   says.
 - Small, focused files beat clever ones. If understanding a function needs three
   other files open, the seam is wrong.
-- Exported things carry their contract in a doc comment. `usecase/ports.go` is
-  the model: the `""` ⇄ SQL NULL convention and the transactional-accept warning
+- Exported things carry their contract in a doc comment. The `usecase/ports*.go`
+  files are the model: the `""` ⇄ SQL NULL convention and the transactional-accept warning
   live where the next implementer will actually read them.
 - Every non-obvious decision is written down at the point someone would try to
   change it. Where a trade-off was accepted, the comment says so and why.
@@ -1763,7 +1763,7 @@ a database `CHECK` constraint, `docs/LEARNING.md`'s Task 7 entry — anyone
 who *does* pass that guard is already an owner, so the branch is
 unreachable through the app today. Both stay shipped as built: the branch
 is defence in depth, not dead code (`router.go:292-299`'s own comment on
-the group), and the delete refusal's own contract (`ports.go`) would need a
+the group), and the delete refusal's own contract (its port's doc comment) would need a
 new domain error to carry the distinction the spec's copy wants — a
 cross-layer change on the strength of a walk's own disagreement with a
 decision the code already explains, not a three-line fix. The same shape

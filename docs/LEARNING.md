@@ -1639,6 +1639,18 @@ person to ask whether the test could ever have gone red in the first place.
   that refuses the same requests (the new session-hash check in
   `handleAdminSession`), say plainly that it cannot be mutation-checked
   through the router rather than claiming it is covered.
+- **A refactor's "no behaviour change" needs a check that could fail.**
+  Splitting `usecase/ports.go` (2026-09) was done by a script, and the
+  script's first dry run dropped `Clock`, the file's first declaration, to
+  an off-by-one in where it thought the import block ended. The build would
+  have failed loudly for `Clock`; it would not have for a dropped doc
+  comment or a floating section comment, and those are what this file's
+  readers depend on. Two checks caught or would catch every such loss: a
+  line-multiset comparison of the old file against the new ones (1981
+  non-blank lines before, 1981 after, proven able to fail by deleting a
+  line), and `go doc -all` before and after, whose only permitted change was
+  the package description. **For a move, compare the moved text, not only
+  the compiled result.**
 
 **Mutate to prove a test.** Break the code deliberately, watch the test go red,
 restore it. If it stays green, the test is decoration — and if it goes red for

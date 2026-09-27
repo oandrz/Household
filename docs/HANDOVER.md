@@ -520,7 +520,7 @@ api/
   cmd/api/            wiring only — read config, open the pool, build the router, serve
   cmd/adminctl/       seed, reset-password, unlock-household, create-invite, prune
   internal/domain/    rules. Imports the standard library and nothing else.
-  internal/usecase/   services + every port interface (ports.go)
+  internal/usecase/   services + every port interface (ports*.go)
   internal/adapter/   http, postgres, crypto, mail, clock, fx
   migrations/         goose
 web/src/
@@ -536,9 +536,10 @@ including in test files. `internal/domain` may import stdlib only;
 adapter. The lint runs a real build first, because `go list` alone tolerates
 breakage the compiler rejects.
 
-`internal/usecase/ports.go` is the contract. Read it before writing a service or
-a repository; it carries doc comments that are load-bearing, not decorative
-(the `""` ⇄ SQL NULL convention, the transactional-accept warning).
+The `internal/usecase/ports*.go` files are the contract (`ports.go` lists them).
+Read the one for your slice before writing a service or a repository; it carries
+doc comments that are load-bearing, not decorative (the `""` ⇄ SQL NULL
+convention, the transactional-accept warning).
 
 ---
 

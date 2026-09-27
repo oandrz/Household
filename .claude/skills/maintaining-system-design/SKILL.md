@@ -46,8 +46,9 @@ diagram edit that leaves stale prose beneath it has made the document *less*
 true, not more.
 
 **3. Verify against the code, not against memory.** Read the router, the
-migration, `ports.go`. This document was built that way and the details are
-load-bearing — guard order, nullability, which reads run unconditionally.
+migration, the `usecase/ports*.go` files. This document was built that way and
+the details are load-bearing — guard order, nullability, which reads run
+unconditionally.
 
 **4. Say what is not built.** The document opens by scoping itself to what
 exists. When a slice lands, update that line. When you add a diagram for
