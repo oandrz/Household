@@ -8,14 +8,11 @@ import (
 	"github.com/andreasoentoro/hearth/api/internal/domain"
 )
 
-// AdminService is the operator's surface: reading and writing feature flags,
-// answering whether a user is a platform admin, and appending to the audit
-// log.
-//
-// It takes no actor parameter for any *permission* decision -- the HTTP
-// layer's requirePlatformAdmin is the only gate. The actorUserID arguments
-// below are written to updated_by and to audit rows, and are never consulted
-// to decide whether a call is allowed.
+// AdminService is the operator's surface: feature flags, whether a user is
+// a platform admin, and the audit log. No actor parameter decides
+// *permission* -- only the HTTP layer's requirePlatformAdmin gates that.
+// actorUserID here is attribution only (updated_by, audit rows), never a
+// permission check.
 type AdminService struct{ d AdminDeps }
 
 type AdminDeps struct {
@@ -51,10 +48,9 @@ func (s *AdminService) FlagsFor(ctx context.Context, householdID string) (domain
 	return domain.ResolveFlags(domain.AllFlags(), asFlagMap(global), asFlagMap(household)), nil
 }
 
-// GlobalFlags resolves every defined flag for a caller with no household --
-// the pre-auth routes. It passes a nil household layer rather than picking
-// one, because household overrides are meaningless before there is a
-// household.
+// GlobalFlags resolves every defined flag for a caller with no household
+// (the pre-auth routes), passing a nil household layer -- household
+// overrides are meaningless before there is a household.
 func (s *AdminService) GlobalFlags(ctx context.Context) (domain.FlagSet, error) {
 	global, err := s.d.Flags.GlobalOverrides(ctx)
 	if err != nil {
@@ -164,19 +160,16 @@ func (s *AdminService) SetHouseholdFlag(ctx context.Context, householdID, key st
 }
 
 // ClearHouseholdFlag removes an override rather than setting it false: "no
-// opinion" and "explicitly off" are different states, and the screen shows
-// all three.
-//
-// It does not call ParseFlag, deliberately: deleting an orphaned row is the
-// one operation that must work on a key this build no longer defines.
+// opinion" and "explicitly off" are different states the screen shows. It
+// skips ParseFlag deliberately -- deleting an orphaned row must work on a
+// key this build no longer defines.
 func (s *AdminService) ClearHouseholdFlag(ctx context.Context, householdID, key string) error {
 	return s.d.Flags.ClearHousehold(ctx, householdID, key)
 }
 
 // RecordAudit appends one row to the audit log, stamping At from the
-// service's own Clock when the caller left it zero -- the common case, since
-// the HTTP layer builds an AdminAuditEntry without ever touching a clock
-// itself.
+// service's Clock when the caller left it zero -- the common case, since
+// the HTTP layer builds an AdminAuditEntry without touching a clock.
 func (s *AdminService) RecordAudit(ctx context.Context, entry AdminAuditEntry) error {
 	if entry.At.IsZero() {
 		entry.At = s.d.Clock.Now()

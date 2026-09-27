@@ -15,17 +15,13 @@ const trendMonths = 12
 
 // TrendPoint is one bar of the twelve-month net worth chart.
 //
-// NetWorth is nil for a month no counted account had been tracked through
-// yet. It is nil rather than zero for the reason NetWorthSummary.Computable
-// exists: zero is a claim about the household's money, and the truth in that
-// month is that we cannot know it.
+// NetWorth is nil, not zero, for a month no counted account was tracked
+// through yet -- the same "zero is a claim" reasoning as
+// NetWorthSummary.Computable.
 //
-// Complete is false when at least one counted account was still untracked in
-// that month -- the bar is real, but it is missing an account the newest bar
-// has, and the step up between them is coverage rather than growth. It is
-// also false on a month with no figure at all, so a caller that reads
-// Complete without checking NetWorth cannot mistake an empty month for a
-// whole one.
+// Complete is false when a counted account was still untracked that month
+// (the step up is coverage, not growth) or when NetWorth is nil, so a
+// caller can't mistake an empty month for a whole one.
 type TrendPoint struct {
 	Month    time.Time
 	NetWorth *domain.Money
@@ -34,9 +30,8 @@ type TrendPoint struct {
 
 // NetWorthTrend is the twelve-month series and the month-to-date change.
 //
-// ChangeBasisPoints is integer basis points -- 210 means 2.10% -- and is nil
-// far more often than it is set. changeBasisPoints below has the four
-// conditions and why each one exists.
+// ChangeBasisPoints is integer basis points (210 = 2.10%), nil far more
+// often than set -- see changeBasisPoints for its four conditions.
 type NetWorthTrend struct {
 	Points            []TrendPoint
 	ChangeBasisPoints *int64
@@ -44,27 +39,20 @@ type NetWorthTrend struct {
 
 // trendAccount is one counted account, carried out of Summary's own loop.
 //
-// inPrimary is the value that loop already added to the headline. Keeping it
-// is the whole point: the newest bar reuses that number instead of converting
-// the same balance a second time, so the bar and the figure above it cannot
-// disagree even if the rate provider is asked twice and answers differently
-// (spec decision 3 -- "the last bar is the headline figure, by construction").
-// This is the load-bearing guarantee for the trend. Converter's per-request
-// cache (TestSummaryLooksUpEachRateOnce) keeps other figures that share a
-// Converter consistent, but the bar-equals-headline property does not rest
-// on it. A live provider is free to return two different rates
-// for the same currency inside one request -- nothing here forbids it -- and
-// reusing inPrimary is what survives that.
+// inPrimary is the value that loop already added to the headline. Reusing it
+// for the newest bar -- rather than converting the same balance again -- is
+// what guarantees the bar can never disagree with the headline, even if the
+// rate provider answers differently on a second call: the last bar IS the
+// headline figure, by construction. Converter's per-request cache
+// (TestSummaryLooksUpEachRateOnce) keeps other figures consistent, but this
+// guarantee does not depend on it.
 //
-// No test in this package can turn the `i != trendMonths-1` guard in trend()
-// red by itself: with today's cache in place, the newest month's currency is
-// already primed before trend runs (Summary's own loop converts every counted
-// account first), so a reconversion at the newest month would return the same
-// cached rate and produce a bit-identical result regardless of the guard. The
-// guard is proven necessary, not decorative, only by disabling the cache and
-// watching TestTheNewestBarIsTheHeadlineFigure fail without it -- do not add
-// a white-box test for this; it would only ever observe the cache, which
-// TestSummaryLooksUpEachRateOnce already covers.
+// The `i != trendMonths-1` guard in trend() can't be proven by an ordinary
+// test here: with the cache in place, reconverting the newest month returns
+// the same cached rate regardless of the guard. It is proven necessary only
+// by disabling the cache and watching TestTheNewestBarIsTheHeadlineFigure
+// fail without it -- don't add a white-box test; it would only observe the
+// cache.
 type trendAccount struct {
 	account   domain.Account
 	balance   domain.Money
@@ -73,34 +61,27 @@ type trendAccount struct {
 
 // trend builds the twelve-month series for the accounts Summary counted.
 //
-// Every month is converted at TODAY's rate, not the rate that held in that
-// month: there is no historical rate table, and fx.StaticProvider has one
-// number in it. The chart therefore shows how the household's balances moved
-// with the exchange rate held still -- the more useful of the two charts
-// anyway, since an account whose balance never changed should not appear to
-// rise and fall because a currency did (spec decision 2).
+// Every month converts at TODAY's rate, not the rate that held then: there
+// is no historical rate table. The chart shows balance movement with the
+// rate held still -- more useful than the alternative, where an unchanged
+// balance would appear to rise and fall because a currency did.
 //
-// counted's balances come from the AccountView.List the handler already ran
-// (account_handlers.go); MonthlyMovements below is a second, separate read,
-// and the two are not wrapped in one transaction. There is a narrow window
-// between them in which a transaction can be written -- or deleted -- dated
-// in one of months[1..11] (a movement in months[0] is never read; walkBack
-// never looks at it). Land in that window and the newest bar still equals
-// the headline exactly, because both are read from the same List call, but
-// every bar older than the month the transaction is dated in is wrong by
-// that amount, silently and plausibly, until the next GET /accounts
-// recomputes both reads together and the window closes on its own.
+// counted's balances come from the handler's AccountView.List;
+// MonthlyMovements below is a second, unwrapped read, so there is a narrow
+// window where a transaction dated in months[1..11] (walkBack never reads
+// months[0]'s movement) can be written or deleted between them. The newest
+// bar still matches the headline exactly (both come from the same List
+// call), but an older bar can silently drift by that amount until the next
+// GET /accounts re-reads both together and closes the window.
 //
-// This is accepted deliberately, not overlooked: the window is one HTTP
-// request wide, it self-heals on the next refresh, and it is a smaller
-// cousin of the retroactivity spec decision 1 already accepts by name for
-// this same feature. A transaction (or the repeatable-read isolation that
-// would make one meaningful here) is more machinery than a self-healing,
-// narrow-window risk earns today. Revisit this if either changes: CSV import
-// (already on the roadmap) turns "one transaction in the window" into "a
-// bulk insert of hundreds," which is a materially wider window than this
-// paragraph was written to accept; or a snapshot table or cached trend
-// arrives, which would stop the next request from healing it for free.
+// This is accepted deliberately: the window is one request wide and
+// self-heals on the next refresh -- a smaller version of the retroactivity
+// this whole feature already accepts, since the trend is derived from
+// transactions on every read rather than snapshotted. A transaction (or
+// repeatable-read isolation) is more machinery than this narrow risk earns
+// today. Revisit if CSV import turns "one transaction" into "a bulk insert
+// of hundreds," or if a snapshot table arrives and this stops self-healing
+// for free.
 func (s *AccountService) trend(
 	ctx context.Context,
 	householdID string,
@@ -140,12 +121,10 @@ func (s *AccountService) trend(
 			return nil, err
 		}
 		trackedFrom := startOfMonth(a.account.OpeningBalanceAsOf)
-		// account.go:177 gives a household a full day of slack on this date so
-		// someone in UTC+8 can enter their own "today"; at a month boundary
-		// that lands the stored date in next month. The account is already in
-		// the headline regardless, so it belongs in the newest bar -- the same
-		// reason deltasByAccountMonth clamps a future-dated movement into the
-		// current month.
+		// AccountService.validate gives a full day of slack on this date, so a
+		// UTC+8 "today" can land in next month. The account is already in the
+		// headline regardless, so it belongs in the newest bar -- the same
+		// reason deltasByAccountMonth clamps a future-dated movement.
 		if trackedFrom.After(current) {
 			trackedFrom = current
 		}
@@ -195,23 +174,17 @@ func (s *AccountService) trend(
 }
 
 // changeBasisPoints is the "▲ 2.1%" beside the headline figure, in integer
-// basis points: 210 means 2.10%.
+// basis points: 210 means 2.10%. It returns nil far more often than a
+// number:
 //
-// It returns nil far more often than it returns a number, and each condition
-// is a claim the product must not make:
+//   - either month unknown: nothing to compare.
+//   - either month incomplete: the step is partly coverage, not growth.
+//   - base <= 0: a percentage of zero is undefined, and a negative base
+//     inverts its own sign (-10,000 to -5,000 would show as -50%).
+//   - arithmetic would overflow: fail closed rather than render a wrapped
+//     number.
 //
-//   - either month unknown: there is no comparison to draw.
-//   - either month incomplete: the step between them is partly coverage, not
-//     growth. A household that started tracking a second account this month
-//     did not get richer by its balance.
-//   - a base of zero or less: a percentage of zero is undefined, and off a
-//     negative base it inverts its own sign -- a household climbing from
-//     -10,000 to -5,000 would be shown as -50%.
-//   - arithmetic that would overflow: the same fail-closed rule as everywhere,
-//     rather than a wrapped number that still renders.
-//
-// The rounding is half away from zero, matching Rate.Apply, so every rounding
-// decision on this screen is the same decision.
+// Rounding is half away from zero, matching Rate.Apply.
 func changeBasisPoints(current, previous TrendPoint) *int64 {
 	if current.NetWorth == nil || previous.NetWorth == nil {
 		return nil
@@ -249,12 +222,11 @@ func changeBasisPoints(current, previous TrendPoint) *int64 {
 
 // deltasByAccountMonth indexes the repository's rows by account and month.
 //
-// A month later than the current one is counted as the current one. That is
-// not a rounding convenience: AccountView.Balance has no upper bound on the
-// transaction date, so a transaction dated next month is already inside the
-// balance the walk anchors on. Left in its own bucket it would never be
-// subtracted, and every bar older than today would be wrong by its amount
-// while the newest bar still matched the headline.
+// A month later than the current one folds into the current one: this isn't
+// rounding, it's correctness -- AccountView.Balance has no upper bound on
+// the transaction date, so a next-month transaction is already inside the
+// anchor balance. Left in its own bucket, it would never be subtracted,
+// leaving every older bar wrong.
 func deltasByAccountMonth(
 	movements []AccountMonthMovement,
 	current time.Time,

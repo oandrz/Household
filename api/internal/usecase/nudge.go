@@ -10,11 +10,10 @@ import (
 	"github.com/andreasoentoro/hearth/api/internal/domain"
 )
 
-// The bot speaks first. Once a day, each NudgeRecipient gets one short
-// message per household: bills overdue or due within three days, and budget
-// lines at or past 80% of their cap. Rules, not a model -- the digest is
-// deterministic, costs nothing, and works with no language model configured.
-// Nothing to say means no message; a person is never told "all fine".
+// The bot speaks first. Once a day, each NudgeRecipient gets one message per
+// household: bills overdue or due within three days, and budget lines at or
+// past 80%. Rules, not a model, so it's deterministic, free, and needs no
+// language model. Nothing to say means no message -- never "all fine".
 const (
 	// nudgeBillHorizon is how far ahead a bill counts as "due soon" here.
 	// Narrower than BillView.DueSoon's 30 days on purpose: that heading
@@ -109,18 +108,16 @@ func (s *NudgeService) Compose(ctx context.Context, householdID, currency string
 	return "", false, nil
 }
 
-// RunOnce delivers today's digest to every recipient who has not had it.
-// Claim comes first, the same insert-first shape as the transaction
-// idempotency key, so two ticks or a restart cannot send twice. One
-// recipient's failure is logged and the loop goes on; a failed send releases
-// its claim so the next tick retries. now is the tick's time in the schedule's
-// location; its calendar date is the day being claimed.
+// RunOnce delivers today's digest to every recipient who hasn't had it.
+// Claim comes first, like the transaction idempotency key, so two ticks or
+// a restart can't send twice. A failure is logged and the loop continues;
+// a failed send releases its claim so the next tick retries. now is the
+// tick's local time; its calendar date is the day being claimed.
 func (s *NudgeService) RunOnce(ctx context.Context, now time.Time) {
-	// The local calendar date, as UTC midnight: the shape every bill and
-	// budget comparison in the product uses (billStartOfDay, the parsed
-	// budget month). Passing the zoned instant through would make a UTC+8
-	// tick before 08:00 local read yesterday's date -- a two-day horizon,
-	// and on the 1st, last month's budget.
+	// The local calendar date, as UTC midnight -- the shape every bill and
+	// budget comparison uses. Passing the zoned instant through instead
+	// would make a UTC+8 tick before 08:00 local read yesterday's date: a
+	// two-day horizon, and last month's budget on the 1st.
 	day := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
 	recipients, err := s.d.Recipients.Recipients(ctx)
 	if err != nil {

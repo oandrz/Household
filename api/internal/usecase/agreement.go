@@ -42,11 +42,9 @@ type AgreementProposalView struct {
 	ProposedAt                                                  time.Time
 	AwaitingNames                                               []string
 	TargetChanged                                               bool
-	// SignedByMembershipIDs never reaches the wire (agreementProposalDTO has
-	// no such field). It carries the record's slice unchanged so the HTTP
-	// layer can compute canAgree = !locked && (!signedByViewer ||
-	// len(awaitingNames) == 0) from a membership id it already holds, rather
-	// than the browser comparing membership ids itself.
+	// SignedByMembershipIDs never reaches the wire (agreementProposalDTO
+	// omits it) -- carried unchanged so the HTTP layer can compute canAgree
+	// from a membership id it already holds, not the browser comparing ids.
 	SignedByMembershipIDs []string
 }
 
@@ -72,13 +70,12 @@ type AgreementsView struct {
 	History   []AgreementHistoryEntry // newest first
 }
 
-// AgreementService composes the Agreements screen and is its only write path.
-// Two ports and no clock: every write takes at time.Time, so the wall clock is
-// read once, at the HTTP layer. No method takes an actor parameter to decide
-// whether a caller may act -- middleware enforces who is asking. There is
-// deliberately no owner-count port: every pending card names who has still to
-// sign, so the names are needed anyway and the count is that list's length --
-// the locked screen and the pending card cannot disagree.
+// AgreementService composes the Agreements screen, its only write path.
+// Two ports, no clock -- every write takes `at`, read once at the HTTP
+// layer. No actor parameter: middleware enforces who's asking. No
+// owner-count port either: the pending-card names already give the count
+// as their length, so the locked screen and the pending card can't
+// disagree.
 type AgreementService struct {
 	agreements AgreementRepository
 	members    MembershipRepository
@@ -88,20 +85,18 @@ func NewAgreementService(agreements AgreementRepository, members MembershipRepos
 	return &AgreementService{agreements: agreements, members: members}
 }
 
-// ErrAgreementDocumentCorrupt is this layer refusing to render a document
-// holding a row it never wrote: a section id naming no section, a proposal in
-// the wrong slice, a history entry with no version. Deliberately unmapped in
-// MapDomainError -- a logged 500 beats an agreement silently missing from the
-// page or a history entry numbered v0. Declared here for the reason
-// ErrSessionRevocationFailed is declared in member.go: it is this service's
-// own vocabulary, not a domain rule.
+// ErrAgreementDocumentCorrupt refuses to render a row this layer never
+// wrote (an orphan section id, a misplaced proposal, a versionless history
+// entry). Deliberately unmapped in MapDomainError -- a logged 500 beats a
+// silently missing agreement. Declared here, not domain, for the same
+// reason as member.go's ErrSessionRevocationFailed: service vocabulary,
+// not a domain rule.
 var ErrAgreementDocumentCorrupt = errors.New("agreement document holds a row this code never wrote")
 
-// agreementLookups are the four things proposalView needs and AgreementsView
-// does not carry. compose hands them back so a write can run the row it just
-// touched through exactly the code the document's own proposals went through:
-// one composition, two entry points, and no way for the row and the document
-// in a single response to describe the household differently.
+// agreementLookups are what proposalView needs that AgreementsView doesn't
+// carry. compose hands them back so a write's row runs through the same
+// code the document's own proposals did -- one composition, two entry
+// points, so a response's row and document can never disagree.
 type agreementLookups struct {
 	all          []domain.Membership
 	names        map[string]string // membership id -> display name
@@ -111,7 +106,8 @@ type agreementLookups struct {
 
 // Get composes the whole screen in one walk -- the only place any of these
 // figures is derived. The version and the 01..N numbering are computed here
-// and stored nowhere (decisions 10 and 11).
+// and stored nowhere: a stored version could drift from the rows it counts,
+// and stored numbers would need rewriting after every removal.
 func (s *AgreementService) Get(ctx context.Context, householdID string) (AgreementsView, error) {
 	view, _, err := s.compose(ctx, householdID)
 	return view, err
@@ -173,8 +169,8 @@ func (s *AgreementService) compose(ctx context.Context, householdID string) (Agr
 			lines = append(lines, AgreementLine{ID: a.ID, Body: a.Body, Number: numbers[i][j]})
 		}
 		// Visible is stamped here so the screen reads a flag rather than
-		// re-deriving decision 8: the page renders the visible ones, the
-		// picker offers them all, off one array.
+		// re-deriving it: the page renders the visible ones, the picker
+		// offers them all, off one array.
 		sections = append(sections, AgreementSectionView{ID: sec.ID, Name: sec.Name,
 			Count: len(lines), Visible: len(lines) > 0, Agreements: lines})
 	}
@@ -230,9 +226,9 @@ func (s *AgreementService) compose(ctx context.Context, householdID string) (Agr
 				ErrAgreementDocumentCorrupt, p.ID, p.SectionID)
 		}
 		// A signer whose membership no longer resolves is OMITTED, never
-		// joined as "", or history renders "Agreed by Andreas and ". Decision
-		// 20 keeps the row forever, so this is the ordinary case for a
-		// household a partner has left.
+		// joined as "" (never "Agreed by Andreas and "). The row survives
+		// forever -- the membership id is a log column with no foreign key
+		// -- so this is the ordinary case for a household a partner has left.
 		signed := make([]string, 0, len(p.SignedByMembershipIDs))
 		for _, id := range p.SignedByMembershipIDs {
 			if name := lk.names[id]; name != "" {
@@ -246,18 +242,17 @@ func (s *AgreementService) compose(ctx context.Context, householdID string) (Agr
 			AcceptedAt: *p.ResolvedAt})
 	}
 
-	// Locked gates writes and never hides the document (decision 3), and it
-	// travels beside the owners list on every response -- a screen may only
-	// say a household is locked once an answered query has said so.
+	// Locked gates writes, never hides the document -- a dropped-to-one-owner
+	// household still sees what it agreed to. It travels beside the owners
+	// list, so a screen never claims "locked" without an answered query.
 	return AgreementsView{Locked: domain.AgreementsLocked(lk.all), Owners: owners,
 		Version: len(doc.Accepted) + 1, UpdatedAt: updatedAt, Sections: sections,
 		Proposals: proposals, History: history}, lk, nil
 }
 
-// proposalView composes one proposal. It is factored out of compose's walk
-// over doc.Open because a write must return a row that has just become
-// accepted or withdrawn -- rows that walk excludes in SQL -- and the row and
-// the document in one response have to be composed by the same code.
+// proposalView composes one proposal, factored out of compose's walk
+// because a write must return a row just accepted or withdrawn -- rows
+// that walk excludes in SQL -- composed by the same code as the document.
 func (s *AgreementService) proposalView(
 	p AgreementProposalRecord,
 	all []domain.Membership,
@@ -282,13 +277,12 @@ func (s *AgreementService) proposalView(
 	for _, id := range awaiting {
 		awaitingNames = append(awaitingNames, names[id])
 	}
-	// TargetChanged is the read-side echo of decision 13, whose authority
-	// stays in Sign. It is asked ONLY of an open proposal: an accepted remove
-	// has taken its own target out of the live set, so the literal rule would
-	// answer true on the very change that just succeeded, and the write
-	// response would read as "your agree was stale". A resolved proposal
-	// cannot go stale -- the question it asked has been answered. An add has
-	// no target, so an empty id also means "cannot go stale".
+	// TargetChanged echoes the check Sign makes authoritative: whether the
+	// target's live wording still equals PreviousBody. Asked ONLY of an open
+	// proposal -- an accepted remove already took its target out of the live
+	// set, so the literal rule would misfire "stale" on the very change that
+	// just succeeded. A resolved proposal can't go stale (already answered);
+	// an add has no target, so an empty id also can't go stale.
 	targetChanged := false
 	if status.IsOpen() && p.TargetAgreementID != "" {
 		body, stillLive := liveBody[p.TargetAgreementID]
@@ -303,10 +297,10 @@ func (s *AgreementService) proposalView(
 		SignedByMembershipIDs: p.SignedByMembershipIDs}, nil
 }
 
-// requireTwoOwners is decision 1's gate, and it runs FIRST in every write --
-// uniform on purpose, because a rule that let some writes through a locked
-// household is one a reader gets wrong. An open proposal simply waits for a
-// second owner; there is no expiry and no decline (decision 6).
+// requireTwoOwners runs FIRST in every write: an agreement needs two
+// owners to mean anything, so a one-owner household gets no drafts --
+// uniform on purpose, since a rule some writes skip is one a reader gets
+// wrong. An open proposal simply waits; there is no expiry and no decline.
 func (s *AgreementService) requireTwoOwners(ctx context.Context, householdID string) error {
 	views, err := s.members.List(ctx, householdID)
 	if err != nil {
@@ -318,19 +312,14 @@ func (s *AgreementService) requireTwoOwners(ctx context.Context, householdID str
 	return nil
 }
 
-// writtenProposal is the read-back every proposal write ends with: compose
-// the document again and run the row that was just written through the same
-// proposalView the document's own open proposals went through. One
-// composition, so the row and the document in a single response cannot
-// describe the household differently -- and so an accepted or withdrawn row,
-// which the document's own walk excludes in SQL, still gets composed by the
-// code that knows how.
-//
-// The document is a snapshot taken AFTER the write and outside its
-// transaction, so a concurrent agree may already have overtaken it; the
-// frontend's refetch stays the authority. A write that lands and then cannot
-// be read back is an error, not a silent success: the row is committed, and
-// the caller is owed a 500 rather than a half-answer.
+// writtenProposal is the read-back every proposal write ends with: recompose the
+// document and run the just-written row through the same proposalView code
+// the document's own proposals use, so a response's row and document can
+// never disagree -- including an accepted or withdrawn row, which the
+// document's SQL walk excludes. The snapshot is taken AFTER the write and
+// outside its transaction, so a concurrent agree may overtake it; the
+// frontend's refetch stays authoritative. Landing a write that can't be
+// read back is an error -- a 500, never a silent half-answer.
 func (s *AgreementService) writtenProposal(ctx context.Context, householdID string,
 	rec AgreementProposalRecord) (AgreementProposalView, AgreementsView, error) {
 	doc, lk, err := s.compose(ctx, householdID)
@@ -344,11 +333,10 @@ func (s *AgreementService) writtenProposal(ctx context.Context, householdID stri
 	return view, doc, nil
 }
 
-// CreateSection adds one label. It never pre-checks the name: the unique index
-// decides the collision, and a "does this name already exist" read is a
-// check-then-write two owners can both pass (decision 19). The section comes
-// back as the recomposed document numbers and flags it, so the row in the
-// response and the same row inside `agreements` can never disagree.
+// CreateSection adds one label, never pre-checking the name -- the unique
+// index decides the collision, avoiding a check-then-write race two owners
+// could both pass. It returns the recomposed section, so the response and
+// `agreements` can never disagree.
 func (s *AgreementService) CreateSection(ctx context.Context, householdID, name string,
 	at time.Time) (AgreementSectionView, AgreementsView, error) {
 	if err := s.requireTwoOwners(ctx, householdID); err != nil {
@@ -376,12 +364,10 @@ func (s *AgreementService) CreateSection(ctx context.Context, householdID, name 
 		ErrAgreementDocumentCorrupt, rec.ID)
 }
 
-// SeedStarterSections is "Use starter set": four labels and no agreements
-// (decision 17), so "everything here is here because you both agreed" stays
-// literally true. Idempotent -- a second click is a no-op, not a 409. It
-// answers with the document alone: it creates labels, and there is no single
-// row to name. The repository's read-back proves all four landed; nothing
-// renders from that slice, because render order is always the document's.
+// SeedStarterSections is "Use starter set": four labels, no agreements, so
+// "everything here is here because you both agreed" stays true. Idempotent
+// -- a second click is a no-op, not a 409. It answers with the document
+// alone; the read-back only proves all four landed.
 func (s *AgreementService) SeedStarterSections(ctx context.Context, householdID string,
 	at time.Time) (AgreementsView, error) {
 	if err := s.requireTwoOwners(ctx, householdID); err != nil {
@@ -393,11 +379,10 @@ func (s *AgreementService) SeedStarterSections(ctx context.Context, householdID 
 	return s.Get(ctx, householdID)
 }
 
-// Propose stamps the household and the proposer from the route and the session
-// BEFORE validating, so a body naming another household is judged against its
-// own constraints rather than smuggled past them -- VisionService.Save's own
-// reasoning. The target check is deliberately not repeated here: it can only
-// be made atomically inside CreateProposal's transaction.
+// Propose stamps household and proposer from the route/session BEFORE
+// validating, so a body naming another household is judged against its own
+// constraints, not smuggled past them. No target check here -- it can only
+// be atomic inside CreateProposal's transaction.
 func (s *AgreementService) Propose(ctx context.Context, householdID, proposedByMembershipID string,
 	p domain.AgreementProposal, at time.Time) (AgreementProposalView, AgreementsView, error) {
 	if err := s.requireTwoOwners(ctx, householdID); err != nil {
@@ -419,10 +404,9 @@ func (s *AgreementService) Propose(ctx context.Context, householdID, proposedByM
 	return s.writtenProposal(ctx, householdID, rec)
 }
 
-// Sign validates nothing beyond the gate: every count and comparison that
-// decides the outcome -- the owner count, the signatures held by current
-// owners, the target's wording -- is inside the repository's transaction,
-// which is the only place any of them is atomic (decisions 4 and 13).
+// Sign validates nothing beyond the gate -- the owner count, current
+// owners' signatures, and the target's wording are all decided inside the
+// repository's transaction, the only place any of them is atomic.
 func (s *AgreementService) Sign(ctx context.Context, householdID, proposalID, membershipID string,
 	at time.Time) (AgreementProposalView, AgreementsView, error) {
 	if err := s.requireTwoOwners(ctx, householdID); err != nil {
@@ -436,11 +420,10 @@ func (s *AgreementService) Sign(ctx context.Context, householdID, proposalID, me
 	return s.writtenProposal(ctx, householdID, rec)
 }
 
-// Park is Discuss: the proposal stays open and shows on the Retros page's
-// To-discuss block (decision 7). The note is capped in RUNES, never bytes, or
-// a household writing Chinese gets a third of what the modal promised -- and
-// in MaxAgreementParkNoteLen, not the proposal note's cap: two fields on two
-// screens, and one constant serving both would have to move for both.
+// Park is Discuss: the proposal stays open, shown on the Retros page's
+// To-discuss block. The note is capped in RUNES, not bytes -- Chinese text
+// would otherwise get a third of what the modal promised -- using its own
+// constant, MaxAgreementParkNoteLen, independent of the proposal note's cap.
 func (s *AgreementService) Park(ctx context.Context, householdID, proposalID, note string,
 	at time.Time) (AgreementProposalView, AgreementsView, error) {
 	if err := s.requireTwoOwners(ctx, householdID); err != nil {
@@ -457,11 +440,11 @@ func (s *AgreementService) Park(ctx context.Context, householdID, proposalID, no
 	return s.writtenProposal(ctx, householdID, rec)
 }
 
-// Withdraw does not branch on byMembershipID, and must not: the proposer check
-// is the handler's, because only the HTTP layer knows who is asking (decision
-// 15, in decision 22's 404 -> 403 -> 409 order). The id travels so the
-// repository's own WHERE-clause backstop can apply it, and a refusal that
-// comes back from there is the store's answer, not this method's.
+// Withdraw does not branch on byMembershipID: only the HTTP layer knows
+// who is asking -- the proposer until they stop being an owner, then any
+// owner -- checked in the fixed 404 -> 403 -> 409 order (see Proposal). The
+// id still travels for the repository's WHERE-clause backstop; a refusal
+// from there is the store's answer, not this method's.
 func (s *AgreementService) Withdraw(ctx context.Context, householdID, proposalID,
 	byMembershipID string, at time.Time) (AgreementProposalView, AgreementsView, error) {
 	if err := s.requireTwoOwners(ctx, householdID); err != nil {
@@ -475,9 +458,9 @@ func (s *AgreementService) Withdraw(ctx context.Context, householdID, proposalID
 }
 
 // Proposal is a read, and is deliberately NOT gated by requireTwoOwners: the
-// withdraw handler needs 404 before 403 before 409 (decision 22), and a gate
-// here would answer 409 for a proposal that does not exist. Pair it with Get's
-// Owners list, which is what decides whether the proposer is still one.
+// withdraw handler needs 404 before 403 before 409, and a gate here would
+// answer 409 for a proposal that does not exist. Pair it with Get's Owners
+// list, which is what decides whether the proposer is still one.
 func (s *AgreementService) Proposal(ctx context.Context, householdID,
 	proposalID string) (AgreementProposalRecord, error) {
 	return s.agreements.Proposal(ctx, householdID, proposalID)

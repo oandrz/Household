@@ -10,12 +10,9 @@ import (
 )
 
 // ErrSessionRevocationFailed is returned by Update and Remove when the
-// membership mutation itself succeeded but the follow-up
-// SessionRepository.RevokeAllForUser call failed. It exists so a caller can
-// tell "the change did not happen at all" (any other error) apart from "the
-// change happened, but the member's prior session(s) may still be live" --
-// the one outcome the revocation step exists to prevent, so it must never be
-// indistinguishable from ordinary failure.
+// membership mutation succeeded but the follow-up
+// SessionRepository.RevokeAllForUser call failed -- so a caller can tell "no
+// change happened" apart from "it happened, but a session may still be live."
 var ErrSessionRevocationFailed = errors.New("membership was updated but revoking the member's sessions failed")
 
 // MemberDeps mirrors AuthDeps/InviteDeps: every port MemberService needs,
@@ -29,11 +26,10 @@ type MemberDeps struct {
 	APITokens APITokenRepository
 }
 
-// MemberService lists and changes a household's members. Every rule about who
-// may hold which role or capability, and about a household never losing its
-// last owner, lives in internal/domain -- this service's job is to fetch the
-// facts domain.ValidateMembershipChange and domain.ValidateMembershipRemoval
-// need and act on their verdict, not to re-implement either rule.
+// MemberService lists and changes a household's members. Every rule about
+// roles, capabilities and the last-owner guarantee lives in
+// domain.ValidateMembershipChange and domain.ValidateMembershipRemoval; this
+// service only fetches the facts those need and acts on the verdict.
 type MemberService struct {
 	d MemberDeps
 }
@@ -46,10 +42,9 @@ func (s *MemberService) List(ctx context.Context, householdID string) ([]MemberV
 	return s.d.Members.List(ctx, householdID)
 }
 
-// MembershipPatch is a change to one membership where a nil field means
-// "keep what the membership has". Both are pointers for the same reason the
-// HTTP request's fields are: a zero value cannot tell "left out" apart from
-// "set to empty".
+// MembershipPatch is a change to one membership; a nil field means "keep
+// what the membership has". Both fields are pointers, like the HTTP
+// request's, so a zero value can't be confused with "left out".
 type MembershipPatch struct {
 	Role         *domain.Role
 	Capabilities *domain.Capabilities
@@ -58,26 +53,19 @@ type MembershipPatch struct {
 // Update applies patch to a member's role and/or capabilities and returns the
 // membership as written.
 //
-// Everything that reads the membership's current state happens INSIDE the
-// write's own transaction, on the memberships read under the household's
-// lock -- never from a read made before it:
+// Everything that determines the write -- the omitted fields, and
+// domain.ValidateMembershipChange's last-owner check -- is read INSIDE the
+// write's transaction, under the household's lock, never earlier: a stale
+// read could carry a stale role into the write and silently undo a
+// promotion committed in between, and two owners demoting each other are
+// each legal alone but illegal together. UpdateWithCheck supplies the lock;
+// role and capabilities are validated together, so a role-only patch is
+// checked against existing capabilities, and a capabilities-only patch
+// against the existing role.
 //
-//   - Omitted fields are filled in from that locked read. Filled in from an
-//     earlier read, a capabilities-only change can carry a stale role into
-//     the write and silently undo a promotion that committed in between.
-//   - domain.ValidateMembershipChange weighs the resolved change against the
-//     whole household. The last-owner rule is about the whole list, and two
-//     owners demoting each other are each legal alone and illegal together.
-//
-// The rules stay here; UpdateWithCheck supplies the lock. Role and
-// capabilities are validated together, so a role-only patch is checked
-// against the member's existing capabilities and a capabilities-only patch
-// against their existing role.
-//
-// A successful change revokes the member's sessions: a capability or role
-// change that stayed effective in an already-open tab would defeat the point
-// of granting or revoking it. If only that revocation fails, the written
-// membership is still returned alongside ErrSessionRevocationFailed.
+// A successful change revokes the member's sessions, so a stale capability
+// doesn't stay effective in an open tab. If only the revocation fails, the
+// written membership is still returned alongside ErrSessionRevocationFailed.
 func (s *MemberService) Update(ctx context.Context, householdID, membershipID string, patch MembershipPatch) (domain.Membership, error) {
 	// written is set by the callback from the same locked read it validated,
 	// so the response and the revocation below describe exactly the change
@@ -105,15 +93,11 @@ func (s *MemberService) Update(ctx context.Context, householdID, membershipID st
 		return domain.Membership{}, err
 	}
 
-	// The mutation above is already committed by this point. If the
-	// revocation below fails, it is deliberately not rolled back: undoing a
-	// completed, valid role/capability change to compensate for a
-	// revocation failure would trade a small, bounded window (the member's
-	// prior session(s) may stay live a little longer than intended) for a
-	// larger one (a write that reports success to the caller but silently
-	// reverts itself, which is worse than either outcome alone and would
-	// need its own failure handling anyway). See auth.go for the same style
-	// of documented, deliberate asymmetry.
+	// The mutation above is already committed. A failed revocation below is
+	// deliberately not rolled back: undoing a valid change to compensate would
+	// trade a small window (a stale session lives a little longer) for a
+	// worse one (a write that reports success and then silently reverts
+	// itself). See auth.go for the same documented asymmetry.
 	if err := s.revokeCredentials(ctx, written.UserID); err != nil {
 		slog.Error("failed to revoke credentials after a membership update",
 			"error", err, "household_id", householdID, "membership_id", membershipID)
@@ -136,12 +120,11 @@ func (s *MemberService) revokeCredentials(ctx context.Context, userID string) er
 }
 
 // Remove deletes a membership, refusing to leave the household without an
-// owner (domain.ValidateMembershipRemoval). As in Update, the rule runs inside
-// DeleteWithCheck's transaction under the household's lock, so a removal
-// cannot race a concurrent demotion or removal of the other owner. A
-// successful removal revokes the removed member's sessions, exactly as Update
-// does, so a removed member's open tab stops working immediately rather than
-// riding out its session TTL.
+// owner (domain.ValidateMembershipRemoval), inside DeleteWithCheck's
+// transaction under the household's lock so it can't race a concurrent
+// demotion or removal of the other owner. A successful removal also revokes
+// the removed member's sessions, exactly as Update, so their open tab stops
+// working immediately rather than riding out its session TTL.
 func (s *MemberService) Remove(ctx context.Context, householdID, membershipID string) error {
 	var targetUserID string
 	err := s.d.Members.DeleteWithCheck(ctx, householdID, membershipID,
@@ -158,11 +141,7 @@ func (s *MemberService) Remove(ctx context.Context, householdID, membershipID st
 	}
 
 	// Same deliberate asymmetry as Update above: the deletion is not undone
-	// if the revocation that follows it fails. Re-creating the just-deleted
-	// membership to compensate would trade a small, bounded window (the
-	// removed member's prior session(s) may stay live a little longer than
-	// intended) for a larger one (a removal that silently un-happens, which
-	// is worse than either outcome alone).
+	// if the revocation that follows it fails -- see Update's comment for why.
 	if err := s.revokeCredentials(ctx, targetUserID); err != nil {
 		slog.Error("failed to revoke credentials after a membership removal",
 			"error", err, "household_id", householdID, "membership_id", membershipID)

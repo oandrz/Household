@@ -12,18 +12,15 @@ import (
 // HoldingPositionView is one row of the portfolio screen: the holding, what
 // its events fold to, and what it is worth if anyone has said.
 //
-// HasMarketValue is the point of this struct. A holding nobody has priced has
-// NO market value -- not a market value of zero, which on screen reads as
-// "this is worthless" rather than "nobody has said what it is worth". The
-// caller renders the absence, and producing that absence is this layer's job,
-// not the handler's. It is the same "blank the figure and say why" rule the
-// net worth card already follows when a primary-currency change strands an
-// account.
+// HasMarketValue is the point of this struct: a holding nobody has priced
+// has NO market value, not a value of zero -- zero would read as
+// "worthless" rather than "nobody has said". Producing that absence is this
+// layer's job, the same "blank the figure and say why" rule the net worth
+// card follows.
 //
-// ValuedAt is when the price it used was true, so a screen can show how stale
-// the figure is. Valuations going quietly stale is this feature's largest
-// product risk, so the age travels with the number rather than being
-// available on request.
+// ValuedAt is when the price it used was true, so the screen can show how
+// stale the figure is -- valuations going quietly stale is this feature's
+// largest product risk, so the age travels with the number.
 type HoldingPositionView struct {
 	Holding        domain.Holding
 	AccountName    string
@@ -32,26 +29,24 @@ type HoldingPositionView struct {
 	HasMarketValue bool
 	ValuedAt       time.Time
 
-	// PrimaryMarketValue is the same figure in the household's own currency,
-	// present only when the holding is NOT already in it. The PRD's rule: a US
-	// stock up 5% in USD while SGD gained 6% against USD made the household
-	// poorer, and the primary figure is the one that says so -- while the
-	// native figure beside it still says whether the pick was good.
+	// PrimaryMarketValue is the same figure in the household's currency,
+	// present only when the holding isn't already in it -- the PRD's rule: a
+	// currency move can make the household poorer even when the pick gained,
+	// and this figure is the one that says so, while the native one says
+	// whether the pick was good.
 	//
-	// It comes from the valuation's own primary unit price, which the owner
-	// supplied, never from a rate: this product has no dated rate source.
-	// HasPrimaryMarketValue false means "this holding is already in your
-	// currency", not "we could not work it out".
+	// It comes from the valuation's owner-supplied primary unit price, never
+	// a rate (no dated rate source). HasPrimaryMarketValue false means
+	// "already in your currency," not "couldn't work it out."
 	PrimaryMarketValue    domain.Money
 	HasPrimaryMarketValue bool
 }
 
 // PortfolioView is the whole portfolio screen in one response.
 //
-// It carries no household total, deliberately. A total would have to convert
-// every holding into the primary currency, and this product has no dated rate
-// source -- adding one is a decision, not a detail. The per-holding figures
-// are honest without it.
+// It carries no household total, deliberately: a total would have to
+// convert every holding into the primary currency, and this product has no
+// dated rate source -- adding one is a decision, not a detail.
 type PortfolioView struct {
 	Holdings []HoldingPositionView
 }
@@ -120,11 +115,10 @@ func (s *HoldingService) requireInvestmentAccount(ctx context.Context, household
 	return nil
 }
 
-// Get is the single holding, for a caller that needs its currency before it
-// can build a money value for an event or a price -- an event carries its
-// holding's currency but does not state it. The service re-validates whatever
-// that caller then sends, so this read builds a request rather than being
-// trusted as one.
+// Get is the single holding, for a caller that needs its currency before
+// building a money value for an event or price -- an event carries its
+// holding's currency but doesn't state it. The service re-validates
+// whatever the caller sends, so this read only builds a request.
 func (s *HoldingService) Get(ctx context.Context, householdID, holdingID string) (domain.Holding, error) {
 	return s.d.Holdings.Get(ctx, householdID, holdingID)
 }
@@ -157,10 +151,8 @@ func (s *HoldingService) SetArchived(ctx context.Context, householdID, holdingID
 
 // RecordEvent validates an acquisition or disposal against its holding and
 // the household's primary currency, then refuses it if it would leave the
-// position oversold.
-// RecordEvent takes today as a parameter rather than reading a clock here, so
-// the behaviour is deterministic in a test and the caller's clock port stays
-// the single source of time -- the rule SetArchived and GoalService follow.
+// position oversold. today is a parameter for the same reason as
+// SetArchived's.
 func (s *HoldingService) RecordEvent(ctx context.Context, e domain.HoldingEvent, today time.Time) (domain.HoldingEvent, error) {
 	if err := refuseFutureDate(e.OccurredOn, today); err != nil {
 		return domain.HoldingEvent{}, err
@@ -180,14 +172,11 @@ func (s *HoldingService) RecordEvent(ctx context.Context, e domain.HoldingEvent,
 		return domain.HoldingEvent{}, err
 	}
 
-	// Overselling is caught at the point of recording, because a ledger that
-	// cannot be folded is a screen that cannot render, and the household would
-	// only discover it on the next page load.
-	//
-	// The fold runs INSIDE the write's own transaction, not as a separate read
-	// before it: two sales of 30 from a holding of 50 are each legal alone and
-	// illegal together, and checking then writing lets both through. The rule
-	// stays here; InsertWithFold supplies the lock.
+	// Overselling is caught at recording time: an unfoldable ledger is a
+	// screen that can't render. The fold runs INSIDE the write's own
+	// transaction, not a separate read before it -- two sales of 30 from a
+	// holding of 50 are legal alone, illegal together, and check-then-write
+	// lets both through. InsertWithFold supplies the lock.
 	return s.d.Events.InsertWithFold(ctx, e, func(withThisOne []domain.HoldingEvent) error {
 		_, err := holding.Position(withThisOne, primaryCurrency)
 		return err
@@ -254,11 +243,10 @@ func (s *HoldingService) ListValuations(ctx context.Context, householdID, holdin
 	return s.d.Valuations.ListByHolding(ctx, householdID, holdingID)
 }
 
-// Portfolio composes the whole screen from three reads -- the holdings, every
-// event, every latest price -- rather than one query per holding, then folds
-// each position in memory. The events arrive already ordered by the
-// repository's own contract (occurred_on, created_at, id), which is what makes
-// the fold's answer deterministic for same-day events.
+// Portfolio composes the whole screen from three reads -- holdings, every
+// event, every latest price -- rather than one query per holding, then
+// folds each position in memory. The repository's own ordering (occurred_on,
+// created_at, id) is what makes the fold deterministic for same-day events.
 func (s *HoldingService) Portfolio(ctx context.Context, householdID string, includeArchived bool) (PortfolioView, error) {
 	records, err := s.d.Holdings.List(ctx, householdID, includeArchived)
 	if err != nil {
@@ -330,10 +318,9 @@ func (s *HoldingService) primaryCurrency(ctx context.Context, householdID string
 	return household.PrimaryCurrency, nil
 }
 
-// refuseFutureDate compares CALENDAR DAYS, not instants. A household recording
-// this morning's purchase must not be refused because the clock reads a later
-// hour, and this project has already shipped that off-by-one three times in
-// its date handling.
+// refuseFutureDate compares CALENDAR DAYS, not instants: a household
+// recording this morning's purchase must not be refused because the clock
+// reads a later hour. This project has shipped that off-by-one three times.
 func refuseFutureDate(date, today time.Time) error {
 	d := time.Date(date.Year(), date.Month(), date.Day(), 0, 0, 0, 0, time.UTC)
 	t := time.Date(today.Year(), today.Month(), today.Day(), 0, 0, 0, 0, time.UTC)
@@ -345,10 +332,9 @@ func refuseFutureDate(date, today time.Time) error {
 
 // maxReportPeriods is how far back the report will go in one response.
 //
-// It is a drawing limit, not a storage one. The chart puts one bar per holding
-// inside each period, so twelve quarters against four holdings is already
-// forty-eight bars in 320 pixels -- past the point where a bar is a bar. A
-// household wanting more history wants a different screen, not a wider one.
+// It is a drawing limit, not a storage one: twelve quarters against four
+// holdings is already forty-eight bars in 320 pixels. A household wanting
+// more history wants a different screen, not a wider one.
 const maxReportPeriods = 12
 
 // HoldingReportRow is one holding's whole row in the report: the holding
@@ -365,21 +351,18 @@ type HoldingReportRow struct {
 
 // PortfolioReportView is the whole report screen in one response.
 //
-// It carries no household total, for the reason PortfolioView carries none:
-// a total would have to convert every holding into the primary currency, and
-// this product has no dated rate source. The per-holding primary figures are
-// each recorded by the owner; a sum across them would be, too -- but a sum
-// that blanks whenever any one holding blanks is worse than no sum at all,
-// because it reads as a zero in the season somebody forgot to type a price.
+// It carries no household total, for the reason PortfolioView carries none
+// (see its doc comment). A sum here would also blank whenever any one
+// holding blanks, which is worse than no sum at all -- it would read as a
+// zero in the season somebody forgot to type a price.
 type PortfolioReportView struct {
 	Periods         []domain.Period
 	PrimaryCurrency string
 	Holdings        []HoldingReportRow
 }
 
-// RecordIncome stores one dividend, coupon or charge. It takes today for the
-// same reason RecordEvent does -- the caller's clock port stays the single
-// source of time.
+// RecordIncome stores one dividend, coupon or charge. today is a parameter
+// for the same reason as SetArchived's.
 func (s *HoldingService) RecordIncome(ctx context.Context, i domain.HoldingIncome, today time.Time) (domain.HoldingIncome, error) {
 	if err := refuseFutureDate(i.ReceivedOn, today); err != nil {
 		return domain.HoldingIncome{}, err
@@ -398,9 +381,9 @@ func (s *HoldingService) RecordIncome(ctx context.Context, i domain.HoldingIncom
 	if err := i.Validate(holding.Currency, primaryCurrency); err != nil {
 		return domain.HoldingIncome{}, err
 	}
-	// No fold, no lock, no transaction: income enters no pool, so no invariant
-	// spans two rows here and there is nothing a concurrent write could
-	// invalidate. Contrast RecordEvent, which folds inside its own write.
+	// No fold, no lock, no transaction: income enters no pool, so nothing
+	// here spans two rows for a concurrent write to invalidate -- contrast
+	// RecordEvent, which folds inside its own write.
 	return s.d.Income.Insert(ctx, i)
 }
 
@@ -412,12 +395,11 @@ func (s *HoldingService) ListIncome(ctx context.Context, householdID, holdingID 
 }
 
 // DeleteIncome needs no fold check, unlike DeleteEvent: removing a dividend
-// cannot leave the remaining rows unable to fold, because they never folded.
+// can't leave the remaining rows unable to fold, since they never folded.
 //
-// The holding is read first so that a row under a holding this household does
-// not own is a 404 rather than a delete that matches nothing, and the holding
-// is passed DOWN as well: the repository scopes on it, so naming one holding
-// cannot remove another's row.
+// The holding is read first so a row under a holding this household doesn't
+// own is a 404, not a no-op delete -- and passed down too, so the
+// repository's scope keeps naming one holding from removing another's row.
 func (s *HoldingService) DeleteIncome(ctx context.Context, householdID, holdingID, incomeID string) error {
 	if _, err := s.d.Holdings.Get(ctx, householdID, holdingID); err != nil {
 		return err
@@ -429,31 +411,26 @@ func (s *HoldingService) DeleteIncome(ctx context.Context, householdID, holdingI
 // `count` periods of this kind, ending with the one the household is currently
 // living in.
 //
-// It reads the household's WHOLE history once -- every holding, every event,
-// every income row, every price -- and computes in memory, rather than issuing
-// a query per holding per period.
+// It reads the household's WHOLE history once -- every holding, event,
+// income row and price -- and computes in memory, rather than querying per
+// holding per period.
 //
-// The work is bigger than "one fold per holding", so here is its real shape.
-// Each period needs the position at BOTH of its ends, and each of those is
-// folded from the beginning of the holding's life, because average cost
-// depends on everything before the window. That is `count x 2` folds per
-// holding, each of them O(n log n) in that holding's events: twelve quarters
-// is twenty-four full folds. Position also copies and re-sorts the slice every
-// time, which the repository's ordering already guarantees -- so at this scale
-// the sort is 24x redundant work that is nonetheless kept, because it is the
-// fold's own defence against a caller that did not order, and correctness that
-// depends on a caller's diligence is not correctness.
+// Each period needs the position at BOTH ends, each folded from the
+// holding's start since average cost depends on everything before the
+// window: `count x 2` folds per holding, O(n log n) each. Position also
+// re-sorts every time as its own defence against an unordered caller --
+// redundant here, but correctness that depends on a caller's diligence
+// isn't correctness.
 //
-// At a household's scale (single-digit holdings, tens of events) all of that
-// is a handful of rows and microseconds, and it is the simplest thing that is
-// correct. It stops being free at maybe a thousand events across dozens of
-// holdings, where the answer is a query that folds in SQL -- not a cache: two
-// paths computing the same figure is how the report and the portfolio screen
-// would start disagreeing.
+// At a household's scale (single-digit holdings, tens of events) this is
+// microseconds and the simplest correct thing. It stops being free around a
+// thousand events, where the fix is a query that folds in SQL -- not a
+// cache, since two paths computing the same figure is how this report and
+// the portfolio screen would start disagreeing.
 //
-// Archived holdings are included. Selling out of something and tidying it away
-// does not unmake the profit it realised that quarter, and dropping it would
-// silently change a closed period's answer.
+// Archived holdings are included: selling out of something doesn't unmake
+// the profit it realised, and dropping it would silently change a closed
+// period's answer.
 func (s *HoldingService) Report(ctx context.Context, householdID string, kind domain.PeriodKind, count int, today time.Time) (PortfolioReportView, error) {
 	if _, err := domain.ParsePeriodKind(string(kind)); err != nil {
 		return PortfolioReportView{}, err
@@ -488,10 +465,9 @@ func (s *HoldingService) Report(ctx context.Context, householdID string, kind do
 		return PortfolioReportView{}, err
 	}
 
-	// Grouping is this function's real job, and getting it wrong would blend
-	// two positions into one answer that looks plausible. Each map preserves
-	// the order its read returned, which for events is the fold's tie-break
-	// for rows sharing a date.
+	// Grouping is this function's real job -- getting it wrong blends two
+	// positions into one answer that looks plausible. Each map preserves its
+	// read's order, the fold's tie-break for events sharing a date.
 	eventsOf := make(map[string][]domain.HoldingEvent, len(records))
 	for _, e := range events {
 		eventsOf[e.HoldingID] = append(eventsOf[e.HoldingID], e)

@@ -15,45 +15,37 @@ import (
 // can move it.
 const inviteTTL = 7 * 24 * time.Hour
 
-// TelegramInviteTTL is 24 hours (partner-invite spec decision 8), exported
-// so main.go and the test wiring cannot drift apart on it.
+// TelegramInviteTTL is 24 hours, exported so main.go and the test wiring
+// cannot drift apart on it.
 const TelegramInviteTTL = 24 * time.Hour
 
-// telegramInvitePayloadPrefix routes a /start payload to an invite rather
-// than to the sign-in nonce table. Reserved by migration 00018's own
-// comment. "inv_" plus NewToken's 43 base64url characters is 47, under
-// Telegram's 64-character start limit -- check that arithmetic again before
-// ever lengthening either half.
+// telegramInvitePayloadPrefix routes a /start payload to an invite, not the
+// sign-in nonce table (migration 00018 reserved it). "inv_" plus NewToken's
+// 43 base64url characters is 47, under Telegram's 64-character start limit
+// -- recheck before lengthening either half.
 const telegramInvitePayloadPrefix = "inv_"
 
 // ErrInviteeAlreadyRegistered is Create's rejection of an invite to an email
-// address that already has a users row. Without this check, Create wrote the
-// invite and sent the mail anyway -- InviteRepo.Accept unconditionally calls
-// CreateUser and never reuses an existing row, so acceptance always hit
-// users.email's unique constraint, translated to domain.ErrAlreadyExists with
-// no mapping, and answered 500. The transaction rolled back, so the invite
-// stayed live and every retry produced the same 500: the owner who sent the
-// invite saw success, and the recipient could never accept it, forever.
+// address that already has a users row.
 //
-// Rejecting at creation -- where the owner who typed the address can see the
-// error and act on it -- is better than teaching Accept to reuse the
-// existing row: re-inviting an address that already belongs to someone is
-// almost always a mistake (a mistype, or an accidental re-invite of a
-// current member) rather than a genuine intent to hand a second person the
-// same account.
+// Without this check, Create wrote the invite and mailed it anyway: Accept
+// always hits users.email's unique constraint (it never reuses an existing
+// row), rolls back, and answers 500 on every retry forever -- the sender
+// saw success, and the recipient could never accept.
+//
+// Rejecting here, where the owner who typed the address can see the error,
+// beats teaching Accept to reuse the row: re-inviting an existing address is
+// almost always a mistake, not genuine intent to share an account.
 var ErrInviteeAlreadyRegistered = errors.New("an account with that email address already exists")
 
 // InviteDeps mirrors AuthDeps: every port InviteService needs, gathered into
-// one struct so NewInviteService has a single, named argument rather than a
-// long positional list.
+// one struct so NewInviteService has a single, named argument.
 //
-// There is no MembershipRepository here. Every write InviteService makes to
-// a membership goes through a port that creates it transactionally alongside
-// the user it belongs to -- UserRepository.CreateWithMembership for the
-// child branch of Create, InviteRepository.Accept for Accept -- so a bare
-// MembershipRepository.Create call is never the right tool for this service
-// (see both ports' doc comments for why a lone Create would
-// reintroduce the orphaned-user defect this task fixed).
+// There is no MembershipRepository here: every membership write goes through
+// a port that creates it transactionally alongside its user --
+// UserRepository.CreateWithMembership or InviteRepository.Accept -- so a bare
+// MembershipRepository.Create call would reintroduce the orphaned-user
+// defect (see both ports' doc comments).
 type InviteDeps struct {
 	Invites    InviteRepository
 	Users      UserRepository
@@ -65,19 +57,18 @@ type InviteDeps struct {
 	SessionTTL time.Duration
 	BaseURL    string
 	// BotUsername is the @name in the t.me deep link. Empty means no bot is
-	// configured on this install, which is one of the two conditions that
-	// make a Telegram invite impossible (spec decision 11).
+	// configured; a Telegram invite is also impossible when the
+	// telegram_sign_in flag is off.
 	BotUsername string
-	// TelegramInviteTTL is 24 hours (spec decision 8). Email invites keep
-	// inviteTTL's seven days: getting a new Telegram link is one click, so
-	// a short life costs almost nothing, and a link forgotten in a chat
-	// history dies the next day.
+	// TelegramInviteTTL is 24 hours; email invites keep inviteTTL's seven
+	// days. A new Telegram link is one click, so the short life costs
+	// little, and a link forgotten in a chat dies the next day.
 	TelegramInviteTTL time.Duration
 	// Codes draws the four digits Knock shows the tapper.
 	Codes PairingCodes
 	// Accounts is read by Knock, before it ever touches the invite: a chat
 	// that already belongs to a Hearth account is refused before it can
-	// spend somebody else's link (spec decision 15).
+	// spend somebody else's link.
 	Accounts TelegramAccountRepository
 	// Chats sends the two messages a Telegram invite causes. It cannot be
 	// set here at construction time -- see SetChats' own doc comment for
@@ -89,32 +80,23 @@ type InviteService struct {
 	d InviteDeps
 }
 
-// NewInviteService has nothing that needs a zero-value default the way
-// NewAuthService's Policy does -- every InviteDeps field is either required
-// or, for BaseURL, safely empty -- so it is a direct wrap, kept as a
-// constructor (rather than a struct literal at call sites) purely to match
-// AuthService's shape.
+// NewInviteService is a direct wrap -- no field here needs a zero-value
+// default the way NewAuthService's Policy does -- kept as a constructor
+// purely to match AuthService's shape.
 func NewInviteService(d InviteDeps) *InviteService {
 	return &InviteService{d: d}
 }
 
 // SetChats completes the two-way wiring between this service and
-// TelegramAuthService: the invite side needs to send two messages, and the
-// Telegram side needs to record a knock (InviteKnocker). Neither can be
-// constructed with the other already built -- a cycle in the wiring, not in
-// the types -- so main.go builds both, handing this service to
-// TelegramAuthDeps.Invites directly, and closes the remaining half of the
-// loop here. Called exactly once, at startup, before any request is served.
+// TelegramAuthService: the invite side sends messages, the Telegram side
+// records a knock (InviteKnocker), and neither can be built with the other
+// already constructed. main.go builds both and closes this half of the loop
+// here, exactly once, at startup, before any request is served.
 //
-// NewLink dereferences d.Chats with no nil check, deliberately: it can
-// never reach a nil Chats, because it returns early whenever BotUsername is
-// empty. Admit is the method that actually can --
-// a knock recorded while a bot was configured can still be sitting in the
-// table after the bot is removed and this process restarted
-// (docs/INFRASTRUCTURE.md's leaked-token runbook), so BotUsername's
-// absence is not available to Admit as a guard the way it is to NewLink.
-// Admit's own nil check on Chats is what covers that case; see its doc
-// comment.
+// NewLink dereferences d.Chats with no nil check: it can never reach a nil
+// Chats, because it returns early whenever BotUsername is empty. Admit can
+// reach one -- see its own doc comment for why, and for the nil check that
+// covers it.
 func (s *InviteService) SetChats(chats InviteChats) { s.d.Chats = chats }
 
 // InvitePreview is what a caller sees before signing in: enough to render
@@ -128,16 +110,14 @@ type InvitePreview struct {
 	Capabilities domain.Capabilities
 }
 
-// Create adds a new member to the household. Most of the time that means
-// writing an invite row and emailing a link; a limited member with no email
-// address of their own -- the design's children -- is instead created
-// directly, with no invite and no email at all, because there is no address
-// to send one to and no one who will ever type a password for that account.
+// Create adds a new member to the household. Usually that means writing an
+// invite row and emailing a link; a limited member with no email (the
+// design's children) is instead created directly, with no invite and no
+// credentials, since there's no address to send one to.
 //
 // The membership shape is validated through domain.NewMembership before any
-// write happens, in both branches, so an invalid role/capability combination
-// (a limited member holding marriage, or an owner missing a capability)
-// never reaches a repository call.
+// write, in both branches, so an invalid role/capability combination never
+// reaches a repository call.
 func (s *InviteService) Create(ctx context.Context, householdID, invitedByUserID, name, email string,
 	role domain.Role, caps domain.Capabilities) error {
 	if _, err := domain.NewMembership("", householdID, "", role, caps); err != nil {
@@ -145,24 +125,19 @@ func (s *InviteService) Create(ctx context.Context, householdID, invitedByUserID
 	}
 
 	if email == "" {
-		// Only a limited member can be created without an email at all --
-		// that's the design's child case, created directly with no
-		// credentials. Any other role with no email has nowhere for an
-		// invite to go: it would occupy a token hash, sit unopened, and
-		// expire silently seven days later while the caller who created it
-		// saw success. Reject the combination before writing anything.
+		// Only a limited member can be created without an email -- the
+		// design's child case, no credentials. Any other role with no email
+		// has nowhere for an invite to go: it would sit unopened and expire
+		// silently while the caller saw success.
 		if role != domain.RoleLimited {
 			return domain.ErrInviteRequiresEmail
 		}
 		// The user's own ID isn't known yet -- CreateWithMembership assigns it
-		// inside its transaction -- so this validates the role/capability
-		// shape with the same empty-userID placeholder Accept uses, before any
-		// write happens. CreateWithMembership itself does the user creation
-		// and the membership creation together, in one transaction: see
-		// UserRepository.CreateWithMembership's doc comment for why that
-		// matters (a partial failure here would orphan a user with a NULL
-		// email -- no unique constraint to make a retry fail loudly, so it
-		// would silently create another orphan each time).
+		// inside its transaction -- so this validates the role/capability shape
+		// with the same empty-userID placeholder Accept uses.
+		// CreateWithMembership creates the user and membership together in one
+		// transaction: a partial failure would otherwise orphan a user with a
+		// NULL email, silently, on every retry (see its own doc comment).
 		membership, err := domain.NewMembership("", householdID, "", role, caps)
 		if err != nil {
 			return err
@@ -172,13 +147,10 @@ func (s *InviteService) Create(ctx context.Context, householdID, invitedByUserID
 	}
 
 	// Reject an invite to an address that already has a users row before
-	// writing anything -- see ErrInviteeAlreadyRegistered's doc comment for
-	// the 500 this closes. This is a pre-check, not the only gate: two
-	// callers inviting the same brand-new address at once can both pass it
-	// before either invite is accepted, so the race is still possible at
-	// acceptance time. That race is closed by users.email's unique
-	// constraint (translated to domain.ErrAlreadyExists, mapped to 409 in
-	// MapDomainError's default case) rather than by anything here.
+	// writing anything (see ErrInviteeAlreadyRegistered's doc comment). This
+	// is a pre-check, not the only gate: two callers inviting the same new
+	// address at once can both pass it, so the race is closed instead by
+	// users.email's unique constraint (mapped to 409 in MapDomainError).
 	if _, err := s.d.Users.ByEmail(ctx, email); err == nil {
 		return ErrInviteeAlreadyRegistered
 	} else if !errors.Is(err, domain.ErrNotFound) {
@@ -216,13 +188,11 @@ type TelegramInviteLink struct {
 // CreateTelegram writes an invite nobody has to have an email address for,
 // and returns the deep link the owner hands over.
 //
-// There is no ErrInviteeAlreadyRegistered pre-check here, and that absence
-// is deliberate: that check exists because users.email is unique, so a
-// second account for the same address could never be created. A Telegram
-// invite has no address, and the collision it *can* hit -- the chat already
-// belonging to a Hearth account -- is not knowable at creation time,
-// because nobody has tapped yet. It is checked at the knock (spec decision
-// 15) and again inside Admit's transaction.
+// There's deliberately no ErrInviteeAlreadyRegistered check here: that
+// exists because users.email is unique, but Telegram has no address. Its
+// real collision -- the chat already belonging to an account -- isn't
+// knowable until someone taps, so it's checked at the knock and again
+// inside Admit's transaction.
 func (s *InviteService) CreateTelegram(ctx context.Context, householdID, invitedByUserID, name string,
 	role domain.Role, caps domain.Capabilities) (TelegramInviteLink, error) {
 	if s.d.BotUsername == "" {
@@ -244,23 +214,19 @@ func (s *InviteService) CreateTelegram(ctx context.Context, householdID, invited
 	return TelegramInviteLink{ID: id, URL: s.telegramInviteURL(raw), ExpiresAt: expiresAt}, nil
 }
 
-// telegramInviteURL is the one place the inv_ prefix is written. Migration
-// 00018's comment reserved it so an invite routes by payload rather than
-// through telegram_link_requests; HandleStart strips it before handing the
-// rest to the knocker.
+// telegramInviteURL is the one place the inv_ prefix is written;
+// HandleStart strips it before handing the rest to the knocker.
 func (s *InviteService) telegramInviteURL(rawToken string) string {
 	return fmt.Sprintf("https://t.me/%s?start=%s%s", s.d.BotUsername, telegramInvitePayloadPrefix, rawToken)
 }
 
-// NewLink replaces a Telegram invite's link, which is also what "Not them"
-// does: the knock is cleared, the old token stops working, and whoever
-// knocked is told. One method for both because the owner's two intentions
-// -- "that wasn't them" and "I lost the link" -- need exactly the same four
-// effects, and a second route would give the waiting card a third state
-// for no benefit.
+// NewLink replaces a Telegram invite's link -- also what "Not them" does:
+// the knock is cleared, the old token stops working, and whoever knocked is
+// told. One method serves both, since the owner's two intents ("that
+// wasn't them" and "I lost the link") need the same four effects.
 //
-// An owner who suspects a leak and wants no new link withdraws the invite
-// instead (Withdraw, which deletes the row).
+// An owner who wants no new link at all uses Withdraw instead (deletes the
+// row).
 func (s *InviteService) NewLink(ctx context.Context, householdID, inviteID string) (TelegramInviteLink, error) {
 	if s.d.BotUsername == "" {
 		return TelegramInviteLink{}, domain.ErrTelegramInvitesUnavailable
@@ -292,20 +258,17 @@ func (s *InviteService) NewLink(ctx context.Context, householdID, inviteID strin
 // invite rule.
 //
 // Every refusal about the *link* is domain.ErrNotFound, with no exception:
-// unknown, expired, accepted, already knocked and email-channel all collapse
-// into one answer, because a caller that could tell them apart would hand a
-// chat holding a stolen link a way to probe for somebody else's invite.
+// unknown, expired, accepted, already-knocked and email-channel all
+// collapse into one answer, so a stolen link can't be used to probe for
+// someone else's invite.
 //
-// The one exception is domain.ErrChatAlreadyBound, and it is safe precisely
-// because it is not about the link: it tells the tapper only that their own
-// chat already belongs to an account, which they can discover by sending
-// /start with no payload at all. Answering it plainly saves them tapping a
-// link that will never work (spec decision 15).
-//
-// That check is first, before the guarded UPDATE, so a chat that already
-// belongs to an account cannot consume somebody else's invite link on its
-// way to being refused. It runs again inside Admit's transaction, because
-// the chat may sign up somewhere else between the knock and the click.
+// domain.ErrChatAlreadyBound is the one exception, and it's safe: it only
+// tells the tapper their own chat is already bound, which a bare /start
+// would reveal anyway, and answering plainly saves them tapping a link
+// that can never work. This check runs first, before the guarded UPDATE, so
+// an already-bound chat can't consume someone else's link on its way to
+// being refused -- and again inside Admit's transaction, since the chat
+// could sign up elsewhere in between.
 func (s *InviteService) Knock(ctx context.Context, rawToken string, chatID int64, username string) (string, error) {
 	if _, err := s.d.Accounts.ByChatID(ctx, chatID); err == nil {
 		return "", domain.ErrChatAlreadyBound
@@ -324,29 +287,23 @@ func (s *InviteService) Knock(ctx context.Context, rawToken string, chatID int64
 	return code, nil
 }
 
-// Admit is Let in, the whole point of the milestone: the owner has compared
-// the four digits by eye and clicked to turn the waiting knock into a real
-// member. The write -- user, membership, telegram_accounts binding and
-// acceptance stamp together -- is entirely InviteRepository.Admit's
-// transaction (see its own doc comment). This method's own job is the
-// order of the two things that cannot both be in that transaction: the
-// write, then the message.
+// Admit is Let in: the owner has compared the four digits by eye and
+// clicked to turn the waiting knock into a real member. The write -- user,
+// membership, telegram_accounts binding and acceptance stamp together -- is
+// entirely InviteRepository.Admit's transaction (see its own doc comment).
+// This method's job is just the order: write, then message.
 //
-// The sign-in link is sent after the commit, never inside it (spec
-// decision 6): sending from inside the transaction would let a message
-// promise an account that a later rollback could still take away. A
-// failure to send is reported as SignInSent: false rather than swallowed
-// (docs/LEARNING.md pattern 5) -- no new recovery path is needed, because
-// the chat is bound by then, so any /start it sends already gets a fresh
-// sign-in link.
+// The sign-in link is sent after the commit, never inside it: sending
+// inside the transaction could promise an account a later rollback takes
+// away. A failed send is reported as SignInSent: false rather than
+// swallowed (docs/LEARNING.md pattern 5) -- no new recovery path is needed,
+// since the chat is bound by then and any /start gets a fresh link.
 //
-// A nil Chats is checked here, unlike NewLink (see SetChats' own doc
-// comment for why the two methods differ): the write above has already
+// A nil Chats is checked here, unlike NewLink: the write above has already
 // committed, so a knocked invite can still be waiting when this runs on an
 // install that has since dropped its bot (docs/INFRASTRUCTURE.md's
-// leaked-token runbook -- remove both .env values and restart). Reported
-// the same way a failed send already is, never a panic: the member is not
-// lost because nobody was left to tell.
+// leaked-token runbook). Reported the same way as a failed send, never a
+// panic: the member is not lost because nobody was left to tell.
 func (s *InviteService) Admit(ctx context.Context, householdID, inviteID string) (AdmittedMember, error) {
 	admitted, err := s.d.Invites.Admit(ctx, householdID, inviteID, s.d.Clock.Now())
 	if err != nil {
@@ -380,12 +337,11 @@ func (s *InviteService) Preview(ctx context.Context, token string) (InvitePrevie
 	if err != nil {
 		return InvitePreview{}, err
 	}
-	// A Telegram invite is not servable here at all, so it is answered as
-	// an unknown token would be -- before the liveness check, so that even
-	// the difference between "expired" and "unknown" cannot leak for a
-	// token this route never serves (spec decision 7). This is one of the
-	// milestone's named mutation checks: removing it must turn
-	// TestTheWebFormCannotAcceptATelegramInvite red.
+	// A Telegram invite isn't servable here: without this, the raw token
+	// could accept through the web form with a password, skipping Let in.
+	// It's answered as an unknown token would be, before the liveness
+	// check, so "expired" can't be told apart from "unknown" either.
+	// TestTheWebFormCannotAcceptATelegramInvite pins this.
 	if details.Channel != domain.ChannelEmail {
 		return InvitePreview{}, domain.ErrNotFound
 	}
@@ -401,18 +357,17 @@ func (s *InviteService) Preview(ctx context.Context, token string) (InvitePrevie
 	}, nil
 }
 
-// checkInviteLive reports the specific reason an invite can no longer be used,
-// distinguishing an already-accepted invite (409, per the spec) from an
-// expired one (410) -- a distinction InviteRepository.Accept's own no-rows case
-// cannot make, because its guarded UPDATE collapses both into the same
-// zero-rows result. Reading accepted_at and expires_at ourselves, via
-// ByTokenHash, is what lets Preview and Accept report the two apart;
-// InviteRepository.Accept's answer is then authoritative only for the race
-// window between this read and that write.
+// checkInviteLive reports the specific reason an invite can no longer be
+// used, telling an already-accepted invite (409) apart from an expired one
+// (410) -- InviteRepository.Accept's own no-rows case can't, since its
+// guarded UPDATE collapses both into zero rows. Reading accepted_at and
+// expires_at via ByTokenHash is what lets Preview and Accept tell them
+// apart; Accept's own answer is authoritative only for the race window
+// between this read and that write.
 //
-// The consumed-before-expired ordering now lives in domain.TokenLifecycle,
-// shared with sign-up. The sentinels stay invite-specific because the HTTP
-// layer maps them to different statuses with different copy.
+// The consumed-before-expired ordering lives in domain.TokenLifecycle,
+// shared with sign-up; the sentinels stay invite-specific since the HTTP
+// layer maps them to different statuses and copy.
 func checkInviteLive(details InviteDetails, now time.Time) error {
 	switch domain.TokenLifecycle(now, details.ExpiresAt, details.AcceptedAt) {
 	case domain.TokenLive:
@@ -429,17 +384,15 @@ func checkInviteLive(details InviteDetails, now time.Time) error {
 	}
 }
 
-// Accept turns an invite into a real account: it hashes the chosen password,
-// creates the user and membership and stamps the invite as accepted --all in
-// the one transaction InviteRepository.Accept performs -- and then signs the
-// new member in exactly as SignIn does, through the same issueSession
-// function.
+// Accept turns an invite into a real account: hashes the password, creates
+// the user and membership, and stamps the invite accepted -- all in
+// InviteRepository.Accept's one transaction -- then signs the member in via
+// the same issueSession SignIn uses.
 //
-// Do not compose this from MarkAccepted plus separate CreateUser and
-// CreateMembership calls: a failure between those three steps would leave an
-// orphaned user occupying the unique email index, and the invite could then
-// never be accepted by anyone, ever (see InviteRepository.Accept's doc
-// comment).
+// Don't compose this from separate MarkAccepted/CreateUser/CreateMembership
+// calls: a failure between them would orphan a user in the unique email
+// index, and the invite could never be accepted by anyone (see
+// InviteRepository.Accept's doc comment).
 func (s *InviteService) Accept(ctx context.Context, token, password, displayName string) (SignInResult, error) {
 	if err := validatePassword(password); err != nil {
 		return SignInResult{}, err
@@ -450,12 +403,7 @@ func (s *InviteService) Accept(ctx context.Context, token, password, displayName
 	if err != nil {
 		return SignInResult{}, err
 	}
-	// A Telegram invite is not servable here at all, so it is answered as
-	// an unknown token would be -- before the liveness check, so that even
-	// the difference between "expired" and "unknown" cannot leak for a
-	// token this route never serves (spec decision 7). This is one of the
-	// milestone's named mutation checks: removing it must turn
-	// TestTheWebFormCannotAcceptATelegramInvite red.
+	// Same refusal as Preview, for the same reason -- see its comment.
 	if details.Channel != domain.ChannelEmail {
 		return SignInResult{}, domain.ErrNotFound
 	}
@@ -463,10 +411,9 @@ func (s *InviteService) Accept(ctx context.Context, token, password, displayName
 		return SignInResult{}, err
 	}
 
-	// Validate the membership shape before any write, exactly as Create
-	// does -- this is what catches an invite whose stored role/capabilities
-	// would otherwise reach the repository's transaction and fail there
-	// instead of here.
+	// Validate the membership shape before any write, exactly as Create: this
+	// catches an invite whose stored role/capabilities would otherwise fail
+	// inside the repository's transaction instead of here.
 	if _, err := domain.NewMembership("", details.HouseholdID, "", details.Role, details.Capabilities); err != nil {
 		return SignInResult{}, err
 	}
@@ -498,10 +445,9 @@ func (s *InviteService) ListPending(ctx context.Context, householdID string) ([]
 }
 
 // Withdraw deletes an invite nobody has accepted, so the link its invitee
-// already holds stops working. It deletes rather than stamps
-// (partner-invite spec decision 13): a "withdrawn" stamp would need every
-// invite query to remember one more condition, and a deleted row cannot be
-// accepted by any of them, current or future.
+// already holds stops working. It deletes rather than stamps: a "withdrawn"
+// stamp would need every invite query to remember one more condition, while
+// a deleted row can't be accepted by any of them.
 func (s *InviteService) Withdraw(ctx context.Context, householdID, inviteID string) error {
 	return s.d.Invites.Delete(ctx, householdID, inviteID)
 }

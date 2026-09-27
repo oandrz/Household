@@ -8,10 +8,8 @@ import (
 	"github.com/andreasoentoro/hearth/api/internal/domain"
 )
 
-// NewAccount is the create input. It is a struct rather than nine parameters
-// because five of them are the same two types and a caller swapping two would
-// compile.
-//
+// NewAccount is the create input: a struct, not nine parameters, because
+// five of them share two types and a swapped pair would still compile.
 // OwnerMembershipID follows the "" <-> SQL NULL convention: "" means shared.
 type NewAccount struct {
 	HouseholdID             string
@@ -25,12 +23,10 @@ type NewAccount struct {
 	VisibleToLimitedMembers bool
 }
 
-// AccountUpdate is a real patch: a nil pointer means "leave this field alone".
-//
-// OwnerMembershipID is a *string rather than a **string, and the two states a
-// caller needs are both reachable: nil leaves the owner unchanged, and a
-// pointer to "" makes the account shared. Without the second, an account
-// assigned to the wrong person could never be un-assigned.
+// AccountUpdate is a real patch: a nil pointer means "leave this field
+// alone". OwnerMembershipID is a *string, not **string: nil leaves the
+// owner unchanged, a pointer to "" clears it to shared -- without that
+// second state, a wrongly assigned account could never be un-assigned.
 type AccountUpdate struct {
 	Nickname                *string
 	Type                    *string
@@ -49,20 +45,16 @@ type AccountDeps struct {
 	Households HouseholdRepository
 	FX         FXRateProvider
 	Clock      Clock
-	// Holdings is read only to answer "does this account still hold
-	// anything", which is what stops an account's type changing out from
-	// under its holdings. It is required, not optional: a nil here would
-	// silently disable that guard, and a guard that can be switched off by
-	// forgetting a field is not a guard.
+	// Holdings answers "does this account still hold anything", which is
+	// what blocks a type change out from under live holdings. Required, not
+	// optional: a nil here would silently disable that guard.
 	Holdings HoldingCounter
 }
 
-// AccountService covers the Finances screen: the accounts themselves and the
-// net worth summary computed from them.
-//
-// It takes no actor parameter, by the rule this whole codebase follows:
-// services enforce what is *valid*, middleware enforces who is *asking*. The
-// money capability and the owner check live in the router.
+// AccountService covers the Finances screen: accounts and the net worth
+// summary computed from them. No actor parameter: services enforce what is
+// *valid*; the router enforces who is *asking*, via the money capability
+// and owner check.
 type AccountService struct {
 	d AccountDeps
 }
@@ -96,11 +88,10 @@ func (s *AccountService) Create(ctx context.Context, in NewAccount) (domain.Acco
 	return s.d.Accounts.Create(ctx, account)
 }
 
-// Update merges the patch onto the stored account and then validates the
-// *result*, never the incoming fields. That ordering is the point: switching a
-// type to "loan" and leaving a negative balance alone are each legal in
-// isolation and illegal together, so validating the patch would let the pair
-// through.
+// Update merges the patch onto the stored account, then validates the
+// *result*, never the fields alone: type "loan" plus a negative balance is
+// illegal together though legal separately, so validating fields alone
+// would let that pair through.
 func (s *AccountService) Update(ctx context.Context, householdID, accountID string, patch AccountUpdate) (domain.Account, error) {
 	view, err := s.d.Accounts.Get(ctx, householdID, accountID)
 	if err != nil {
@@ -112,13 +103,10 @@ func (s *AccountService) Update(ctx context.Context, householdID, accountID stri
 		account.Nickname = *patch.Nickname
 	}
 	if patch.Type != nil {
-		// A holding is anchored to an investment account, and HoldingService
-		// refuses to create one anywhere else. Without this the other
-		// direction is wide open: an owner could turn a brokerage into a cash
-		// account while it still held 300g of gold, leaving holdings attached
-		// to an account type that would never have accepted them. Only a
-		// CHANGE is refused -- renaming an account that holds something is
-		// fine, and so is re-setting the type it already has.
+		// HoldingService anchors a holding to an investment account on create;
+		// this guards the reverse, blocking a type change that would strand
+		// live holdings under a type that never accepts them. Only a CHANGE
+		// is refused -- renaming, or re-setting the same type, is fine.
 		if domain.AccountType(*patch.Type) != account.Type {
 			held, err := s.d.Holdings.CountLiveForAccount(ctx, householdID, accountID)
 			if err != nil {
@@ -159,10 +147,9 @@ func (s *AccountService) SetArchived(ctx context.Context, householdID, accountID
 	return s.d.Accounts.SetArchived(ctx, householdID, accountID, archived, s.d.Clock.Now())
 }
 
-// validate normalises and checks an assembled account in place. It is shared by
-// Create and Update so the two cannot drift -- the class of defect this project
-// has hit four times is a rule fixed at one call site while its sibling kept
-// the bug.
+// validate normalises and checks an assembled account in place, shared by
+// Create and Update so the two rules cannot drift -- a defect class this
+// project has hit four times: a rule fixed at one call site, not its sibling.
 func (s *AccountService) validate(ctx context.Context, a *domain.Account) error {
 	a.Nickname = strings.TrimSpace(a.Nickname)
 	if a.Nickname == "" {
@@ -184,18 +171,12 @@ func (s *AccountService) validate(ctx context.Context, a *domain.Account) error 
 	}
 	a.OpeningBalance.Currency = code
 
-	// A whole day of tolerance, deliberately. This product stores no timezone
-	// for a household, so the server cannot know what "today" means to the
-	// person filling in the form: at 17:00 UTC it is already tomorrow in
-	// Singapore, and a household there entering today's balance would be
-	// refused for eight hours out of every twenty-four. Real zones span UTC-12
-	// to UTC+14, so one day of slack covers every one of them.
-	//
-	// The asymmetry is what makes this the right trade: accepting a balance
-	// dated a day early costs nothing -- it is a figure the owner typed and can
-	// edit -- while refusing a genuine "today" is a wall with no way past it
-	// and no explanation that would make sense to the person hitting it. The
-	// check exists to catch a typo like 2062, not to police the date line.
+	// A day of tolerance, deliberately: this product stores no household
+	// timezone, so the server cannot know the person's "today", and real
+	// zones span UTC-12 to UTC+14, so one day covers all of them.
+	// Accepting an early balance costs nothing (it's editable); refusing a
+	// genuine "today" would be an unexplainable wall. This catches a typo
+	// like 2062, not the date line.
 	if a.OpeningBalanceAsOf.After(s.d.Clock.Now().AddDate(0, 0, 1)) {
 		return domain.ErrOpeningBalanceInFuture
 	}

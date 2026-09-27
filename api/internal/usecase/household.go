@@ -9,37 +9,27 @@ import (
 )
 
 // ErrSpaceVisibilityNotSupported is CreateSpace's rejection of any visibility
-// other than "everyone" or "parents_only". It is a usecase sentinel, not a
-// domain one, for the same reason ErrPasswordTooShort lives in invite.go
-// rather than internal/domain: this is not a rule about who may act, but a
-// feature-completeness gate -- "custom" is a real domain.Visibility value,
-// valid enough for domain.VisibleSpaces to filter on (it currently treats it
-// as owner-only, see space.go), but the design marks custom space pages "not
-// built" and there is no per-space member list yet to back it. Accepting the
-// value here would silently create a space no one but an owner could ever
-// see, with no way to change that.
+// other than "everyone" or "parents_only". It is a usecase sentinel because
+// this is a feature-completeness gate, not a domain rule: "custom" is a
+// valid domain.Visibility (VisibleSpaces treats it as owner-only), so the
+// domain cannot reject it; there is no per-space member list yet to back
+// custom pages. Accepting the value here would silently create a space only
+// an owner could ever see, with no way to change that.
 var ErrSpaceVisibilityNotSupported = errors.New("space visibility must be \"everyone\" or \"parents_only\"; custom spaces are not supported yet")
 
 // ErrSpaceNameTaken is CreateSpace's rejection of a name that collides, once
-// lowercased and hyphenated, with an existing space's key -- including a
-// builtin one. The database enforces the identical constraint
-// (UNIQUE (household_id, key), migrations/00002_identity.sql), so this check
-// exists to fail with a clear, typed error in the common case, before a write
-// is even attempted. It is not the only gate: CreateSpace's pre-check is a
-// plain list-then-compare, not a transaction, so two concurrent creates that
-// derive the same key can both pass it before either insert lands. The
-// database's constraint is the backstop for that race, and the postgres
-// adapter's translate function reports the identical violation as
-// domain.ErrAlreadyExists; CreateSpace maps that onto this same sentinel
-// below, so a caller sees one error regardless of which gate caught it.
+// lowercased and hyphenated, with an existing space's key, including a
+// builtin one -- the same UNIQUE (household_id, key) constraint the database
+// enforces (migrations/00002_identity.sql). The list-then-compare pre-check
+// isn't transactional, so two concurrent creates can both pass it; the
+// database constraint is the real backstop, and CreateSpace maps its
+// translated domain.ErrAlreadyExists onto this same sentinel so the caller
+// sees one error either way.
 var ErrSpaceNameTaken = errors.New("a space with that name already exists in this household")
 
 // ErrSpaceNameRequired is CreateSpace's rejection of a name that is empty
-// once trimmed. Without this check, a blank name would derive the empty key
-// "" and create a nameless space; a second blank name would then collide
-// with it and report ErrSpaceNameTaken, a confusing way to say "a name is
-// required" for what is really a missing-input problem, not a naming
-// collision.
+// once trimmed. Without it, a blank name derives the empty key, and a second
+// blank name would then fail as the more confusing ErrSpaceNameTaken.
 var ErrSpaceNameRequired = errors.New("space name is required")
 
 // ErrInvalidFXRateMode is Update's rejection of any fxRateMode value other
@@ -74,27 +64,20 @@ func (s *HouseholdService) Get(ctx context.Context, householdID string) (domain.
 	return s.d.Households.Get(ctx, householdID)
 }
 
-// Update persists every field on h, after normalising both PrimaryCurrency
-// and SecondaryCurrency to uppercase and validating each through
-// domain.NewMoney's existing currency check -- the same three-letters,
-// uppercase-only rule Money already enforces on the monetary path, rather
-// than a second, independently invented check that could drift from it. Both
-// fields get identical treatment, not just the primary: both are persisted
-// (Task 11 widened UpdateHousehold specifically because silently dropping a
-// field was a defect), and both feed FXRateProvider.Rate(from, to) on the
-// conversion path -- a malformed secondary code would not fail here at write
-// time, only later as a missing rate, far from the edit that caused it.
-// domain.NewMoney's own error is wrapped in domain.ErrInvalidMoney (the
-// sentinel Money.Add already uses for the same family of problem) rather
-// than returned bare, so a caller -- and eventually Task 16's HTTP layer --
-// can test for it with errors.Is instead of matching an fmt.Errorf string.
+// Update persists every field on h, normalising and validating
+// PrimaryCurrency and SecondaryCurrency through normalizeCurrency
+// (domain.ParseCurrency) -- the same rule Money enforces on the monetary
+// path.
 //
-// FXRateMode gets the identical treatment for the identical reason: the
-// database enforces CHECK (fx_rate_mode IN ('auto', 'manual'))
-// (migrations/00002_identity.sql), so without a check here a caller-supplied
-// value outside that pair -- a typo, or any other string -- would reach the
-// constraint first and fail as an unmapped 500, exactly as an invalid
-// currency code did before normalizeCurrency existed.
+// Both currency fields are validated and persisted, not just the primary:
+// silently dropping one was a defect, and a bad secondary code would
+// otherwise surface later as a missing rate rather than at write time. The
+// error is wrapped in domain.ErrInvalidMoney so a caller can test it with
+// errors.Is.
+//
+// FXRateMode gets the same treatment for the same reason: the database's own
+// CHECK (fx_rate_mode IN ('auto', 'manual')) would otherwise turn a bad value
+// into an unmapped 500.
 func (s *HouseholdService) Update(ctx context.Context, h domain.Household) (domain.Household, error) {
 	primary, err := normalizeCurrency(h.PrimaryCurrency)
 	if err != nil {
@@ -117,15 +100,10 @@ func (s *HouseholdService) Update(ctx context.Context, h domain.Household) (doma
 	return s.d.Households.Update(ctx, h)
 }
 
-// normalizeCurrency validates a currency code through domain.ParseCurrency --
-// the single reference for what a valid code looks like, shared by both of
-// Update's currency fields so the two checks cannot drift apart. It no longer
-// uppercases first: ParseCurrency does that itself, and NewMoney (which this
-// used to call) now delegates to the same function.
-//
-// The error is returned as-is rather than re-wrapped: ParseCurrency already
-// wraps ErrInvalidMoney, which is the sentinel adapter/http/errors.go maps to
-// 422 INVALID_CURRENCY. Wrapping it twice added nothing.
+// normalizeCurrency validates a currency code through domain.ParseCurrency,
+// shared by both of Update's currency fields so the checks cannot drift. Its
+// error is returned as-is -- ParseCurrency already wraps
+// domain.ErrInvalidMoney, which maps to 422 INVALID_CURRENCY.
 func normalizeCurrency(currency string) (string, error) {
 	return domain.ParseCurrency(currency)
 }
@@ -141,27 +119,17 @@ func (s *HouseholdService) Spaces(ctx context.Context, householdID string, m dom
 	return domain.VisibleSpaces(all, m), nil
 }
 
-// CreateSpace adds a custom space to the household's sidebar. It accepts only
-// domain.VisibilityEveryone and domain.VisibilityParentsOnly -- see
-// ErrSpaceVisibilityNotSupported -- rejects a name that is blank once
-// trimmed (ErrSpaceNameRequired), and derives the space's key by trimming,
-// lowercasing and hyphenating the name, rejecting a collision against any
-// existing space (builtin or custom) with ErrSpaceNameTaken before writing
-// anything. The new space is never builtin and carries no required
-// capability: only the three seeded spaces gate on one.
+// CreateSpace adds a custom space to the household's sidebar: it validates
+// visibility (ErrSpaceVisibilityNotSupported), rejects a blank name
+// (ErrSpaceNameRequired), derives the key by trimming, lowercasing and
+// hyphenating the name, and rejects a collision (ErrSpaceNameTaken) before
+// writing. The new space is never builtin and needs no capability.
 //
-// The stored Name is the same trimmed value the key is derived from, not the
-// caller's raw string: there is no rename endpoint, so a name saved with
-// leading or trailing whitespace (" Movie Night ") would be permanent, and
-// would render with that whitespace in the sidebar forever.
+// The stored Name is the same trimmed value the key comes from, since there
+// is no rename endpoint to fix stray whitespace later.
 //
-// The list-then-compare duplicate check above is not transactional, so it is
-// not the only gate against a collision: Create's own domain.ErrAlreadyExists
-// (the database's UNIQUE (household_id, key) constraint, translated -- see
-// ErrSpaceNameTaken's doc comment) is mapped onto the identical
-// ErrSpaceNameTaken sentinel, so the race between two concurrent creates
-// deriving the same key is closed at the database and reported identically
-// to the caller, whichever gate actually caught it.
+// See ErrSpaceNameTaken's doc comment for how the database closes the race
+// this pre-check alone cannot.
 func (s *HouseholdService) CreateSpace(ctx context.Context, householdID, name string, visibility domain.Visibility) (domain.Space, error) {
 	switch visibility {
 	case domain.VisibilityEveryone, domain.VisibilityParentsOnly:
@@ -223,21 +191,14 @@ func (s *HouseholdService) UpdateNotifications(ctx context.Context, householdID 
 	return s.d.Notifications.Upsert(ctx, householdID, p)
 }
 
-// refusePrimaryCurrencyChangeWhileHolding is the one rule the portfolio adds to
-// this screen.
-//
-// A holding event stores its cost in the household's currency AS IT WAS WHEN
-// THE EVENT WAS WRITTEN, and a valuation stores its price the same way. There
-// is nothing in that data to re-express an old figure under a new currency --
-// no rate, and no date to look one up at even if a source existed. So changing
-// the primary currency does not restate a portfolio, it strands it: the fold
-// would refuse every holding, which is a portfolio page that throws on load,
-// and the only screen that could fix it.
-//
-// Refusing at the edit is the honest version of that. It costs a household
-// nothing before it holds anything -- which is when a currency actually gets
-// chosen -- and it is why domain.Position takes the currency as a parameter
-// rather than trusting that it never moves.
+// refusePrimaryCurrencyChangeWhileHolding is the one rule the portfolio adds
+// to this screen: a holding event or valuation stores its cost in whatever
+// currency was primary when it was written, and there is no rate to
+// re-express it under a new one. Changing the primary currency once a
+// household holds anything would strand the portfolio -- the fold would
+// refuse every holding, and the only screen that could fix it is the one now
+// broken. Refusing at the edit costs nothing before a household holds
+// anything, which is when a currency actually gets chosen.
 func (s *HouseholdService) refusePrimaryCurrencyChangeWhileHolding(ctx context.Context, householdID, primary string) error {
 	current, err := s.d.Households.Get(ctx, householdID)
 	if err != nil {

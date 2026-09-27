@@ -7,19 +7,16 @@ import (
 	"github.com/andreasoentoro/hearth/api/internal/domain"
 )
 
-// The household access list (partner invite lobby, milestone 3): every live
-// way into a household that is not a password -- API tokens and linked
-// Telegram chats. docs/superpowers/specs/2026-09-23-hearth-household-access-list-design.md.
-//
-// This service takes no actor. Whether the caller sees the whole household
-// (an owner) or only their own rows (a limited member) is decided by the
-// HTTP handler, which picks ForHousehold or ForMember (ADR 8).
+// The household access list (partner invite lobby) is every live way into
+// a household that isn't a password -- API tokens and linked Telegram chats.
+// docs/superpowers/specs/2026-09-23-hearth-household-access-list-design.md.
+// It takes no actor: the HTTP handler picks ForHousehold for an owner (sees
+// everyone) or ForMember for a limited member (own rows only) -- ADR 8.
 
-// HouseholdTokenLister returns a household's live API tokens -- not revoked,
-// not expired -- newest first, and never another household's. Empty is an
-// empty slice, not domain.ErrNotFound. Its own narrow port rather than a
-// method on APITokenRepository, so the doubles of that wider port do not
-// have to grow a method they never use.
+// HouseholdTokenLister returns a household's live (not revoked, not
+// expired) API tokens, newest first; empty is an empty slice, never
+// domain.ErrNotFound. Its own port, not a method on APITokenRepository, so
+// that wider port's doubles need not grow one they'd never use.
 type HouseholdTokenLister interface {
 	ListForHousehold(ctx context.Context, householdID string) ([]domain.APIToken, error)
 }

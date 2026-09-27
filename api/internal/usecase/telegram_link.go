@@ -11,7 +11,7 @@ import (
 
 // telegramLinkMintsPerHourLimit bounds how many link attempts one member can
 // start in an hour. The per-chat limit in telegram_auth.go bounds redemption;
-// this bounds minting, which a signed-in session can now do with no chat
+// this bounds minting, which a signed-in session can do with no chat
 // involved at all.
 const telegramLinkMintsPerHourLimit = 3
 
@@ -26,13 +26,12 @@ type TelegramLinkDeps struct {
 }
 
 // TelegramLinkService connects a Hearth account that already exists to a
-// Telegram chat, and disconnects it again. It is deliberately separate from
-// TelegramAuthService: that service delivers Hearth's existing tokens over a
-// chat, this one writes the binding those deliveries depend on.
-//
-// It takes a userID as the subject it acts on, supplied by the handler from
-// the session. That is not an actor parameter (ADR 8): the service enforces
-// what is valid, the HTTP edge enforces who is asking.
+// Telegram chat, and disconnects it again. It's deliberately separate from
+// TelegramAuthService: that delivers Hearth's existing tokens over a chat,
+// this writes the binding those deliveries depend on. It takes a userID as
+// the subject it acts on, supplied by the handler from the session -- not
+// an actor parameter (ADR 8): the service enforces what is valid, the HTTP
+// edge enforces who is asking.
 type TelegramLinkService struct{ d TelegramLinkDeps }
 
 func NewTelegramLinkService(d TelegramLinkDeps) *TelegramLinkService {
@@ -49,18 +48,17 @@ type TelegramLinkStart struct {
 
 // TelegramLinkStatus is where a link request has got to. Status is one of
 // exactly five values: "waiting", "pending", "connected", "refused",
-// "expired" -- the same set the zod enum in Task 7 accepts.
+// "expired" -- the same set the frontend's zod enum accepts.
 type TelegramLinkStatus struct {
 	Status       string
 	ChatUsername string
 	ChatID       int64
 	// Reason is set only for "refused" -- a small stable code
 	// (TelegramLinkReasonChatTaken or TelegramLinkReasonAlreadyLinked), never
-	// a sentence and never a database error. This package may not import the
-	// http adapter, so it cannot own the copy a person reads; the HTTP layer
-	// maps the code onto the same sentence errors.go's 409 mapping uses for
-	// the identical condition reached through confirm, so the two routes
-	// never drift into saying the same refusal two different ways.
+	// a sentence or database error, since this package can't import the http
+	// adapter to own that copy. The HTTP layer maps the code onto the same
+	// sentence errors.go's 409 mapping uses for the identical condition
+	// reached through confirm, so the two routes never drift.
 	Reason string
 }
 
@@ -136,16 +134,14 @@ func (s *TelegramLinkService) Confirm(ctx context.Context, userID, linkID string
 			return TelegramBinding{}, fmt.Errorf("create telegram account: %w", err)
 		}
 		// Both UNIQUEs arrive as ErrAlreadyExists, and by now this service
-		// genuinely does not know which one fired: the pre-checks above ran
-		// against state that is, at worst, this row's whole ten-minute
-		// window old, and it is the constraints -- not those checks -- that
-		// are the real gate. Re-read the chat side to find out. Bound to
-		// this same user is the idempotent case: our own earlier confirm,
-		// or a second tab open on the same link, already wrote this exact
-		// row, so hand back the binding rather than an error. Bound to
-		// someone else is the chat-side collision. Still unbound means the
-		// chat side was never the problem, so it was the user-side UNIQUE --
-		// a second pending link for this user won the race instead.
+		// can't tell which fired: the pre-checks above ran against state up
+		// to this row's ten-minute window old, and the constraints, not
+		// those checks, are the real gate. Re-read the chat side to find
+		// out: bound to this same user is idempotent (an earlier confirm or
+		// a second tab already wrote this row), so hand back the binding;
+		// bound to someone else is the chat-side collision; still unbound
+		// means it was the user-side UNIQUE -- a second pending link for
+		// this user won the race instead.
 		boundTo, chatErr := s.d.Accounts.ByChatID(ctx, row.ChatID)
 		switch {
 		case chatErr == nil && boundTo == userID:
@@ -161,10 +157,10 @@ func (s *TelegramLinkService) Confirm(ctx context.Context, userID, linkID string
 	return binding, nil
 }
 
-// Status derives where a link has got to, in this order: binding first, then
-// refusals, then expiry. Expiry last is deliberate -- a connected panel that
-// is still polling when the nonce's ten minutes run out must keep reading
-// "connected", not flip to "expired" ten minutes after it succeeded.
+// Status derives where a link has got to, in this order: binding first,
+// then refusals, then expiry. Expiry last is deliberate: a connected panel
+// still polling after the nonce's ten minutes must keep reading
+// "connected", not flip to "expired".
 func (s *TelegramLinkService) Status(ctx context.Context, userID, linkID string) (TelegramLinkStatus, error) {
 	row, err := s.d.Links.ByID(ctx, linkID)
 	if err != nil {
@@ -182,9 +178,6 @@ func (s *TelegramLinkService) Status(ctx context.Context, userID, linkID string)
 	}
 	bound := err == nil
 
-	// Binding first: a connected panel still polling after expires_at passes
-	// must keep reading "connected", never flip to "expired" ten minutes
-	// after it worked.
 	if bound && binding.ChatID == row.ChatID {
 		return TelegramLinkStatus{Status: "connected", ChatID: binding.ChatID, ChatUsername: binding.ChatUsername}, nil
 	}
@@ -223,7 +216,7 @@ func (s *TelegramLinkService) Status(ctx context.Context, userID, linkID string)
 }
 
 // Binding returns this user's connected chat, domain.ErrNotFound when there
-// is none -- the same shape GET /auth/telegram (Task 6) answers from.
+// is none -- the same shape GET /auth/telegram answers from.
 func (s *TelegramLinkService) Binding(ctx context.Context, userID string) (TelegramBinding, error) {
 	return s.d.Accounts.ByUserID(ctx, userID)
 }

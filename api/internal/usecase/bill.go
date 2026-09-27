@@ -10,10 +10,8 @@ import (
 )
 
 // BillView is one row on the screen: the stored bill plus the derived
-// figures. Amount is in the BILL's own currency -- the pay-from account's --
-// not the household's primary: a row for an IDR account renders in IDR.
-// Only the summary totals below convert, for the reason GoalView's own
-// comment gives.
+// figures. Amount is in the BILL's own currency, not the household's
+// primary -- only the summary totals below convert (see GoalView's comment).
 type BillView struct {
 	Bill         domain.Bill
 	CategoryName string
@@ -24,24 +22,18 @@ type BillView struct {
 	// the frontend so the rule lives in exactly one place.
 	DueSoon bool
 	// Settled is true for a live bill with no next occurrence -- a paid
-	// one-off. The design's own formula table defines BOTH "Due soon" and
-	// "Later" as requiring a non-NULL next_due, so a bill like this belongs
-	// in neither: DueSoon is always false for one, and without this flag the
-	// frontend has no way to tell "genuinely Later, just far out" from "done,
-	// nothing left to schedule" -- both arrive with NextDue nil once a bill
-	// this old existed before MarkPaid could produce one.
-	//
-	// It is never dropped from the page to compensate: 00008_bills.sql's own
-	// comment on next_due says a settled one-off is deliberately not
-	// auto-archived, "that would hide a record the household may still want
-	// to see." Settled is how it stays visible without being miscategorised.
+	// one-off. Both "Due soon" and "Later" require a non-NULL next_due, so
+	// a bill like this fits neither, and without this flag the frontend
+	// can't tell "far out" from "done" -- both read NextDue nil. It stays
+	// visible rather than being dropped: 00008_bills.sql says a settled
+	// one-off is deliberately not auto-archived, so Settled is how it
+	// renders without being miscategorised.
 	Settled bool
 }
 
-// BillPaymentView is one row of "Paid this month" -- ListPayments' own
-// BillPaymentRecord, unwrapped at this layer the same way BillView unwraps
-// BillRecord, though nothing here is derived: a settled payment has no next
-// occurrence to be overdue or due-soon about.
+// BillPaymentView is one row of "Paid this month", unwrapped from
+// ListPayments' BillPaymentRecord like BillView unwraps BillRecord. Nothing
+// here is derived -- a settled payment has no overdue/due-soon to compute.
 type BillPaymentView struct {
 	Payment  domain.BillPayment
 	BillName string
@@ -50,18 +42,15 @@ type BillPaymentView struct {
 
 // BillsSummary is the page header and the three stat cards. DueThisMonth,
 // PaidSoFar, SubscriptionsMonthly and SubscriptionsAnnual are all in the
-// household's primary currency; a bill whose account currency has no rate to
-// primary is excluded from every one of them and counted in ExcludedNoRate,
-// never silently dropped (the BudgetRolloverCard precedent, 8a1114b).
+// household's primary currency; a bill with no rate to primary is excluded
+// from all of them and counted in ExcludedNoRate instead of silently
+// dropped.
 //
-// NextDueAmount is the one figure here that does NOT convert: it is the
-// single next-due bill's own Amount, in that bill's own currency, exactly
-// the way BillView's own Amount is -- converting only it would leave the
-// card pairing an amount with a currency symbol from Summary.Currency that
-// disagrees with it. It is the zero domain.Money{} (no currency at all) when
-// there is no next-due bill; NextDueOn == nil is the field to gate on, the
-// same "nil, not a zero Money" rule TestNextDueIsOmittedWhenThereIsNone pins
-// for NextDueOn itself.
+// NextDueAmount does NOT convert -- it stays in the next-due bill's own
+// currency, the way BillView's Amount does, so the card never pairs an
+// amount with a mismatched currency symbol. It is zero Money{} when there is
+// no next-due bill; gate on NextDueOn == nil, not on a zero Money (see
+// TestNextDueIsOmittedWhenThereIsNone).
 type BillsSummary struct {
 	Currency             string
 	DueThisMonth         domain.Money
@@ -87,10 +76,9 @@ type BillsView struct {
 	Summary       BillsSummary
 }
 
-// NewBill is Create's input. Unlike NewBillRow, it carries no DueAnchorDay --
-// the anchor is derived from NextDue.Day() by the service itself (see
-// Create's own doc comment), so a caller cannot structurally supply one, the
-// same reasoning GoalUpdate's missing Currency field documents for goals.
+// NewBill is Create's input. It carries no DueAnchorDay: Create derives the
+// anchor from NextDue.Day() itself, the same pattern GoalUpdate's missing
+// Currency field follows.
 type NewBill struct {
 	HouseholdID        string
 	Name               string
@@ -104,14 +92,13 @@ type NewBill struct {
 	IsSubscription     bool
 }
 
-// BillPatch is a PATCH: a nil field is unchanged. There is deliberately no
-// ArchivedAt field -- archive and restore are their own routes, so an
-// ordinary rename cannot archive a bill as a side effect (router.go's own
-// comment for accounts, categories and goals).
+// BillPatch is a PATCH: a nil field is unchanged. There is no ArchivedAt
+// field -- archive and restore are their own routes, so a rename cannot
+// archive a bill as a side effect.
 //
-// ClearCategory and ClearPayer are how a set field is unset, the same
-// explicit -clear convention clearReceivedAmount uses on transactions: a nil
-// pointer already means "unchanged", so it cannot also mean "clear".
+// ClearCategory and ClearPayer are the explicit-clear convention
+// (clearReceivedAmount's, on transactions): a nil pointer already means
+// "unchanged", so it cannot also mean "clear".
 type BillPatch struct {
 	Name               *string
 	AmountMinor        *int64
@@ -127,14 +114,12 @@ type BillPatch struct {
 }
 
 // MarkPayment is MarkPaid's input. AmountMinor is optional: nil pays the
-// bill's own stored amount, and a value is the caller's figure for this one
-// payment. The modal prefills the bill's amount but leaves it editable,
-// because a utility bill varies month to month, and marking one payment does
-// not change the bill's own standing amount.
+// bill's own stored amount, a value is this payment's own figure -- a
+// utility bill varies month to month, and paying one instance never changes
+// the bill's own standing amount.
 //
-// The default is decided by MarkPaid, not by each caller. The HTTP handler
-// used to work it out itself by reading the whole bills page, which left the
-// rule where the CLI and the Telegram bot could not reuse it.
+// The default is decided by MarkPaid, not by each caller, so the CLI and the
+// Telegram bot can reuse the same rule instead of recomputing it themselves.
 type MarkPayment struct {
 	HouseholdID string
 	BillID      string
@@ -142,18 +127,15 @@ type MarkPayment struct {
 	PaidOn      time.Time
 }
 
-// BillDeps gathers every port BillService needs, mirroring GoalDeps. There is
-// no Clock here for the same reason: every method that needs the current
-// date takes it as a parameter (today, at), so nothing in this service reads
-// the wall clock and every test is deterministic.
+// BillDeps gathers every port BillService needs, mirroring GoalDeps. There
+// is no Clock: every method takes the date it needs as a parameter (today,
+// at), so nothing here reads the wall clock and every test is deterministic.
 //
-// Categories is the same narrow CategoryLookup TransactionDeps carries, and
-// it is here for the same reason: MarkPaid writes a real expense into the
-// ledger carrying the bill's own category_id, so a bill that stored an
-// income category would produce spend that Budget's own buildCategoryViews
-// skips entirely -- money in Spent, but in no category row. A bill validates
-// its category at the two points one can be chosen (Create and Update), not
-// at the point it is spent.
+// Categories is the same narrow CategoryLookup TransactionDeps carries:
+// MarkPaid writes a real expense carrying the bill's own category_id, so an
+// income category would produce spend Budget's buildCategoryViews skips
+// entirely. A bill's category is validated at Create and Update, not at the
+// point it is spent.
 type BillDeps struct {
 	Bills      BillRepository
 	Households HouseholdRepository
@@ -165,7 +147,7 @@ type BillDeps struct {
 // BillService composes the Bills screen and every write against it. Like
 // every other service here it takes no actor parameter: services enforce
 // what is *valid*, middleware enforces who is *asking* -- the money
-// capability and the owner check live in the router (Task 9).
+// capability and the owner check live in the router.
 type BillService struct {
 	deps BillDeps
 }
@@ -175,33 +157,21 @@ func NewBillService(deps BillDeps) *BillService {
 }
 
 // List composes the whole Bills screen for one household: every row (each
-// carrying Overdue/DueSoon), the paid-this-month list and the page summary.
-// today is always a parameter -- see BillDeps' own comment -- so every figure
-// is deterministic in tests and driven by the clock port at the HTTP layer in
+// carrying Overdue/DueSoon), the paid-this-month list and the page summary,
+// in four repository calls regardless of how many bills or payments exist.
+// today is always a parameter -- see BillDeps' own comment -- so every
+// figure is deterministic in tests and driven by the clock port in
 // production.
 //
-// The household is read once for the primary currency, the bills once via
-// Bills.List, the due/paid figures once via Bills.MonthTotals, and the paid
-// list once via Bills.ListPayments -- four repository calls regardless of how
-// many bills or payments the household has.
+// ExcludedNoRate counts once per BILL, even one that would otherwise touch
+// two totals, plus once per PAYMENT not already counted that way -- a
+// payment can be a distinct no-rate fact from its bill's current state.
 //
-// ExcludedNoRate counts once per BILL (a bill due this month that is also
-// ticked as a subscription counts once, not twice, even though it would
-// otherwise touch two totals -- the NetWorthSummary and GoalService.List
-// precedent: one entity, one exclusion) plus once per PAYMENT whose own bill
-// was not already counted that way (a payment made from a bill that has
-// since stopped being due this month, or been archived, is a distinct fact
-// from that bill's current state, so it is not folded into the same count).
-//
-// DueThisMonth and PaidSoFar themselves still sum from Bills.MonthTotals'
-// own currency-aggregated maps -- that repository call exists specifically
-// because the paid half cannot be reconstructed from bills alone (its own
-// header comment explains why), and nothing here second-guesses that. What
-// an aggregated map cannot do is say which bill or payment a given currency's
-// contribution came from, which is what ExcludedNoRate needs to be precise
-// -- so that identity is recovered separately, by walking the same `records`
-// and `paymentRecords` this method already fetches for the page's other
-// purposes, entirely independent of the dueMinor/paidMinor summing below.
+// DueThisMonth and PaidSoFar sum from Bills.MonthTotals' own
+// currency-aggregated maps, which cannot say which bill or payment a
+// currency's contribution came from -- so ExcludedNoRate is recovered
+// separately, by walking `records` and `paymentRecords` directly (see
+// sumConvertible for why the no-rate count is not taken again there).
 func (s *BillService) List(ctx context.Context, householdID string, includeArchived bool, today time.Time) (BillsView, error) {
 	household, err := s.deps.Households.Get(ctx, householdID)
 	if err != nil {
@@ -229,10 +199,9 @@ func (s *BillService) List(ctx context.Context, householdID string, includeArchi
 	}
 	subscriptionsAnnual := zero
 	excludedNoRate := 0
-	// excludedBillIDs is what stops the per-bill pass below and the
-	// per-payment pass after it from counting the same bill twice: a bill
-	// paid this month that is also a currently-ticked subscription is one
-	// underlying no-rate fact, not two.
+	// excludedBillIDs stops the per-bill and per-payment passes below from
+	// counting the same bill twice -- a bill that is both due this month and
+	// a ticked subscription is one no-rate fact, not two.
 	excludedBillIDs := map[string]bool{}
 
 	// views is built with make(..., 0, ...), never left nil: a household
@@ -258,14 +227,9 @@ func (s *BillService) List(ctx context.Context, householdID string, includeArchi
 		}
 		next.consider(b, view.Overdue)
 
-		// excludedThisBill is one flag for the whole bill, covering both
-		// totals it might touch below, per this method's own comment on
-		// ExcludedNoRate. The due-this-month probe here exists only to
-		// recover per-bill identity for the count -- DueThisMonth's actual
-		// figure is unaffected either way, since it sums dueMinor
-		// (Bills.MonthTotals' own aggregated figure) further down, which
-		// already omits this bill's contribution when its currency has no
-		// rate.
+		// excludedThisBill covers both totals this bill might touch below.
+		// The due-this-month probe only recovers per-bill identity for the
+		// count -- dueMinor further down already excludes a no-rate currency.
 		excludedThisBill := false
 		if b.NextDue != nil && dueInMonthOf(*b.NextDue, today) {
 			_, hasRate, convErr := conv.TryConvert(ctx, b.Amount)
@@ -368,22 +332,20 @@ func (n *nextDueBill) consider(b domain.Bill, overdue bool) {
 	}
 }
 
-// dueInMonthOf reports whether due falls in today's calendar month. Both sides
-// go through billStartOfDay: Year/Month read a time's own Location, so an
-// unconverted today would answer this in the caller's zone while
-// Bills.MonthTotals -- the figure this probe recovers per-bill identity for --
-// scoped its month in UTC. See billStartOfDay's own comment.
+// dueInMonthOf reports whether due falls in today's calendar month, after
+// both are normalised through billStartOfDay -- Bills.MonthTotals scopes its
+// month in UTC, and an unconverted today would compare against the caller's
+// own zone instead (see billStartOfDay's own comment).
 func dueInMonthOf(due, today time.Time) bool {
 	c, t := billStartOfDay(due), billStartOfDay(today)
 	return c.Year() == t.Year() && c.Month() == t.Month()
 }
 
 // addSubscriptionAnnual adds one subscription's annual equivalent, converted
-// into primary, to total. noRate reports a bill whose currency has no rate: it
-// adds nothing, and List counts it in ExcludedNoRate. A one-off answers total
-// unchanged and noRate false -- not a recurring cost, ticked or not, and never
-// a reason to exclude anything. Any error from Converter.TryConvert is
-// returned.
+// into primary, to total. noRate is true when the bill's currency has no
+// rate -- nothing is added, and List counts it in ExcludedNoRate. A one-off
+// is not a recurring cost: total comes back unchanged and noRate false. Any
+// Converter.TryConvert error is returned.
 func (s *BillService) addSubscriptionAnnual(ctx context.Context, conv *Converter, total domain.Money, b domain.Bill) (sum domain.Money, noRate bool, err error) {
 	annual, ok := domain.AnnualEquivalentMinor(b.Cadence, b.Amount.Amount)
 	if !ok {
@@ -404,12 +366,10 @@ func (s *BillService) addSubscriptionAnnual(ctx context.Context, conv *Converter
 }
 
 // countExcludedPayments counts this month's payments whose currency has no
-// rate. Payments due this month also feed DueThisMonth (the union rule
-// Bills.MonthTotals' own header comment states), but a payment is a distinct
-// entity from the bill that generated it, so its own no-rate exclusion is
-// counted here -- unless that bill was already counted by List's per-bill
-// pass, per List's own comment. excludedBillIDs is updated as it goes. Any
-// error from Converter.TryConvert is returned.
+// rate. A payment is a distinct entity from the bill that generated it, so
+// it gets its own count here unless that bill was already counted in
+// List's per-bill pass -- excludedBillIDs is updated as it goes. Any error
+// from Converter.TryConvert is returned.
 func (s *BillService) countExcludedPayments(ctx context.Context, conv *Converter, payments []BillPaymentRecord, excludedBillIDs map[string]bool) (int, error) {
 	count := 0
 	for _, p := range payments {
@@ -428,13 +388,12 @@ func (s *BillService) countExcludedPayments(ctx context.Context, conv *Converter
 	return count, nil
 }
 
-// sumConvertible is the actual sum behind DueThisMonth and PaidSoFar:
-// Bills.MonthTotals' own currency-aggregated map, each currency converted into
-// zero's currency, then added. A currency with no rate is simply skipped here
-// -- its exclusion was already counted, precisely, by List's two per-entity
-// passes; counting it again here (once per currency) is exactly the bug List's
-// own comment describes fixing. Any error from Converter.TryConvert is
-// returned.
+// sumConvertible sums DueThisMonth and PaidSoFar from Bills.MonthTotals'
+// aggregated map, one currency at a time, converted then added. A no-rate
+// currency is skipped WITHOUT incrementing ExcludedNoRate: that count is
+// already exact, from List's separate per-bill and per-payment passes (an
+// aggregated map can't say which bill or payment it belongs to). Any
+// Converter.TryConvert error is returned.
 func (s *BillService) sumConvertible(ctx context.Context, conv *Converter, byCurrency map[string]int64, zero domain.Money) (domain.Money, error) {
 	total := zero
 	for currency, amount := range byCurrency {
@@ -456,9 +415,8 @@ func (s *BillService) sumConvertible(ctx context.Context, conv *Converter, byCur
 
 // sortBillViews orders the Bills list ascending by due date, nil last, ties by
 // name -- one order across the whole list rather than two separately-sorted
-// Due-soon/Later slices: the frontend splits on each row's own DueSoon flag
-// (Task 9's own comment), so the order they arrive in is the order both halves
-// render in.
+// Due-soon/Later slices: the frontend splits on each row's own DueSoon flag,
+// so the order they arrive in is the order both halves render in.
 func sortBillViews(views []BillView) {
 	sort.SliceStable(views, func(i, j int) bool {
 		a, b := views[i].Bill.NextDue, views[j].Bill.NextDue
@@ -478,28 +436,17 @@ func sortBillViews(views []BillView) {
 }
 
 // Create validates and writes a new bill. DueAnchorDay is derived from
-// NextDue.Day() here, never accepted from a caller -- NewBill carries no
-// field for one (see that type's own comment), so an anchor that disagreed
-// with the bill's own first due date is not a state Create can even be asked
-// to produce.
+// NextDue.Day() here, never accepted from a caller -- NewBill has no field
+// for one, so it can never disagree with the bill's own first due date.
 //
-// today is one parameter wider than the brief's own sketch of this method,
-// for the same reason GoalService.SetArchived documents its own widening:
-// the returned BillView's Overdue and DueSoon are meaningless without it, and
-// BillDeps carries no Clock (see its own comment) for this method to read the
-// date from instead.
+// today is a parameter because BillDeps carries no Clock: the returned
+// BillView's Overdue and DueSoon are meaningless without it.
 //
-// A non-empty PaidByMembershipID that does not belong to this household is
-// refused with domain.ErrAccountOwnerNotInHousehold, the identical check
-// AccountService.Create runs for OwnerMembershipID and TransactionService
-// runs for its own PaidByMembershipID: a bill's payer, like an account's
-// owner, is a validity question this layer answers, not something left for
-// the HTTP layer to have caught by then.
-//
-// A CategoryID that is not this household's, or is not an expense category,
-// is refused with domain.ErrCategoryKindMismatch -- see validateCategory's
-// own comment for why a bill needs the ledger's category rule and not just
-// the ledger's account and payer rules.
+// A non-empty PaidByMembershipID outside this household is refused with
+// domain.ErrAccountOwnerNotInHousehold, the same check AccountService.Create
+// and TransactionService run for their own payer/owner fields. A CategoryID
+// that is not this household's, or not an expense category, is refused with
+// domain.ErrCategoryKindMismatch (see validateCategory's own comment).
 func (s *BillService) Create(ctx context.Context, in NewBill, today time.Time) (BillView, error) {
 	name := strings.TrimSpace(in.Name)
 	if name == "" {
@@ -521,13 +468,11 @@ func (s *BillService) Create(ctx context.Context, in NewBill, today time.Time) (
 		return BillView{}, domain.ErrForbidden
 	}
 
-	// "" is the "" <-> SQL NULL convention (domain.Bill.PaidByMembershipID:
-	// "" when unattributed): unattributed is always valid, so this only runs
-	// for a caller-supplied id. AccountService.Create's identical check on
-	// OwnerMembershipID is the reason domain.ErrAccountOwnerNotInHousehold's
-	// own wording ("that member is not in this household") is already generic
-	// enough to share rather than duplicate as a bills-only sentinel -- see
-	// that sentinel's own comment in errors.go.
+	// "" means unattributed (domain.Bill.PaidByMembershipID's own
+	// convention) and is always valid, so this only runs for a
+	// caller-supplied id. The error is shared with AccountService.Create's
+	// identical check on OwnerMembershipID -- its wording ("that member is
+	// not in this household") is generic enough to reuse.
 	if in.PaidByMembershipID != "" {
 		ok, err := s.deps.Accounts.MembershipBelongsToHousehold(ctx, in.HouseholdID, in.PaidByMembershipID)
 		if err != nil {
@@ -561,45 +506,33 @@ func (s *BillService) Create(ctx context.Context, in NewBill, today time.Time) (
 	return s.toView(rec, today), nil
 }
 
-// Update Gets the stored bill, applies each non-nil field of patch onto it,
+// Update gets the stored bill, applies each non-nil field of patch onto it,
 // and hands BillRepository.Update the complete result -- the port never
-// merges (its own doc comment states the rule; AccountRepository.Update and
-// TransactionRepository.Update state it for their own tables).
+// merges (AccountRepository.Update and TransactionRepository.Update state
+// the same rule for their own tables).
 //
 // DueAnchorDay is re-derived from the new NextDue whenever the patch moves
-// it: an explicit edit is the household choosing a new anchor, and leaving
-// the stored one would make the NEXT advance land on a day they did not
-// pick. This is deliberately the mirror image of domain.NextDue's own
-// mechanical rewind (Task 5's anchor test), which must NOT touch the anchor
-// -- that case is the bill quietly moving forward on its own cadence, this
-// case is a person typing a new date into the edit form.
+// it -- an explicit edit is the household choosing a new anchor. This is
+// the mirror image of domain.NextDue's own mechanical rewind, which must
+// NOT touch the anchor: that case is the bill advancing on its own cadence,
+// this case is a person typing a new date into the form.
 //
-// A PayFromAccountID pointed at an account whose currency differs from the
-// bill's current one is refused with domain.ErrBillCurrencyImmutable: a
-// bill's amount is stored in its pay-from account's currency (BillRecord's
-// own comment), so re-pointing across a currency boundary would silently
-// reinterpret every past figure. The message naming both currencies is the
-// HTTP layer's job, not this one's.
+// Update refuses, before the write: a PayFromAccountID whose currency
+// differs from the bill's current one -> domain.ErrBillCurrencyImmutable
+// (Update only) -- a bill's amount is stored in its pay-from account's
+// currency, so re-pointing across currencies would silently reinterpret
+// every past figure. Naming both currencies in the message is the HTTP
+// layer's job, not this one's.
 //
-// A PayFromAccountID pointed at an ARCHIVED account is refused with
-// domain.ErrForbidden, the identical check Create runs (that method's own
-// comment) -- re-pointing a bill at a dead account would leave it silently
-// unpayable until the household hit the dead end at the pay button instead
-// of at the edit.
+// Mirroring Create's own checks: an ARCHIVED pay-from account ->
+// domain.ErrForbidden (else the bill sits unpayable until the household
+// hits the dead end at the pay button); a PaidByMembershipID outside this
+// household -> domain.ErrAccountOwnerNotInHousehold; a CategoryID that is
+// not this household's, or not an expense category ->
+// domain.ErrCategoryKindMismatch. The last two are re-run here because a
+// patch can name a different membership or category than Create validated.
 //
-// A non-empty PaidByMembershipID is refused with
-// domain.ErrAccountOwnerNotInHousehold when it does not belong to this
-// household, the same check Create runs and AccountService.Create runs for
-// OwnerMembershipID -- services enforce what is valid, and a payer from
-// another household is not.
-//
-// A CategoryID naming a category that is not this household's, or is not an
-// expense category, is refused with domain.ErrCategoryKindMismatch -- the
-// same check Create runs, re-run here because a patch can name a different
-// category than the one Create validated.
-//
-// today is one parameter wider than the brief's own sketch, for the same
-// reason Create's own comment gives.
+// today is a parameter for the same reason Create's own comment gives.
 func (s *BillService) Update(ctx context.Context, householdID, billID string, patch BillPatch, today time.Time) (BillView, error) {
 	rec, err := s.deps.Bills.Get(ctx, householdID, billID)
 	if err != nil {
@@ -632,17 +565,15 @@ func (s *BillService) Update(ctx context.Context, householdID, billID string, pa
 		b.NextDue = &nextDue
 		b.DueAnchorDay = nextDue.Day() // see this method's own comment
 	}
-	// ClearCategory wins over a nil CategoryID being ambiguous, the same
-	// reason GoalUpdate.ClearTargetMonth wins over a nil TargetMonth: without
-	// it there would be no way to tell "leave alone" from "the household
-	// picked uncategorised," and both would arrive as patch.CategoryID == nil.
+	// ClearCategory wins over a nil CategoryID, the same convention
+	// GoalUpdate.ClearTargetMonth uses: without it there is no way to tell
+	// "leave alone" from "picked uncategorised" -- both arrive as nil.
 	if patch.ClearCategory {
 		b.CategoryID = ""
 	} else if patch.CategoryID != nil {
-		// Checked again here, for the same reason the membership check below
-		// is: a patch can name a DIFFERENT category than the one Create
-		// validated. ClearCategory above needs no check -- "" is
-		// uncategorised, which is always valid.
+		// Checked again here: a patch can name a DIFFERENT category than
+		// the one Create validated. ClearCategory above needs no check --
+		// "" is always valid (uncategorised).
 		if err := s.validateCategory(ctx, householdID, *patch.CategoryID); err != nil {
 			return BillView{}, err
 		}
@@ -657,14 +588,7 @@ func (s *BillService) Update(ctx context.Context, householdID, billID string, pa
 			return BillView{}, domain.ErrBillCurrencyImmutable
 		}
 		if acct.Account.IsArchived() {
-			// The same refusal Create gives (bill.go's own comment on that
-			// check): a bill re-pointed at an archived account sits
-			// unpayable, and MarkPaid would refuse it with this identical
-			// sentinel anyway (its own archived-account check) -- catching
-			// it here means the household meets the dead end at the edit,
-			// not at the pay button. This asymmetry with Create predates
-			// Task 9 (see that task's own report) and was closed once
-			// Task 10's pay route made the gap reachable.
+			// Same refusal as Create -- see this method's own doc comment.
 			return BillView{}, domain.ErrForbidden
 		}
 		b.PayFromAccountID = *patch.PayFromAccountID
@@ -672,15 +596,11 @@ func (s *BillService) Update(ctx context.Context, householdID, billID string, pa
 	if patch.ClearPayer {
 		b.PaidByMembershipID = ""
 	} else if patch.PaidByMembershipID != nil {
-		// A nil patch.PaidByMembershipID means "leave alone" and ClearPayer
-		// already handled "unset it" above, so the membership check below
-		// only ever needs to run for a caller genuinely naming a member --
-		// the same guard Create's own comment explains, checked again here
-		// because Update's patch can name a DIFFERENT membership than the
-		// one Create originally validated. An empty-but-non-nil pointer
-		// (which a well-behaved caller sends via ClearPayer instead, never
-		// this field) still clears it exactly as it always has, needing no
-		// check.
+		// nil means "leave alone" (ClearPayer already handled "unset"), so
+		// the check below only runs for a caller naming a real member --
+		// checked again because Update's patch can name a DIFFERENT
+		// membership than Create validated. An empty-but-non-nil pointer
+		// still clears without a check.
 		if *patch.PaidByMembershipID != "" {
 			ok, err := s.deps.Accounts.MembershipBelongsToHousehold(ctx, householdID, *patch.PaidByMembershipID)
 			if err != nil {
@@ -708,11 +628,10 @@ func (s *BillService) Update(ctx context.Context, householdID, billID string, pa
 
 // SetArchived archives or restores a bill, stamping ArchivedAt with at --
 // the same caller-supplied convention AccountRepository.SetArchived and
-// GoalRepository.SetArchived use. BillRepository.SetArchived already returns
-// the full record, so this needs no second Get the way a bare-error port
-// would force on it (that port method's own doc comment). at doubles as
-// "today" for the returned view's Overdue/DueSoon, the same reason Create's
-// own comment explains BillDeps carrying no Clock.
+// GoalRepository.SetArchived use. BillRepository.SetArchived already
+// returns the full record, so no second Get is needed. at also doubles as
+// "today" for the returned view's Overdue/DueSoon, since BillDeps carries
+// no Clock.
 func (s *BillService) SetArchived(ctx context.Context, householdID, billID string, archived bool, at time.Time) (BillView, error) {
 	rec, err := s.deps.Bills.SetArchived(ctx, householdID, billID, archived, at)
 	if err != nil {
@@ -721,35 +640,28 @@ func (s *BillService) SetArchived(ctx context.Context, householdID, billID strin
 	return s.toView(rec, at), nil
 }
 
-// MarkPaid writes the payment, the expense and the advanced due date, through
-// BillRepository.RecordPayment's single transaction -- this is the seam
-// where Bills writes into the ledger: the expense it creates is what feeds
-// Budget's Spent, the daily pace figures, Spending by person and net worth,
-// so getting the currency or the date wrong here is wrong money on three
-// other screens.
+// MarkPaid writes the payment, the expense and the advanced due date,
+// through BillRepository.RecordPayment's single transaction -- the seam
+// where Bills writes into the ledger, feeding Budget's Spent, the daily
+// pace, Spending by person and net worth. Getting the currency or date
+// wrong here is wrong money on three other screens.
 //
-// The amount is the caller's when MarkPayment carries one, and the bill's own
-// stored figure when it does not -- see MarkPayment's own comment. Either way
-// the bill's own amount_minor is left untouched by paying.
+// The amount is the caller's when MarkPayment carries one, else the bill's
+// own stored figure (see MarkPayment's own comment); either way the bill's
+// amount_minor itself is left untouched by paying.
 //
-// A caller's amount must be positive, the same domain.ErrBillAmountNotPositive
-// refusal Create (bill.go's own check) and Update give -- checked here, in
-// the service, not by the HTTP layer: bill_payments' own CHECK
-// (amount_minor > 0) would otherwise be the first thing to catch a
-// non-positive amount, and a raw constraint violation surfacing as a 500 is
-// not an acceptable answer to a bad request body. Checked before the Get
-// below, the same "validate the caller's own input before spending a query
-// on it" order Create uses. The bill's own amount needs no second check:
-// Create and Update already refuse a non-positive one.
+// A caller's amount must be positive, checked here rather than left to
+// bill_payments' own CHECK constraint -- a raw constraint violation
+// surfacing as a 500 is not an acceptable answer to a bad request. Checked
+// before the Get below, same as Create's validate-input-first order. The
+// bill's own amount needs no re-check: Create and Update already refuse a
+// non-positive one.
 //
-// Three separate conditions refuse with *domain.BillNotPayableError, not a
-// bare domain.ErrForbidden: an archived bill, a settled one-off with no
-// occurrence left, and an archived pay-from account each mean something
-// different to the household, and the design's own error table gives two of
-// the three their own named 422. The error's Reason field is what the HTTP
-// layer switches on to answer each with its own message -- see that type's
-// own doc comment for why this does not disturb errors.Is(err,
-// domain.ErrForbidden) callers.
+// Three conditions refuse with *domain.BillNotPayableError, not a bare
+// domain.ErrForbidden: an archived bill, a settled one-off, and an archived
+// pay-from account each mean something different to the household. Reason
+// is what the HTTP layer switches on to answer each with its own message,
+// without disturbing an errors.Is(err, domain.ErrForbidden) caller.
 func (s *BillService) MarkPaid(ctx context.Context, in MarkPayment) (BillPaymentView, error) {
 	if in.AmountMinor != nil && *in.AmountMinor <= 0 {
 		return BillPaymentView{}, domain.ErrBillAmountNotPositive
@@ -790,12 +702,10 @@ func (s *BillService) MarkPaid(ctx context.Context, in MarkPayment) (BillPayment
 	dueOn := *rec.Bill.NextDue
 
 	var next *time.Time
-	// Advance from the DUE date, never from PaidOn: domain.NextDue's own
-	// comment states the same rule for the mechanical rewind it performs --
-	// paying three days late must not shift the bill's day, or a year of late
-	// payments walks it a month off. ok is false only for a one-off, which
-	// settles with no next occurrence at all (PaymentWrite.NextDue stays
-	// nil).
+	// Advance from the DUE date, never PaidOn: paying three days late must
+	// not shift the bill's day, or a year of late payments walks it a month
+	// off (domain.NextDue's own comment). ok is false only for a one-off,
+	// which settles with no next occurrence (PaymentWrite.NextDue stays nil).
 	if n, ok := domain.NextDue(rec.Bill.Cadence, dueOn, rec.Bill.DueAnchorDay); ok {
 		next = &n
 	}
@@ -816,11 +726,9 @@ func (s *BillService) MarkPaid(ctx context.Context, in MarkPayment) (BillPayment
 	if err != nil {
 		return BillPaymentView{}, err
 	}
-	// Autopay comes from the bill this method already read, not from pay:
-	// BillPaymentRecord's own doc comment says RecordPayment deliberately
-	// leaves Autopay false because its caller -- this method -- already holds
-	// the flag, so joining it back would be a second read of something
-	// already in hand.
+	// Autopay comes from the bill already read, not from pay: RecordPayment
+	// deliberately leaves Autopay false since its caller (this method)
+	// already holds the flag -- joining it back would re-read what's in hand.
 	return BillPaymentView{Payment: pay.Payment, BillName: pay.BillName, Autopay: rec.Bill.Autopay}, nil
 }
 
@@ -832,12 +740,10 @@ func (s *BillService) UndoPayment(ctx context.Context, householdID, billID, paym
 	return s.deps.Bills.UndoPayment(ctx, householdID, billID, paymentID)
 }
 
-// View is one bill exactly as List renders its row, archived bills included,
-// for a caller that needs a single bill: a write handler answering with the
-// row it just changed, or a check that reads the bill's currency. It is one
-// repository read, where going through List would cost four plus the whole
-// page summary. A bill that does not exist in this household is
-// domain.ErrNotFound, BillRepository.Get's own answer.
+// View is one bill exactly as List renders its row, archived included, for
+// a caller that needs a single one -- a write handler answering with the
+// row it just changed. One repository read, where List would cost four
+// plus a summary nobody asked for; a missing bill is domain.ErrNotFound.
 func (s *BillService) View(ctx context.Context, householdID, billID string, today time.Time) (BillView, error) {
 	rec, err := s.deps.Bills.Get(ctx, householdID, billID)
 	if err != nil {
@@ -847,22 +753,17 @@ func (s *BillService) View(ctx context.Context, householdID, billID string, toda
 }
 
 // toView composes one BillView from a repository record, computing Overdue
-// and DueSoon against today -- the one calculation every method that returns
-// a BillView shares, so List, View, Create, Update and SetArchived cannot
-// drift on what "overdue" means the way transaction.go's validate exists to
-// stop Create and Update drifting on transaction rules.
+// and DueSoon against today -- the one place every returning method shares,
+// so List, View, Create, Update and SetArchived cannot drift on the rule.
 func (s *BillService) toView(rec BillRecord, today time.Time) BillView {
 	b := rec.Bill
 	overdue := b.NextDue != nil && domain.IsOverdue(*b.NextDue, today)
 	dueSoon := overdue
 	if !dueSoon && b.NextDue != nil {
-		// Day boundaries, not a raw duration: billStartOfDay converts both
-		// times to UTC and strips them to midnight before the 30-day
-		// comparison, which is the same normalisation domain.IsOverdue
-		// applies to the same two values on the Overdue line above. The two
-		// fields have to agree: Overdue and DueSoon are read off one row on
-		// one screen, and a bill the page calls overdue but not due soon is
-		// a contradiction the household can see.
+		// Day boundaries, not a raw duration: billStartOfDay strips both
+		// times to UTC midnight first, the same normalisation domain.IsOverdue
+		// applies on the Overdue line above. The two must agree -- a bill the
+		// page calls overdue but not due soon is a contradiction users can see.
 		dueSoon = billStartOfDay(*b.NextDue).Sub(billStartOfDay(today)) <= 30*24*time.Hour
 	}
 	return BillView{
@@ -878,21 +779,16 @@ func (s *BillService) toView(rec BillRecord, today time.Time) BillView {
 	}
 }
 
-// billStartOfDay is midnight UTC for t -- t converted to UTC first, then
-// stripped, exactly as domain.startOfDay does it.
+// billStartOfDay is midnight UTC for t, exactly as domain.startOfDay does
+// it.
 //
-// It exists because this package already has a startOfDay (signup.go) that
-// deliberately does NOT convert: it keeps t.Location() because the signup
-// rate limit resets at the household's own local midnight. That is correct
-// for signups and wrong for bills, whose dates are UTC calendar days from a
-// `date` column. Calling the wrong one here would leave Overdue (which goes
-// through domain.IsOverdue, and does convert) and DueSoon (which does not)
-// disagreeing about the same two times for eight hours of every day in
-// UTC+8 -- the read-a-date-in-its-own-Location family catalogued under
-// docs/LEARNING.md pattern 1's `time.Truncate` bullet, which is where the
-// running list of instances lives (no count is repeated here on purpose: a
-// number copied into a comment is a number that goes stale). Do not
-// "simplify" this by pointing it back at signup.go's.
+// This package also has signup.go's startOfDay, which deliberately does
+// NOT convert, since the signup rate limit resets at the household's own
+// local midnight; bills' dates are UTC calendar days instead. Using
+// signup's version here would leave Overdue (which converts) and DueSoon
+// (which wouldn't) disagreeing for eight hours a day in UTC+8 -- the
+// read-a-date-in-its-own-Location family under docs/LEARNING.md pattern 1.
+// Do not "simplify" this by pointing it back at signup.go's.
 func billStartOfDay(t time.Time) time.Time {
 	t = t.UTC()
 	return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, time.UTC)
@@ -901,19 +797,18 @@ func billStartOfDay(t time.Time) time.Time {
 // validateCategory refuses a category that is not this household's, and one
 // that is not an EXPENSE category -- the same two checks
 // TransactionService.validateCategory runs, minus its choice between expense
-// and income: a bill is always a payment to a company (spec decision 1), so
-// there is no kind here to branch on.
+// and income: a bill is always a payment to a company, so there is no kind
+// here to branch on.
 //
-// Without this, POST /bills would accept an income category id (the modal
-// filters to expense, but an API caller is not the modal), and the expense
-// MarkPaid later writes from it would land in Budget's Spent total while
-// appearing in no category row at all -- buildCategoryViews walks expense
-// categories only. domain.ErrCategoryKindMismatch is the sentinel because it
-// is the one the HTTP layer already answers 422 INVALID_CATEGORY for; a
-// bills-only sentinel would need its own arm to say the same thing.
+// Without this, an income category id could slip through from an API
+// caller bypassing the modal's own filter: the expense MarkPaid later
+// writes from it would land in Budget's Spent total while appearing in no
+// category row at all (buildCategoryViews walks expense categories only).
+// domain.ErrCategoryKindMismatch is reused because the HTTP layer already
+// answers 422 INVALID_CATEGORY for it.
 //
-// "" is uncategorised, which is always valid -- the same "" <-> SQL NULL
-// convention PaidByMembershipID's own check above skips on.
+// "" is uncategorised, always valid -- the same convention
+// PaidByMembershipID's own check above uses.
 func (s *BillService) validateCategory(ctx context.Context, householdID, categoryID string) error {
 	if categoryID == "" {
 		return nil

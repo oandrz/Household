@@ -12,44 +12,34 @@ import (
 
 const (
 	// SignupTTL is how long a create-household token lives. Exported because
-	// the frontend's copy states it ("expires in 24 hours") and the mail
-	// template repeats it, so the value has one source.
-	//
-	// 24 hours, not magicLinkTTL's 15 minutes and not inviteTTL's 7 days: a
-	// person who asks to create a household may well finish the job that
-	// evening, but an unverified address should not hold a provisioning token
-	// for a week.
+	// the frontend and the mail template both state it ("expires in 24
+	// hours"), so the value has one source. 24 hours, not magicLinkTTL's 15
+	// minutes or inviteTTL's 7 days: a person creating a household may
+	// finish that evening, but an unverified address shouldn't hold a
+	// provisioning token for a week.
 	SignupTTL = 24 * time.Hour
 
 	// signupPerHourLimit mirrors magicLinkPerHourLimit. Being over it is
 	// silent, like every other branch.
 	signupPerHourLimit = 3
 
-	// SignupGlobalDailyLimit is the backstop for the case both the per-address
-	// and per-IP limits are being worked at once. It is counted from the
-	// signups table rather than an in-memory counter, so restarting the API
-	// cannot reset it, and it is evaluated against the calendar day (see
-	// startOfDay), not a rolling 24 hours -- see Request's use of it below.
+	// SignupGlobalDailyLimit backstops both the per-address and per-IP
+	// limits combined. Counted from the signups table, not memory, so a
+	// restart can't reset it, and evaluated against the calendar day
+	// (startOfDay), not a rolling 24 hours.
 	//
-	// Sign-up is open to anyone (a deliberate product decision), which makes
-	// this the last thing standing between the SMTP relay and a stranger with a
-	// loop. The two ways of getting this number wrong are not symmetric. Too
-	// high, and a bad day costs the relay up to this many mails -- recoverable,
-	// and visible in relay metrics and cost. Too low, and onboarding silently
-	// stops: every sign-up still answers 202, nothing is mailed, and that looks
-	// exactly like nobody signing up, not like a limit tripping. For a
-	// household product, a busy real day is dozens of sign-ups; 1000 is far
-	// enough above that to never bind for legitimate traffic while still being
-	// a real ceiling against a determined loop spread across many addresses
-	// and IPs.
+	// Sign-up is open to anyone, making this the last defense between the
+	// SMTP relay and a determined loop. Too high costs the relay extra mail
+	// on a bad day (recoverable, visible in metrics); too low silently
+	// stops onboarding (every sign-up still answers 202, mailing nothing).
+	// A busy real day is dozens of sign-ups; 1000 stays well above that
+	// while still bounding a loop spread across many addresses and IPs.
 	//
 	// Exported (not signupGlobalDailyLimit) solely so
-	// TestSignUpRateLimitsCompose, in the httpadapter package's test suite, can
-	// assert signUpRequestsPerIPPerHour * 24 < SignupGlobalDailyLimit without
-	// an import cycle: usecase has no import on httpadapter, and httpadapter
-	// already imports usecase in production code (router.go), so exporting
-	// this adds no new edge to the dependency graph, only visibility for a
-	// test that reads both constants.
+	// TestSignUpRateLimitsCompose in httpadapter can assert
+	// signUpRequestsPerIPPerHour * 24 < SignupGlobalDailyLimit without an
+	// import cycle -- usecase has no import on httpadapter, which already
+	// imports usecase, so this adds no new dependency edge.
 	SignupGlobalDailyLimit = 1000
 
 	// signupSendTimeout bounds the background send so a wedged relay cannot
@@ -57,11 +47,11 @@ const (
 	signupSendTimeout = 30 * time.Second
 )
 
-// ErrSignupAlreadyUsed is Preview's and Complete's answer for a token that has
-// already provisioned a household. It is deliberately NOT domain.ErrAlreadyExists:
-// that sentinel's copy is "That already exists.", which tells the holder of a
-// spent link nothing useful, and its own doc comment scopes it to a
-// unique-constraint race between concurrent writers.
+// ErrSignupAlreadyUsed is Preview's and Complete's answer for a token that
+// already provisioned a household. Deliberately not domain.ErrAlreadyExists:
+// that sentinel's copy ("That already exists.") tells the holder of a spent
+// link nothing useful, and its doc comment scopes it to a unique-constraint
+// race between concurrent writers.
 var ErrSignupAlreadyUsed = errors.New("this sign-up link has already been used")
 
 type SignupDeps struct {
@@ -84,11 +74,10 @@ func NewSignupService(d SignupDeps) *SignupService {
 	return &SignupService{d: d}
 }
 
-// SignupPreview is what the create-household screen needs before anything is
-// created. Channel tells the screen which identity the token proved, so it can
-// show a read-only address for an email sign-up and say "Telegram" for a
-// Telegram one -- rather than rendering an empty address box, which would look
-// like a field the person forgot to fill in.
+// SignupPreview is what the create-household screen needs before creating
+// anything. Channel tells the screen which identity the token proved, so it
+// shows a read-only address for email or "Telegram" for Telegram, rather
+// than an empty box that looks like a field the person forgot to fill in.
 type SignupPreview struct {
 	Email   string
 	Channel string
@@ -108,55 +97,43 @@ func signupChannel(d SignupDetails) (string, error) {
 	}
 }
 
-// Request is deliberately quiet. It returns nil for a fresh address, an address
-// that already has an account, an address over its hourly limit, a day over the
+// Request is deliberately quiet: it returns nil for a fresh address, one
+// that already has an account, one over its hourly limit, a day over the
 // global mail ceiling, an implausibly-formed address, and every internal
 // failure below the branch point. Any observable difference between those
 // would let a caller discover which addresses are registered.
 //
-// Before any of that, isPlausibleEmail is checked, and a failure returns nil
-// immediately -- before any of the reads or writes below ever run. That is
-// deliberately not one of the four properties below: it is not making two
-// branches indistinguishable, it is refusing to spend a counted read or a
-// signups row on input that cannot possibly be a real address at all
-// ("", "not-an-email"). That is safe precisely because the check is a pure
-// function of the string itself, independent of whether any particular
-// address is registered -- it rejects "" identically no matter what the users
-// or signups tables contain, so it cannot become the registration oracle an
-// error return from the reads below would be. See isPlausibleEmail's own doc
-// comment for what it does and does not guard against.
+// Before any of that, isPlausibleEmail is checked, and failure returns nil
+// immediately, before any read or write below runs. This is not one of the
+// four properties below: it isn't making two branches indistinguishable,
+// it's refusing to spend a counted read or signups row on input that can't
+// be a real address ("", "not-an-email"). That's safe because the check is
+// a pure function of the string, independent of whether any address is
+// registered, so it can't become a registration oracle. See
+// isPlausibleEmail's own doc comment for its exact scope.
 //
 // Four properties make the rest of it true, and all four are load-bearing:
 //
-//  1. All three reads below run unconditionally, in this fixed order, on every
-//     call that reaches them (every call whose address passed the
-//     plausibility gate above). RequestMagicLink once returned as soon as its
-//     rate-limit check decided the outcome, which made the *number of
-//     repository reads* distinguish the rate-limited case just as surely as
-//     an error would have. A read that is skipped on one branch of an address
-//     that passed the gate is the defect; the ordered read log in
-//     signup_test.go is what defends against it.
+//  1. All three reads below run unconditionally, in this fixed order, on
+//     every call that passes the plausibility gate. Don't return early once
+//     a rate-limit check decides the outcome: a skipped read makes the
+//     *number of repository reads* distinguish that branch as surely as an
+//     error would. signup_test.go's ordered read log defends against it.
 //
 //  2. Mail is sent off the request path (see sendAsync), so a slow or wedged
 //     relay cannot make the fresh-address branch measurably slower than the
 //     others.
 //
-//  3. Both branches write a signups row, through Create or CreateConsumed,
-//     using the same generated token -- not just the same reads, the same
-//     writes. This closed a fix-round finding: CountForEmailSince/CountSince
-//     count rows in that table, and the only writer used to be Create on the
-//     fresh branch. An already-registered address's counters therefore never
-//     advanced no matter how many requests arrived for it, so the shared
-//     rate-limit check below gated the fresh branch in practice and the
-//     registered branch never -- POST /auth/sign-up four times for a
-//     registered address sent four (then forty, then four hundred)
-//     "you already have an account" mails with no ceiling, which is the exact
-//     mailbox oracle SendSignupForExistingAccount's own doc comment exists to
-//     close, expressed as unbounded volume rather than presence-or-absence.
-//     CreateConsumed's row can never provision anything (Provision's guarded
-//     UPDATE requires consumed_at IS NULL) and its token is never mailed; it
-//     exists solely to be counted, so the limit is now real on both branches,
-//     which is what CountForEmailSince's doc comment already claimed.
+//  3. Both branches write a signups row (Create or CreateConsumed) using the
+//     same generated token -- not just the same reads, the same writes.
+//     Don't let only the fresh branch write a countable row:
+//     CountForEmailSince/CountSince count this table, so an uncounted
+//     registered branch would let the rate limit gate only fresh addresses,
+//     letting a registered inbox absorb unlimited existing-account mail --
+//     the exact oracle SendSignupForExistingAccount's doc comment exists to
+//     close. CreateConsumed's row can never provision anything (Provision's
+//     guarded UPDATE requires consumed_at IS NULL) and its token is never
+//     mailed; it exists solely to be counted.
 //
 //  4. Everything after the branch point -- token generation, the INSERT, the
 //     send -- is reachable by both a fresh and a registered under-limit
@@ -166,10 +143,9 @@ func signupChannel(d SignupDetails) (string, error) {
 //     address and returns nil instead. ANYONE ADDING A STEP BELOW THE BRANCH
 //     POINT OWES IT THE SAME TREATMENT.
 func (s *SignupService) Request(ctx context.Context, email string) error {
-	// A budget guard, not a correctness check -- see isPlausibleEmail's doc
-	// comment. Checked before the Clock, before every read, before any write:
-	// {"email":""} must not advance a rate-limit counter or write a countable
-	// signups row for free.
+	// A budget guard, not a correctness check (see isPlausibleEmail). Checked
+	// before the Clock and before any read or write: {"email":""} must not
+	// advance a counter or write a countable row for free.
 	if !isPlausibleEmail(email) {
 		return nil
 	}
@@ -193,27 +169,22 @@ func (s *SignupService) Request(ctx context.Context, email string) error {
 	}
 	alreadyRegistered := err == nil
 
-	// Both limits gate both branches. If only the fresh-address branch were
-	// gated, someone could flood a registered address's inbox with
-	// existing-account notices, and the differing behaviour would itself
-	// distinguish the two cases. This check is only as real as the counters
-	// it reads, which is why every branch below writes a row for it to count.
+	// Both limits gate both branches: if only the fresh branch were gated,
+	// someone could flood a registered address's inbox with existing-account
+	// notices, and the differing behaviour would itself distinguish the two
+	// cases. This check is only as real as the counters it reads -- every
+	// branch below writes a row for it to count.
 	//
-	// The two limits are checked separately, in this order, and logged at
-	// different levels, even though both still return nil identically to the
-	// caller (see the doc comment above -- the log level is for the operator,
-	// not the caller, and a different *response* on either branch would be
-	// exactly the enumeration oracle this whole design exists to prevent).
-	// Global is checked first so that every request arriving while the global
-	// ceiling is breached is logged loudly, regardless of whether that
-	// request's own address also happens to be over its hourly limit --
-	// checking address-first would silently downgrade those requests to
-	// routine Info noise and hide the outage on exactly the traffic most
-	// likely to be causing it. Per-address tripping is ordinary and expected
-	// (one caller gets a quiet no-op); the global ceiling tripping means the
-	// platform is either under attack or succeeding beyond plan, and either
-	// way a human needs to find out from something other than a customer
-	// complaining that sign-up mail never arrived.
+	// The two limits are checked separately and logged at different levels,
+	// though both still return nil identically to the caller -- the log
+	// level is for the operator, and a differing *response* would be the
+	// enumeration oracle this design prevents. Global is checked first so a
+	// breach is always logged loudly, even when the address is also over
+	// its hourly limit; checking address-first would downgrade those
+	// requests to routine noise and hide the outage on the traffic most
+	// likely causing it. Per-address tripping is an ordinary no-op; global
+	// tripping means attack or overwhelming success, and needs a human to
+	// notice some way other than a customer complaint.
 	if globalCount >= SignupGlobalDailyLimit {
 		slog.Error("sign-up request declined by the global daily mail ceiling",
 			"email_hash", hashPrefix(s.d.Tokens.HashToken(email), 12),
@@ -232,12 +203,11 @@ func (s *SignupService) Request(ctx context.Context, email string) error {
 		return nil
 	}
 
-	// One token generated here, before the branch, and used by whichever
-	// branch runs -- not because the registered branch's token is ever used
-	// for anything (it is never mailed and its row is inserted pre-consumed),
-	// but so a token-generation failure is handled identically for both
-	// branches by construction, rather than by two copies of the same
-	// failure-handling code.
+	// One token is generated here, before the branch, and used by whichever
+	// runs -- not because the registered branch's token matters (it's never
+	// mailed; its row is pre-consumed), but so a generation failure is
+	// handled identically for both branches by construction, not by two
+	// copies of the same code.
 	raw, hash, err := s.d.Tokens.NewToken()
 	if err != nil {
 		slog.Error("sign-up token generation failed",
@@ -246,11 +216,10 @@ func (s *SignupService) Request(ctx context.Context, email string) error {
 	}
 
 	if alreadyRegistered {
-		// This row can never provision anything -- see
-		// SignupRepository.CreateConsumed's doc comment -- and its token is
-		// never mailed. It exists so this branch's own
-		// CountForEmailSince/CountSince advance, the same way Create makes the
-		// fresh branch's advance below.
+		// This row can never provision anything (see CreateConsumed's doc
+		// comment) and its token is never mailed -- it exists solely so this
+		// branch's own CountForEmailSince/CountSince advance, the same way
+		// Create does for the fresh branch.
 		if err := s.d.Signups.CreateConsumed(ctx, email, hash, now.Add(SignupTTL)); err != nil {
 			slog.Error("sign-up persistence failed (existing-account counter row)",
 				"error", err, "email_hash", hashPrefix(s.d.Tokens.HashToken(email), 12))
@@ -275,30 +244,22 @@ func (s *SignupService) Request(ctx context.Context, email string) error {
 	return nil
 }
 
-// startOfDay returns midnight for t, in t's own location -- t.Location(), not
-// a hardcoded time.UTC. Which zone that resolves to is therefore a property of
-// the Clock this service is built with, not of this function: the production
-// Clock (adapter/clock.System.Now) already normalizes every reading to UTC
-// (see its own doc comment), so in production this computes UTC midnight --
-// but it gets there by asking the clock what "today" is, the same rule
-// Request already follows for every other use of "now" in this file (never
-// reach for wall-clock time directly; only the injected Clock, which is also
-// why this codebase's tests can move the clock across this exact boundary
-// without sleeping). "Midnight" is ambiguous across zones by nature, so this
-// is recorded as a decision, not a default: were this service ever run with a
-// Clock that did not normalize to UTC, the daily ceiling would reset at that
-// Clock's own midnight, which is the point -- "today starting over" is
-// whichever zone the Clock reports, not a fixed zone baked into this
-// function.
+// startOfDay returns midnight for t in t's own location, not a hardcoded
+// time.UTC -- it asks the clock what "today" is, the same rule this file
+// follows for every use of "now": never reach for wall-clock time directly,
+// only the injected Clock. In production the Clock already normalizes to
+// UTC, so this computes UTC midnight in practice. This is deliberate, not
+// an oversight: "midnight" is ambiguous across zones, so "today starting
+// over" means whichever zone the Clock reports, not one fixed here.
 func startOfDay(t time.Time) time.Time {
 	y, m, d := t.Date()
 	return time.Date(y, m, d, 0, 0, 0, 0, t.Location())
 }
 
-// sendAsync fires a send off the request path and returns immediately, for the
-// same two reasons sendMagicLinkAsync does: timing parity between the branches,
-// and the fact that Request's contract is "always nil, always silent", so a
-// relay that is down must not become a caller-visible error on one branch only.
+// sendAsync fires a send off the request path and returns immediately, for
+// the same reasons sendMagicLinkAsync does: timing parity between branches,
+// and Request's contract of "always nil, always silent" -- a down relay
+// must not become a caller-visible error on only one branch.
 //
 // The context is derived from context.Background(), not the request's, because
 // the request context is cancelled the moment the handler returns -- which
@@ -346,10 +307,9 @@ func (s *SignupService) Preview(ctx context.Context, token string) (SignupPrevie
 }
 
 // checkSignupLive reports why a sign-up token can no longer be used, keeping
-// consumed and expired apart because the next action differs: a consumed token
-// means the household exists and the answer is to sign in, an expired one means
-// start again. The ordering rule lives in domain.TokenLifecycle, shared with
-// invites.
+// consumed and expired apart because the next action differs: consumed
+// means sign in, expired means start again. The ordering rule lives in
+// domain.TokenLifecycle, shared with invites.
 func checkSignupLive(details SignupDetails, now time.Time) error {
 	switch domain.TokenLifecycle(now, details.ExpiresAt, details.ConsumedAt) {
 	case domain.TokenLive:
@@ -366,13 +326,12 @@ func checkSignupLive(details SignupDetails, now time.Time) error {
 	}
 }
 
-// Complete turns a verified address into a household and signs its owner in.
-//
-// Every validation happens before the hash and before Provision, so a rejected
-// form never consumes the token -- someone who mistypes their password can
-// simply resubmit. The session is minted by the same package-level issueSession
-// that SignIn and InviteService.Accept use, so a session from sign-up is
-// indistinguishable from theirs, down to how it is created.
+// Complete turns a verified address into a household and signs its owner
+// in. Every validation happens before the hash and before Provision, so a
+// rejected form never consumes the token -- a mistyped password can simply
+// be resubmitted. The session is minted by the same issueSession that
+// SignIn and InviteService.Accept use, so it's indistinguishable from
+// theirs.
 func (s *SignupService) Complete(ctx context.Context, token, householdName, displayName,
 	currency, password string) (SignInResult, error) {
 	now := s.d.Clock.Now()

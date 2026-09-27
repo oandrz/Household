@@ -15,20 +15,19 @@ var (
 	ErrDisplayNameRequired   = errors.New("a display name is required")
 )
 
-// HouseholdBlueprint is the single definition of what a new household consists
-// of. Seed and SignupRepository.Provision both build one and then apply it
-// differently -- Seed step-by-step and idempotently, because a partially failed
-// seed run must be retryable (see Seed's own doc comment); Provision in one
-// transaction, because a partially provisioned household leaves a users row
-// occupying users.email's unique index and permanently blocks that address.
+// HouseholdBlueprint is the single definition of what a new household
+// consists of. Seed and SignupRepository.Provision both build one and apply
+// it differently -- Seed step-by-step and idempotently, since a partially
+// failed seed run must be retryable; Provision in one transaction, since a
+// partial provision leaves a users row blocking that email permanently.
 //
-// Sharing the blueprint rather than one implementation is deliberate: a single
-// implementation would have to give up either the step-idempotency or the
+// Sharing the blueprint, not one implementation, is deliberate: a single
+// implementation would have to give up either step-idempotency or
 // atomicity, and both are load-bearing where they are.
 //
-// Spaces are not a field. domain.BuiltinSpaces needs the household ID, which
-// does not exist until inside Provision's transaction, so the adapter calls it
-// there. The knowledge of which spaces a household starts with stays in domain.
+// Spaces are not a field: domain.BuiltinSpaces needs the household ID,
+// which doesn't exist until inside Provision's transaction, so the adapter
+// calls it there -- the starter-spaces knowledge stays in domain.
 type HouseholdBlueprint struct {
 	Name                  string
 	FamilyName            string
@@ -66,10 +65,10 @@ func NewSignupBlueprint(householdName, displayName, currency string) (HouseholdB
 		return HouseholdBlueprint{}, ErrDisplayNameRequired
 	}
 	// ParseSelectableCurrency, not ParseCurrency: a currency chosen for the
-	// first time at sign-up must be one domain.Money can actually render, not
-	// merely one ISO 4217 recognises -- see domain.SelectableCurrencies for
-	// why, and household.go's normalizeCurrency for the PATCH path, which
-	// stays on ParseCurrency because it must keep accepting stored data.
+	// first time at sign-up must be one domain.Money can actually render,
+	// not merely one ISO 4217 recognises (see domain.SelectableCurrencies).
+	// household.go's normalizeCurrency stays on ParseCurrency for the PATCH
+	// path, since it must keep accepting stored data.
 	code, err := domain.ParseSelectableCurrency(currency)
 	if err != nil {
 		return HouseholdBlueprint{}, err
@@ -77,18 +76,18 @@ func NewSignupBlueprint(householdName, displayName, currency string) (HouseholdB
 
 	return HouseholdBlueprint{
 		Name: name,
-		// The design's create card asks for one name only ("Household name",
-		// helper "Shown at the top of the sidebar"), so family_name mirrors it
-		// rather than adding a field the design does not draw. The invite
-		// preview then reads "join the Ade & Kris household", which is fine.
+		// The design's create card asks for one name only ("Household name"),
+		// so family_name mirrors it rather than adding a field the design
+		// doesn't draw. The invite preview reads "join the Ade & Kris
+		// household", which is fine.
 		FamilyName:      name,
 		PrimaryCurrency: code,
-		// Equal to primary, and the toggle off. Not the column's IDR default:
-		// CurrencyPanel renders "Show {secondaryCurrency} equivalents" straight
-		// from the column, so a household in Sao Paulo would otherwise find a
-		// reference to Indonesian rupiah in Settings. Equal-to-primary makes
-		// the toggle inert but coherent, and makes the missing
-		// secondary-currency picker a visible gap rather than a surprise.
+		// Equal to primary, toggle off -- not the column's IDR default:
+		// CurrencyPanel renders "Show {secondaryCurrency} equivalents"
+		// straight from the column, so a household in Sao Paulo would
+		// otherwise see a reference to Indonesian rupiah in Settings.
+		// Equal-to-primary keeps the toggle inert but coherent, and makes
+		// the missing picker a visible gap, not a surprise.
 		SecondaryCurrency:     code,
 		ShowSecondaryCurrency: false,
 		OwnerDisplayName:      owner,
@@ -101,10 +100,10 @@ func NewSignupBlueprint(householdName, displayName, currency string) (HouseholdB
 	}, nil
 }
 
-// Household renders the blueprint as the domain value HouseholdRepository.Create
-// takes. ID and FXRateMode are left zero: the database assigns the ID, and
-// fx_rate_mode keeps its column default of 'auto', which the CHECK constraint
-// makes the only safe value to assume at creation time.
+// Household renders the blueprint as the domain value
+// HouseholdRepository.Create takes. ID and FXRateMode are left zero: the
+// database assigns the ID, and fx_rate_mode keeps its column default of
+// 'auto', the only value the CHECK constraint makes safe to assume here.
 func (b HouseholdBlueprint) Household() domain.Household {
 	return domain.Household{
 		Name:                  b.Name,

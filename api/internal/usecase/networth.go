@@ -16,10 +16,9 @@ type BreakdownEntry struct {
 }
 
 // ExcludedAccount names one account that could not be converted into the
-// household's primary currency, so the screen can say which and why. It is an
-// explicit field rather than something the frontend infers by comparing lists:
-// a limited member's response carries no amounts at all, so inference there
-// would produce a wrong or empty notice.
+// household's primary currency, so the screen can say which and why. It's
+// explicit rather than frontend-inferred, since a limited member's response
+// carries no amounts to infer from.
 type ExcludedAccount struct {
 	AccountID string
 	Currency  string
@@ -28,12 +27,10 @@ type ExcludedAccount struct {
 // NetWorthSummary is everything the Finances screen shows above the accounts
 // list.
 //
-// Computable is false when at least one account exists and none of them could
-// be converted -- the state a household reaches by changing its primary
-// currency in Settings while fx.StaticProvider knows only SGD<->IDR. A zero
-// must never be shown for it: zero is a claim about the household's money, and
-// the truth is that we cannot compute it. A household with no accounts at all
-// is computable and genuinely zero.
+// Computable is false only when accounts exist but none could convert (e.g.
+// after a primary-currency change fx.StaticProvider can't price). Never show
+// zero for that case -- zero is a claim about the household's money, not "we
+// can't compute it." No accounts at all is still computable, genuinely zero.
 type NetWorthSummary struct {
 	Currency         string
 	NetWorth         domain.Money
@@ -48,22 +45,17 @@ type NetWorthSummary struct {
 	Trend *NetWorthTrend
 }
 
-// Summary composes the figures above the accounts list from views the caller
-// has already listed, rather than listing again -- the handler needs both
-// halves of one response and they must describe the same set of rows.
+// Summary composes the figures above the accounts list from views the
+// caller already listed: the handler needs both halves of one response
+// describing the same rows.
 //
-// The order of operations is not incidental. domain.Money.Add refuses to add
-// two different currencies, deliberately, so each account is converted into
-// the household's primary currency *first* and only then summed. Summing first
-// and converting after fails on the second account of a mixed-currency
-// household. Rounding therefore happens per account (half away from zero, as
-// Rate.Apply already does) and the total is never re-rounded, so the figure is
-// deterministic.
+// domain.Money.Add refuses mixed currencies, so each account converts to the
+// primary currency *first*, then sums -- summing first fails on the second
+// account of a mixed-currency household. Rounding is per account, half away
+// from zero, never re-rounded, so the total is deterministic.
 //
-// today drives the twelve-month window and is taken as a parameter, never read
-// from a clock in here, so every figure is deterministic in tests and the wall
-// clock is read exactly once, at the HTTP layer. RetroService.List is the same
-// shape for the same reason.
+// today is a parameter rather than a clock read here, so it's deterministic
+// in tests and read once, at the HTTP layer.
 func (s *AccountService) Summary(ctx context.Context, householdID string, views []AccountView, today time.Time) (NetWorthSummary, error) {
 	household, err := s.d.Households.Get(ctx, householdID)
 	if err != nil {
@@ -86,11 +78,10 @@ func (s *AccountService) Summary(ctx context.Context, householdID string, views 
 	}
 
 	byType := map[domain.AccountType]domain.Money{}
-	// considered counts every non-archived view Summary looked at; converted
-	// counts how many of those actually converted. Computable is judged
-	// against considered, not len(views): an archived account is skipped
-	// outright (see below), so a household whose only accounts are archived
-	// must still read as a genuine, computable zero, not as "cannot compute."
+	// considered counts every non-archived view; converted counts how many of
+	// those actually converted. Computable is judged against considered, not
+	// len(views), so a household whose only accounts are archived reads as a
+	// genuine, computable zero -- not "cannot compute."
 	considered := 0
 	converted := 0
 	counted := make([]trendAccount, 0, len(views))

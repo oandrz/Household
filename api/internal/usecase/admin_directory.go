@@ -9,23 +9,19 @@ import (
 )
 
 // AdminDirectoryService is the operator's read-only view of the install:
-// how many households exist, which are active, who signed up, and -- for
-// one household -- who its members are and whether its sign-in is locked.
-//
-// It is separate from AdminService on purpose: that service is "who is a
-// platform admin, feature flags, the audit log", and this one reads across
-// every household, a boundary nothing else in the product crosses. It takes
-// no actor parameter; the HTTP layer's /admin guards are the only gate.
+// household counts and activity, and per-household members and lock state.
+// Separate from AdminService on purpose -- that one is admin/flags/audit;
+// this one alone crosses every household, so no actor parameter, only the
+// HTTP layer's /admin guards.
 type AdminDirectoryService struct{ d AdminDirectoryDeps }
 
 type AdminDirectoryDeps struct {
 	Directory     AdminDirectoryRepository
 	LoginAttempts LoginAttemptRepository
 	Clock         Clock
-	// Policy is the household sign-in lockout policy, the same one
-	// AuthService.SignIn evaluates. Zero means domain.DefaultLockoutPolicy,
-	// filled in by the constructor exactly as NewAuthService does, so the
-	// two can never disagree by omission.
+	// Policy is the same lockout policy AuthService.SignIn evaluates. Zero
+	// becomes domain.DefaultLockoutPolicy, filled in by the constructor like
+	// NewAuthService, so the two can't disagree by omission.
 	Policy domain.LockoutPolicy
 }
 

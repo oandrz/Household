@@ -8,15 +8,13 @@ import (
 	"github.com/andreasoentoro/hearth/api/internal/domain"
 )
 
-// GoalView is one card: the stored goal plus every derived figure the screen
-// shows. RequiredMonthly is present only for a dated, unachieved goal --
-// RequiredMonthlyOK false means the card shows no "needs S$X/mo" line rather
-// than a zero.
+// GoalView is one card: the stored goal plus every derived figure the
+// screen shows. RequiredMonthly is set only for a dated, unachieved goal;
+// RequiredMonthlyOK false means no "needs S$X/mo" line, not a zero.
 //
-// Contributed and RequiredMonthly are in the GOAL's own currency, not the
-// household's primary: the card renders an IDR goal in IDR. Only the two
-// summary totals below convert. Converting here as well would leave the card
-// saying "S$2,600 of Rp 40,000,000", which is not a sentence.
+// Contributed and RequiredMonthly stay in the GOAL's own currency, not the
+// household's primary (only the two summary totals below convert) -- else
+// the card would read "S$2,600 of Rp 40,000,000", not a sentence.
 type GoalView struct {
 	Goal              domain.Goal
 	Contributed       domain.Money
@@ -63,20 +61,16 @@ type NewGoal struct {
 	StartingBalanceMinor int64
 }
 
-// GoalUpdate is a PATCH: a nil field is unchanged. ClearTargetMonth is how a
-// dated goal loses its date, the same explicit-clear convention
-// clearReceivedAmount uses on transactions -- a nil pointer already means
-// "unchanged", so it cannot also mean "clear".
+// GoalUpdate is a PATCH: a nil field is unchanged. ClearTargetMonth is the
+// explicit-clear convention (clearReceivedAmount's, on transactions): a nil
+// pointer already means "unchanged", so it cannot also mean "clear".
 //
-// There is deliberately no Currency field: GoalRepository.Update's own doc
-// comment says currency is not mutable, and the only place a currency is
-// ever supplied is NewGoal, at creation. A caller cannot even attempt a
-// currency change through this type -- there is no field to put one in, so
-// the compiler refuses it before any runtime check would get the chance to.
-// If a JSON request body carries a "currency" key on a PATCH anyway, that is
-// Task 8's PATCH decoder's own problem to refuse (the design spec's own
-// Error handling section requires it, 422, via ErrGoalCurrencyImmutable) --
-// it cannot be this struct's, because nothing here ever sees that key.
+// There is deliberately no Currency field: GoalRepository.Update says
+// currency is not mutable, and only NewGoal supplies one, at creation. A
+// caller cannot even attempt a currency change through this type -- the
+// compiler refuses it before any runtime check could. A stray "currency"
+// key on a PATCH body is the HTTP layer's PATCH decoder's job to refuse
+// (422, via ErrGoalCurrencyImmutable), not this struct's.
 type GoalUpdate struct {
 	Name                *string
 	TargetMinor         *int64
@@ -86,9 +80,9 @@ type GoalUpdate struct {
 }
 
 // NewContribution is what AddContribution receives. It carries no currency:
-// a contribution is its goal's currency by construction (design decision 5),
-// so the service reads the goal's own Target.Currency rather than trusting a
-// caller to supply the right one.
+// a contribution is its goal's currency by construction, so the service
+// reads the goal's own Target.Currency rather than trusting a caller to
+// supply the right one.
 type NewContribution struct {
 	HouseholdID string
 	GoalID      string
@@ -97,11 +91,9 @@ type NewContribution struct {
 	Note        string
 }
 
-// GoalDeps gathers every port GoalService needs, mirroring BudgetDeps. There
-// is no Clock here for the same reason BudgetDeps has none: List, Create,
-// SetArchived and AddContribution all take the time they need as a
-// parameter (today, createdOn, at, in.OccurredOn), so nothing in this
-// service reads time.Now() and every test is deterministic.
+// GoalDeps gathers every port GoalService needs, mirroring BudgetDeps.
+// There is no Clock: List, Create, SetArchived and AddContribution all take
+// the time they need as a parameter, so every test is deterministic.
 type GoalDeps struct {
 	Goals      GoalRepository
 	Households HouseholdRepository
@@ -111,7 +103,7 @@ type GoalDeps struct {
 // GoalService composes the Goals screen and every write against it. Like
 // every other service here it takes no actor parameter: services enforce
 // what is *valid*, middleware enforces who is *asking* -- the money
-// capability and the owner check live in the router (Task 8).
+// capability and the owner check live in the router.
 type GoalService struct {
 	d GoalDeps
 }
@@ -121,27 +113,21 @@ func NewGoalService(d GoalDeps) *GoalService {
 }
 
 // List composes the whole Goals screen for one household: each goal's card
-// (contributed, percent, status, required monthly) plus the page summary.
-// today is always a parameter -- see GoalDeps' own comment -- so status and
-// the next-goal figure are deterministic in tests and driven by the clock
-// port at the HTTP layer in production.
+// (contributed, percent, status, required monthly) plus the page summary,
+// in three repository calls regardless of how many goals exist. today is
+// always a parameter -- see GoalDeps' own comment -- so status and the
+// next-goal figure are deterministic in tests.
 //
-// The household is read once for the primary currency, the goals once, and
-// MonthContributionTotals once -- three repository calls regardless of how
-// many goals the household has.
-//
-// The summary's two totals follow the exact rule BudgetService.Month's Spent
-// figure does (docs/LEARNING.md pattern 12): convert EACH goal's own figure
-// into the household's primary currency first, then add -- never sum minor
-// units across currencies and convert the total. A goal whose currency has
-// no available rate is excluded from BOTH totals and counted in
-// ExcludedNoRate, never silently dropped; a quietly short total would look
-// identical to a correct one. The counts (dated/no-date/on-track) and the
-// next-goal figure need no conversion at all -- they are currency-independent
-// -- and always consider live (unarchived) goals only, even when
-// includeArchived is true and the returned card list also carries archived
-// ones: the "X of Y on track" copy and the Monthly contributions card are
-// never about a goal nobody is tracking anymore.
+// The summary's two totals follow BudgetService.Month's Spent rule
+// (docs/LEARNING.md pattern 12): convert EACH goal's own figure into
+// primary first, then add -- never sum minor units across currencies and
+// convert the total. A no-rate goal is excluded from BOTH totals and
+// counted in ExcludedNoRate, never silently dropped -- a quietly short
+// total looks correct. The counts (dated/no-date/on-track) and the
+// next-goal figure need no conversion -- they always consider live goals
+// only, even when includeArchived is true and the card list also carries
+// archived ones -- "X of Y on track" and the Monthly contributions card
+// are never about a goal nobody tracks anymore.
 func (s *GoalService) List(ctx context.Context, householdID string, includeArchived bool, today time.Time) (GoalsView, error) {
 	household, err := s.d.Households.Get(ctx, householdID)
 	if err != nil {
@@ -246,12 +232,10 @@ func goalCardView(rec GoalRecord, today time.Time) GoalView {
 	return view
 }
 
-// View is one goal exactly as List renders its card, archived goals included,
-// for a caller that needs a single goal: a write handler answering with the
-// card it just changed, or a check that reads the goal's currency. It is one
-// repository read, where going through List would cost three and a summary
-// nobody asked for. A goal that does not exist in this household is
-// domain.ErrNotFound, GoalRepository.Get's own answer.
+// View is one goal exactly as List renders its card, archived included, for
+// a caller that needs a single one -- a write handler answering with the
+// card it just changed. One repository read, where List would cost three
+// plus a summary nobody asked for; a missing goal is domain.ErrNotFound.
 func (s *GoalService) View(ctx context.Context, householdID, goalID string, today time.Time) (GoalView, error) {
 	rec, err := s.d.Goals.Get(ctx, householdID, goalID)
 	if err != nil {
@@ -287,18 +271,16 @@ func (c *goalCounts) add(g domain.Goal, status domain.GoalStatus) {
 	}
 }
 
-// monthlyInPrimary converts one goal's planned monthly figure and, if the goal
-// received anything this month, its actual figure into primary. excluded means
-// the goal's currency has no rate, and neither figure may be added to a total.
+// monthlyInPrimary converts one goal's planned monthly figure and, if it
+// received anything this month, its actual figure into primary. excluded
+// means the goal's currency has no rate, so neither figure is added to a
+// total.
 //
-// Convert-then-add, per goal: the planned and actual figures share the goal's
-// one currency, so either both convert or neither does. Splitting these into
+// Convert-then-add, per goal: planned and actual share the goal's one
+// currency, so either both convert or neither does -- splitting them into
 // two independently-guarded conversions would let the two totals disagree
-// about which goals had a rate, which List's "excluded from BOTH totals" rule
-// forbids.
-//
-// Converter.TryConvert decides what "excluded" means; any error it returns
-// is returned here, and List fails with it.
+// about which goals had a rate. Converter.TryConvert decides "excluded";
+// any error it returns is returned here.
 func (s *GoalService) monthlyInPrimary(ctx context.Context, conv *Converter, g domain.Goal, actualByGoal map[string]int64) (planned, actual domain.Money, hasActual, excluded bool, err error) {
 	planned, hasRate, err := conv.TryConvert(ctx, g.PlannedMonthly)
 	if err != nil {
@@ -321,12 +303,11 @@ func (s *GoalService) monthlyInPrimary(ctx context.Context, conv *Converter, g d
 	return planned, actual, true, false, nil
 }
 
-// Create validates and writes a new goal. Every check runs before the
-// repository is ever called. The target month, if given, is normalised to
-// the first of its month -- the same convention target_month and
-// budgets.month already use -- so a caller passing the 15th does not leave a
-// goal whose stored date disagrees with what MonthsLeftInclusive assumes
-// about it.
+// Create validates and writes a new goal, every check before the
+// repository is called. The target month, if given, normalises to the
+// first of its month -- the same convention target_month and budgets.month
+// use -- so a caller passing the 15th can't leave a date
+// MonthsLeftInclusive disagrees with.
 func (s *GoalService) Create(ctx context.Context, in NewGoal, createdOn time.Time) (domain.Goal, error) {
 	name := strings.TrimSpace(in.Name)
 	if name == "" {
@@ -368,21 +349,18 @@ func (s *GoalService) Create(ctx context.Context, in NewGoal, createdOn time.Tim
 		PlannedMonthly: planned,
 	}
 
-	// A negative StartingBalanceMinor is passed through unchanged: a goal is
-	// allowed to start in deficit if the household says so (a debt being
-	// tracked as a savings goal, for instance), and GoalRepository.Create's
-	// own contract writes no contribution row at all when the figure is
-	// exactly zero.
+	// A negative StartingBalanceMinor passes through unchanged: a goal may
+	// start in deficit if the household says so. GoalRepository.Create
+	// writes no contribution row at all when the figure is exactly zero.
 	return s.d.Goals.Create(ctx, goal, in.StartingBalanceMinor, createdOn)
 }
 
-// Update merges the patch onto the stored goal and validates the *result*,
-// the same ordering AccountService.Update's own comment explains: a nil
-// field means "leave alone," and validating the assembled whole (rather than
-// only the incoming fields) is what stops two independently-legal changes
-// from combining into an illegal one. Currency is never touched -- GoalUpdate
-// carries no field for it (see that type's own comment), so g.Target.Currency
-// is always whatever Get just read off the stored row.
+// Update merges the patch onto the stored goal and validates the *result*
+// -- the same ordering AccountService.Update explains: validating the
+// assembled whole, not just the incoming fields, stops two
+// independently-legal changes combining into an illegal one. Currency is
+// never touched -- GoalUpdate has no field for it, so g.Target.Currency
+// stays whatever Get read off the stored row.
 func (s *GoalService) Update(ctx context.Context, householdID, goalID string, patch GoalUpdate) (domain.Goal, error) {
 	rec, err := s.d.Goals.Get(ctx, householdID, goalID)
 	if err != nil {
@@ -409,11 +387,9 @@ func (s *GoalService) Update(ctx context.Context, householdID, goalID string, pa
 		}
 		g.PlannedMonthly.Amount = *patch.PlannedMonthlyMinor
 	}
-	// ClearTargetMonth wins over a nil TargetMonth being ambiguous: without
-	// it, there would be no way to distinguish "leave the date alone" from
-	// "the household picked 'No target date'" -- both would arrive as
-	// patch.TargetMonth == nil. Both false/nil leaves the stored date
-	// completely untouched.
+	// ClearTargetMonth wins over a nil TargetMonth: without it there is no
+	// way to tell "leave alone" from "picked 'No target date'" -- both
+	// arrive as nil. Both false/nil leaves the stored date untouched.
 	if patch.ClearTargetMonth {
 		g.TargetMonth = nil
 	} else if patch.TargetMonth != nil {
@@ -427,13 +403,10 @@ func (s *GoalService) Update(ctx context.Context, householdID, goalID string, pa
 // SetArchived archives or restores a goal, stamping ArchivedAt with at
 // rather than reading time.Now() -- the same convention Create's createdOn
 // and List's today follow, so this service never reaches for a clock
-// directly (GoalDeps has none, deliberately -- see its own comment). This
-// signature is one parameter wider than the brief's own sketch of it:
-// GoalRepository.SetArchived (widened in Task 3's fix round) takes
-// `at time.Time`, and there is no Clock in GoalDeps to produce one from
-// inside this method, so it must arrive as a parameter the same way
-// Create's createdOn does. Task 8's handler supplies it from its own
-// injected clock.
+// directly (GoalDeps has none, deliberately). at must arrive as a
+// parameter for the same reason: GoalRepository.SetArchived takes
+// `at time.Time`, and there is no Clock here to produce one from. The HTTP
+// handler supplies it from its own injected clock.
 func (s *GoalService) SetArchived(ctx context.Context, householdID, goalID string, archived bool, at time.Time) (domain.Goal, error) {
 	return s.d.Goals.SetArchived(ctx, householdID, goalID, archived, at)
 }
@@ -443,23 +416,17 @@ func (s *GoalService) SetArchived(ctx context.Context, householdID, goalID strin
 // before any write: the amount must be non-zero (goal_contributions' own
 // CHECK (amount_minor <> 0)), and the goal must not be archived.
 //
-// Before either of those, it reads the goal via
-// Goals.Get(in.HouseholdID, in.GoalID). This is not a redundant lookup:
-// InsertGoalContribution's SQL has no constraint tying
-// goal_contributions.goal_id to its own household_id column
-// (00007_goals.sql), so nothing stops a caller from writing a contribution
-// against a goal id that belongs to a DIFFERENT household. A row like that
-// is invisible to the victim's own ListContributions (which filters by the
-// row's own household_id, and the forged row carries the attacker's) but IS
-// summed into the victim's ContributedMinor: GetGoalWithTotal and
-// ListGoalsWithTotals both join goal_contributions to goals by goal_id
-// alone, with no household_id check on the contribution side. That is a
-// cross-household write with no error returned to the attacker and no trace
-// visible in the one place the victim would look. Get(...) is what stands
-// between a caller's household id and the goal id it named: a goal that does
-// not exist in THIS household is indistinguishable from one that does not
-// exist at all (the port's own contract), so its domain.ErrNotFound is
-// returned unchanged, before anything is written.
+// Before either check, it reads the goal via Goals.Get(in.HouseholdID,
+// in.GoalID) -- not a redundant lookup. InsertGoalContribution's SQL has no
+// constraint tying goal_contributions.goal_id to household_id
+// (00007_goals.sql), so a caller could write a contribution against
+// another household's goal id. That forged row is invisible to the
+// victim's own ListContributions (filtered by the row's attacker-owned
+// household_id) but IS summed into the victim's ContributedMinor --
+// GetGoalWithTotal and ListGoalsWithTotals join by goal_id alone, with no
+// household_id check on the contribution side. Get(...) is the barrier: a
+// goal outside THIS household reads as domain.ErrNotFound, same as one
+// that doesn't exist, refused before anything is written.
 func (s *GoalService) AddContribution(ctx context.Context, in NewContribution) (domain.GoalContribution, error) {
 	if in.AmountMinor == 0 {
 		return domain.GoalContribution{}, domain.ErrContributionAmountZero
@@ -485,19 +452,16 @@ func (s *GoalService) AddContribution(ctx context.Context, in NewContribution) (
 }
 
 // DeleteContribution removes one contribution. It needs no guard the way
-// AddContribution needs one: GoalRepository.DeleteContribution's own doc
-// comment requires the adapter to scope its DELETE by household_id AND
-// goal_id AND the contribution id together, so a foreign household id
-// simply matches no row (domain.ErrNotFound) -- there is no INSERT-shaped
-// gap here to close.
+// AddContribution needs one: GoalRepository.DeleteContribution scopes its
+// DELETE by household_id AND goal_id AND the contribution id together, so a
+// foreign household id simply matches no row (domain.ErrNotFound).
 func (s *GoalService) DeleteContribution(ctx context.Context, householdID, goalID, contributionID string) error {
 	return s.d.Goals.DeleteContribution(ctx, householdID, goalID, contributionID)
 }
 
-// Contributions lists one goal's recent contributions, newest first, at the
-// repository's own default limit (ListContributions treats limit <= 0 as
-// its default of 50, following TransactionRepository.List's own
-// convention).
+// Contributions lists one goal's recent contributions, newest first, at
+// the repository's default limit (ListContributions treats limit <= 0 as
+// 50, following TransactionRepository.List's convention).
 func (s *GoalService) Contributions(ctx context.Context, householdID, goalID string) ([]domain.GoalContribution, error) {
 	return s.d.Goals.ListContributions(ctx, householdID, goalID, 0)
 }

@@ -5,14 +5,11 @@ import "context"
 // IntentParser turns a sentence a person typed into a chat -- "spent 84.50
 // on groceries at DBS" -- into the same fields the /spend grammar produces.
 // It is a port because the implementation is a language model behind an API
-// key (adapter/openrouter), and the product must work identically without
-// one: when no parser is configured the bot answers free text with /help.
+// key; with none configured, the bot falls back to /help.
 //
-// A parser is a reader of intent, never a writer: whatever it returns is
-// shown back to the person and written only after they confirm. That rule
-// lives in the Telegram Commander, not here, but it is why Intent carries
-// text fields rather than ids -- the person must be able to read what will
-// be logged before it is.
+// A parser only reads intent, never writes: the Telegram Commander shows it
+// back and writes only after the person confirms -- why Intent carries text
+// fields, not ids, so the person can read what will be logged before it is.
 type IntentParser interface {
 	ParseIntent(ctx context.Context, in ParseIntentInput) (Intent, error)
 }

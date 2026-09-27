@@ -9,29 +9,25 @@ import (
 )
 
 const (
-	// DevPassword is Andreas's development password. Seed writes it (through
-	// Hasher, so only the hash is ever stored) and adminctl prints it on
-	// completion, so it is a known constant rather than a secret hidden in a
-	// diff: Seed's development-only guard, enforced by its caller, is the
-	// only thing standing between it and a production database, and that
-	// guard protects this value exactly as it protects everything else Seed
-	// writes.
+	// DevPassword is Andreas's development password. Seed writes only its
+	// hash (via Hasher) and adminctl prints it on completion, so it is a
+	// known constant, not a secret hidden in a diff: Seed's development-only
+	// guard, enforced by its caller, is the only thing standing between it
+	// and a production database, and that guard protects this exactly like
+	// everything else Seed writes.
 	DevPassword = "hearth-dev-password"
 
 	// devInviteToken is the first rung of Christine's development invite
-	// token ladder (see devInviteTokenAt below). Like DevPassword, it is
-	// fixed rather than randomly generated: the token's hash, once
-	// persisted, cannot be reversed, so a run of Seed that finds an invite
-	// already sitting in the database has no way to recover whatever raw
-	// value produced its hash and print a working URL again -- unless that
-	// raw value was never random to begin with.
+	// token ladder (see devInviteTokenAt). Like DevPassword it is fixed, not
+	// random: once persisted, its hash can't be reversed, so a Seed run that
+	// finds an existing invite could never recover the raw value to print a
+	// working URL again.
 	devInviteToken = "hearth-dev-invite-token"
 
-	// AndreasEmail identifies the household's first owner. It is exported so
+	// AndreasEmail identifies the household's first owner. Exported so
 	// adminctl's other subcommands (unlock-household, create-invite) can
-	// resolve "the household" the same way Seed itself does, in an app with
-	// no household-listing endpoint and exactly one household per
-	// deployment.
+	// resolve "the household" the same way Seed does -- there is no
+	// household-listing endpoint, and exactly one household per deployment.
 	AndreasEmail = "andreas@hearth.family"
 
 	christineEmail = "christine@hearth.family"
@@ -40,12 +36,9 @@ const (
 )
 
 // SeedDeps gathers every port Seed needs, mirroring AuthDeps/InviteDeps/
-// HouseholdDeps. Unlike InviteDeps, it does carry a MembershipRepository:
-// InviteDeps never reads a membership (every write it makes goes through a
-// port that creates one transactionally), but Seed does, on its
-// already-seeded path -- recovering the household ID a second run needs
-// means looking up Andreas's own membership, and so does checking whether
-// Christine has already accepted.
+// HouseholdDeps. Unlike InviteDeps, it carries a MembershipRepository: Seed
+// reads a membership on its already-seeded path, to recover the household
+// ID and to check whether Christine has accepted.
 type SeedDeps struct {
 	Households    HouseholdRepository
 	Users         UserRepository
@@ -63,25 +56,22 @@ type SeedDeps struct {
 // SeedResult is what a caller (adminctl) needs back to tell the operator
 // what happened to Christine's invite.
 type SeedResult struct {
-	// InviteURL is empty when there is nothing useful to print: either
-	// ChristineIsMember is true, or a live invite for her address already
-	// exists that Seed's own token ladder (see devInviteTokenAt) did not
-	// create, and so there is no raw token left to reconstruct a URL from.
+	// InviteURL is empty when there's nothing to print: ChristineIsMember is
+	// true, or a live invite for her address exists that the token ladder
+	// (see devInviteTokenAt) didn't create, leaving no raw token to
+	// reconstruct a URL from.
 	InviteURL string
-	// ChristineIsMember is true once Christine has actually accepted an
-	// invite and become a member of the household. At that point Seed has
-	// nothing left to do for her -- printing an invite link would be
-	// actively wrong, not just redundant, even on a build where one would
-	// still technically resolve.
+	// ChristineIsMember is true once Christine has accepted an invite and
+	// become a member. Seed then has nothing left to do for her -- printing
+	// an invite link would be actively wrong, not just redundant.
 	ChristineIsMember bool
 }
 
 // fixedRawToken always returns the same raw token, so an invite created
-// through it produces a deterministic hash -- and therefore a deterministic
-// URL -- no matter how many times Seed runs. HashToken still delegates to
-// the real generator, so a hash Seed computes independently, to check
-// whether that invite already exists, matches exactly what a Create call
-// through this wrapper would persist.
+// through it has a deterministic hash and URL no matter how many times Seed
+// runs. HashToken still delegates to the real generator, so a hash computed
+// independently to check whether an invite already exists matches what
+// Create would persist.
 type fixedRawToken struct {
 	inner TokenGenerator
 	raw   string
@@ -93,18 +83,17 @@ func (f fixedRawToken) NewToken() (string, []byte, error) {
 
 func (f fixedRawToken) HashToken(raw string) []byte { return f.inner.HashToken(raw) }
 
-// Seed writes the design's starting household -- Andreas as a fully
-// capable owner, a pending co-owner invite for Christine, Kayla and Ethan as
-// limited members, the three builtin spaces, and notification preferences
-// with every flag on -- and reports the URL Task 21 needs to accept
-// Christine's invite.
+// Seed writes the design's starting household: Andreas as owner, a pending
+// co-owner invite for Christine, Kayla and Ethan as limited members, the
+// three builtin spaces, and notification preferences with every flag on. It
+// reports the URL adminctl prints so an operator can accept Christine's
+// invite.
 //
-// Every write is gated on its own idempotency check rather than one
-// top-level "already seeded" flag: a Seed call that partially failed
-// (Andreas written, Christine's invite email not yet sent because Mailpit
-// was still starting up, say) must be safely retryable step by step, not
-// short-circuited into reporting an invite URL for a row that was never
-// written.
+// Every write is gated on its own idempotency check, not one top-level
+// "already seeded" flag: a call that partially failed (Andreas written,
+// Christine's invite mail not yet sent, say) must be safely retryable step
+// by step, not short-circuited into reporting a URL for a row that was
+// never written.
 func Seed(ctx context.Context, d SeedDeps) (SeedResult, error) {
 	household, andreasID, err := ensureHouseholdAndAndreas(ctx, d)
 	if err != nil {
@@ -123,11 +112,10 @@ func Seed(ctx context.Context, d SeedDeps) (SeedResult, error) {
 		return SeedResult{}, fmt.Errorf("set notification preferences: %w", err)
 	}
 
-	// Christine's membership is checked before her invite, exactly the way
-	// ensureHouseholdAndAndreas checks Andreas's own membership before
-	// deciding whether there is anything left to create: once she has
-	// accepted, re-issuing (or even just re-reporting a URL for) an invite
-	// is wrong, not merely redundant.
+	// Christine's membership is checked before her invite, the same way
+	// ensureHouseholdAndAndreas checks Andreas's: once she has accepted,
+	// re-issuing or re-reporting an invite URL is wrong, not merely
+	// redundant.
 	isMember, err := christineIsMember(ctx, d, household.ID)
 	if err != nil {
 		return SeedResult{}, err
@@ -145,10 +133,10 @@ func Seed(ctx context.Context, d SeedDeps) (SeedResult, error) {
 }
 
 // ensureHouseholdAndAndreas returns the seeded household and Andreas's user
-// ID, creating both -- together, via CreateWithMembership -- only if Andreas
-// does not already exist. There is no inviter for the first owner, so this
-// is the one member of the household Seed creates directly rather than
-// through InviteService.Create.
+// ID, creating both together (via CreateWithMembership) only if Andreas
+// doesn't already exist. There's no inviter for the first owner, so this is
+// the one member Seed creates directly rather than through
+// InviteService.Create.
 func ensureHouseholdAndAndreas(ctx context.Context, d SeedDeps) (domain.Household, string, error) {
 	existing, err := d.Users.ByEmail(ctx, AndreasEmail)
 	switch {
@@ -173,10 +161,10 @@ func ensureHouseholdAndAndreas(ctx context.Context, d SeedDeps) (domain.Househol
 		return domain.Household{}, "", fmt.Errorf("build the seed blueprint: %w", err)
 	}
 	// The design's household is the one place that keeps the dual-currency
-	// display on: Andreas and Christine genuinely track SGD against IDR. A
-	// self-serve household gets secondary == primary and the toggle off (see
-	// NewSignupBlueprint), so these three are overridden here rather than
-	// baked into the blueprint constructor.
+	// display on: Andreas and Christine really do track SGD against IDR,
+	// unlike a self-serve household (secondary == primary, toggle off --
+	// see NewSignupBlueprint), so these three fields are overridden here
+	// rather than baked into the blueprint constructor.
 	blueprint.FamilyName = familyName
 	blueprint.SecondaryCurrency = "IDR"
 	blueprint.ShowSecondaryCurrency = true
@@ -206,10 +194,9 @@ func ensureHouseholdAndAndreas(ctx context.Context, d SeedDeps) (domain.Househol
 	return household, andreas.ID, nil
 }
 
-// christineIsMember reports whether Christine has already accepted an
-// invite and holds a membership in this household -- the same
-// ByEmail-then-ByUser resolution ensureHouseholdAndAndreas uses for Andreas,
-// applied to the one other member Seed has a fixed identity for.
+// christineIsMember reports whether Christine has accepted an invite and
+// holds a membership in this household -- the same ByEmail-then-ByUser
+// resolution ensureHouseholdAndAndreas uses for Andreas.
 func christineIsMember(ctx context.Context, d SeedDeps, householdID string) (bool, error) {
 	user, err := d.Users.ByEmail(ctx, christineEmail)
 	switch {
@@ -234,11 +221,10 @@ func christineIsMember(ctx context.Context, d SeedDeps, householdID string) (boo
 	}
 }
 
-// ensureChildren creates Kayla and Ethan if they are not already members of
-// the household, each through InviteService.Create with an empty email --
-// the design's "limited member with no credentials of their own" case, which
-// that call routes to UserRepository.CreateWithMembership so the user and
-// membership are written in one transaction.
+// ensureChildren creates Kayla and Ethan if they aren't already members,
+// each through InviteService.Create with an empty email -- the "limited
+// member with no credentials" case, which writes the user and membership in
+// one transaction via UserRepository.CreateWithMembership.
 func ensureChildren(ctx context.Context, d SeedDeps, householdID, andreasID string) error {
 	inviteSvc := seedInviteService(d)
 
@@ -267,20 +253,17 @@ func ensureChildren(ctx context.Context, d SeedDeps, householdID, andreasID stri
 }
 
 // ensureChild creates one credential-less child, but refuses -- rather than
-// silently creating a duplicate -- if a credential-less user with this exact
-// display name already exists with no membership anywhere. That is exactly
-// the state left behind by removing a child's membership without deleting
-// the underlying user row: a child has no email, so there is no unique
-// constraint (the way there is for a real address) to make a second Kayla
-// impossible.
+// silently duplicating -- if a credential-less user with this exact display
+// name already exists with no membership anywhere. That's exactly the state
+// left by removing a child's membership without deleting the user row: a
+// child has no email, so there's no unique constraint (unlike a real
+// address) to make a second Kayla impossible.
 //
-// Guessing which such orphan belongs to this seed run -- reattaching it to a
-// fresh membership -- would be worse than stopping: it might not be the
-// child anyone thinks it is (a name collision, a half-finished manual
-// cleanup), and silently repairing that guess wrong is much harder to notice
-// than a seed that simply refuses to run. A seed that refuses is
-// recoverable by an operator who can inspect and decide; one that silently
-// duplicates is not.
+// Guessing which orphan belongs to this run and reattaching it would be
+// worse than stopping: it might not be the right child (a name collision, a
+// half-finished cleanup), and a wrong silent repair is much harder to
+// notice than a refusal. A seed that refuses is recoverable by an operator
+// who can inspect; one that silently duplicates is not.
 func ensureChild(ctx context.Context, d SeedDeps, inviteSvc *InviteService,
 	householdID, andreasID, name string, caps domain.Capabilities) error {
 	orphan, err := d.Users.FindOrphanedChild(ctx, name)
@@ -326,12 +309,11 @@ func ensureSpaces(ctx context.Context, d SeedDeps, householdID string) error {
 }
 
 // devInviteTokenAt returns the fixed raw token for one rung of Christine's
-// invite ladder: devInviteToken itself for the first rung, then
-// "<devInviteToken>-2", "-3", and so on. Every rung's raw value is
-// reconstructible from nothing but its position, which is what lets Seed
-// recover the URL for an invite a previous run created without ever having
-// persisted the raw value anywhere -- SHA-256 is one-way, so devInviteToken
-// alone could not survive being reissued once, let alone repeatedly.
+// invite ladder: devInviteToken for rung 1, then "<devInviteToken>-2", "-3",
+// and so on. Every rung's value is reconstructible from its position alone,
+// which lets Seed recover the URL for a previously-created invite without
+// ever persisting the raw value -- SHA-256 is one-way, so a single fixed
+// token couldn't survive being reissued.
 func devInviteTokenAt(rung int) string {
 	if rung == 1 {
 		return devInviteToken
@@ -340,26 +322,23 @@ func devInviteTokenAt(rung int) string {
 }
 
 // maxInviteLadderRungs bounds the walks below. Each rung is consumed only by
-// a genuine, unaccepted expiry (inviteTTL in invite.go is seven days) --
-// reaching even a handful in a real development database would be
-// extraordinary. This ceiling exists purely so a bug cannot spin an
-// unbounded loop, not because the ladder is expected to run deep in
-// practice.
+// a genuine unaccepted expiry (inviteTTL, seven days), so reaching even a
+// handful in a real dev database would be extraordinary -- this ceiling
+// exists purely so a bug can't spin an unbounded loop.
 const maxInviteLadderRungs = 1000
 
 // ensureChristineInvite returns the URL for Christine's pending co-owner
-// invite. The caller (Seed) has already established that she is not yet a
-// member, so this only has to answer one question: is there already a live,
-// unaccepted invite for her address at all -- not just at devInviteToken's
-// own hash -- and if not, issue one.
+// invite. Seed has already confirmed she isn't a member, so this only
+// answers one question: is there already a live, unaccepted invite for her
+// address at all (not just at devInviteToken's own hash) -- and if not,
+// issues one.
 //
-// This ordering (ask InviteRepository.LiveInviteForEmail first, only create
-// on a miss) is what stops the invite-abandonment bug a token-hash-only
-// check had: checking solely "is devInviteToken's own row still usable"
-// cannot see a live invite this function itself reissued at a later rung on
-// a previous run, so it would reissue *again*, abandoning the previous
-// reissue live and pending forever and sending a second real email every
-// time Seed ran after the first expiry.
+// This checks InviteRepository.LiveInviteForEmail first and only creates on
+// a miss. Don't check solely whether devInviteToken's own row is usable:
+// that misses a live invite this function reissued at a later rung on a
+// previous run, causing a second reissue -- abandoning the first live and
+// pending forever, and re-sending mail every time Seed runs after an
+// expiry.
 func ensureChristineInvite(ctx context.Context, d SeedDeps, householdID, andreasID string) (string, error) {
 	_, err := d.Invites.LiveInviteForEmail(ctx, householdID, christineEmail)
 	switch {
@@ -372,17 +351,15 @@ func ensureChristineInvite(ctx context.Context, d SeedDeps, householdID, andreas
 	}
 }
 
-// findLiveLadderURL walks the ladder looking for the one rung (if any) that
-// is currently live: created, not accepted, not expired. It stops at the
-// first never-created rung, since Seed always fills rungs in order and never
-// skips one.
+// findLiveLadderURL walks the ladder for the one rung (if any) that's
+// currently live: created, not accepted, not expired. It stops at the first
+// never-created rung, since Seed always fills rungs in order.
 //
 // An empty string with a nil error means LiveInviteForEmail found something
-// this ladder itself did not create -- e.g. a manual create-invite for
-// Christine's address from outside Seed. There is something genuinely
-// pending in that case, but no raw token this function can honestly
-// reconstruct a URL from; the caller is expected to report that state
-// without fabricating a link.
+// this ladder didn't create -- e.g. a manual create-invite for Christine's
+// address. Something is genuinely pending, but there's no raw token to
+// honestly reconstruct a URL from; the caller reports that state without
+// fabricating a link.
 func findLiveLadderURL(ctx context.Context, d SeedDeps) (string, error) {
 	now := d.Clock.Now()
 	for rung := 1; rung <= maxInviteLadderRungs; rung++ {
@@ -403,27 +380,24 @@ func findLiveLadderURL(ctx context.Context, d SeedDeps) (string, error) {
 }
 
 // issueChristineInviteAtNextRung creates Christine's invite at the first
-// never-used rung of the ladder. A used rung -- live, expired or accepted --
-// can never be reused: its hash already occupies invites.token_hash's UNIQUE
-// constraint permanently, so the first free rung is the only place a new
-// invite can legally be written.
+// never-used rung. A used rung -- live, expired or accepted -- can never be
+// reused: its hash already occupies invites.token_hash's UNIQUE constraint
+// permanently, so the first free rung is the only place a new invite can
+// legally be written.
 //
-// domain.ErrAlreadyExists from the Create call itself is tolerated: it
-// closes the race between the ByTokenHash check just above and the write,
-// where a concurrent caller's insert lands in between -- the database's real
-// UNIQUE (token_hash) constraint is the authoritative backstop for that
-// window, exactly as it is everywhere else this codebase relies on
-// translate's unique-violation mapping.
+// domain.ErrAlreadyExists from Create is tolerated: it closes the race
+// between the ByTokenHash check above and the write, where a concurrent
+// insert lands in between. The database's UNIQUE (token_hash) constraint is
+// the real backstop, exactly as translate's unique-violation mapping relies
+// on elsewhere.
 //
-// ErrInviteeAlreadyRegistered from Create is not tolerated the same way: it
-// means christineEmail already has a users row with no membership in this
-// household -- the state removing a membership (MemberService.Remove)
-// leaves behind, since it deletes the memberships row and not the user
-// underneath it (see that fix's report). That is not a race Seed can retry
-// past; InviteService.Create refuses to write anything until it's resolved,
-// exactly as intended. This surfaces it through christineOrphanedUserError
-// instead, naming the row and the remedy, the same way ensureChild's
-// identical orphan case does for a credential-less child.
+// ErrInviteeAlreadyRegistered is not tolerated the same way: it means
+// christineEmail already has an orphaned users row, left when
+// MemberService.Remove deletes a membership but not the user underneath it.
+// That's not a race to retry past (InviteService.Create refuses to write
+// anything until it's resolved, exactly as intended), so this surfaces it
+// through christineOrphanedUserError instead -- naming the row and the
+// remedy, the same way ensureChild does for a credential-less child.
 func issueChristineInviteAtNextRung(ctx context.Context, d SeedDeps, householdID, andreasID string) (string, error) {
 	for rung := 1; rung <= maxInviteLadderRungs; rung++ {
 		token := devInviteTokenAt(rung)
@@ -458,14 +432,11 @@ func issueChristineInviteAtNextRung(ctx context.Context, d SeedDeps, householdID
 }
 
 // christineOrphanedUserError builds the actionable error
-// issueChristineInviteAtNextRung returns when InviteService.Create refuses
-// because christineEmail already has a users row: Seed has already
-// confirmed she is not a member (Seed calls christineIsMember before ever
-// reaching here), so that row can only be an orphan left behind by removing
-// her membership without deleting the user underneath it. Names the row and
-// the remedy -- not just the fact that Create refused -- mirroring
-// ensureChild's identical orphan case for a credential-less child, so an
-// operator sees a concrete next step instead of a bare wrapped error.
+// issueChristineInviteAtNextRung returns when Create refuses because
+// christineEmail already has a users row -- necessarily an orphan, since
+// Seed has already confirmed she isn't a member. Names the row and the
+// remedy, mirroring ensureChild's orphan case, so an operator gets a
+// concrete next step instead of a bare wrapped error.
 func christineOrphanedUserError(ctx context.Context, d SeedDeps) error {
 	existing, err := d.Users.ByEmail(ctx, christineEmail)
 	if err != nil {
@@ -480,10 +451,10 @@ func christineOrphanedUserError(ctx context.Context, d SeedDeps) error {
 }
 
 // seedInviteService builds an InviteService over d's ports, wrapping Tokens
-// in fixedRawToken so any invite created through it for Kayla or Ethan is
-// reproducible too -- though in practice neither call ever reaches Tokens at
-// all, since InviteService.Create only generates a token on its
-// email-present branch, and both children are invited with an empty one.
+// in fixedRawToken so any invite for Kayla or Ethan would also be
+// reproducible -- though neither call reaches Tokens in practice, since
+// Create only generates a token on its email-present branch, and both
+// children are invited with an empty one.
 func seedInviteService(d SeedDeps) *InviteService {
 	return NewInviteService(InviteDeps{
 		Invites: d.Invites,
