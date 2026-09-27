@@ -14,19 +14,15 @@ import (
 	"github.com/andreasoentoro/hearth/api/internal/usecase"
 )
 
-// readLog records the sequence of repository reads a service performed, in
-// order. SignupService.Request's contract is that the same reads happen, in
-// the same order, on every branch -- a read that is *skipped* on one branch
-// is the exact defect RequestMagicLink shipped with (see auth.go's
-// RequestMagicLink doc comment), and no assertion about return values can
-// catch it. Only an ordered log can.
+// readLog records the ordered sequence of repository reads a service made.
+// SignupService.Request must make the same reads, in the same order, on
+// every branch -- a skipped read is the defect RequestMagicLink's "Don't
+// skip ByEmail" comment warns against.
 //
-// It is wired into the synchronous read methods only (userDouble.ByEmail,
-// signupDouble.CountSince, signupDouble.CountForEmailSince) -- never into
-// mailerDouble, which is called from sendAsync's background goroutine. This
-// type carries no mutex, and a log write from that goroutine racing a test's
-// log.seq() read would be exactly the kind of bug -race is run to catch, not
-// something this double should paper over.
+// Wired into the synchronous read methods only (userDouble.ByEmail,
+// signupDouble.CountSince, signupDouble.CountForEmailSince), never
+// mailerDouble, which runs async. No mutex on purpose: a racing write from
+// that goroutine is exactly the bug -race exists to catch.
 type readLog struct{ calls []string }
 
 func (l *readLog) record(name string) { l.calls = append(l.calls, name) }
@@ -39,15 +35,13 @@ type fixedClock struct{ now time.Time }
 func (c *fixedClock) Now() time.Time          { return c.now }
 func (c *fixedClock) Advance(d time.Duration) { c.now = c.now.Add(d) }
 
-// fakeHasher logs every Verify call, by encoded argument (via a pointer
-// receiver, unlike the brief's value-receiver sketch), so a test can tell
-// apart a real verification against a member's own stored hash from
-// AuthService's timing-parity decoy verification, which runs against a
-// different, unrelated encoded hash. verifyCallCount answers "did the
-// hasher get touched at all" (the decoy's whole reason to exist); the log
-// itself answers "was it touched with *this* encoded value" (the guard
-// TestUsersWithoutAPasswordCannotSignIn cares about — a credential-less
-// member's own empty PasswordHash must never reach Verify, decoy or not).
+// fakeHasher logs every Verify call by its encoded argument, so a test can
+// tell a real verification against a member's own hash apart from
+// AuthService's timing-parity decoy verification against an unrelated
+// hash. verifyCallCount answers "was the hasher touched at all";
+// verifyCallsWithEncoded answers "was it touched with THIS value" -- what
+// TestUsersWithoutAPasswordCannotSignIn needs: an empty stored hash must
+// never reach Verify, decoy or not.
 type fakeHasher struct {
 	verifyLog []string /* encoded arguments */
 }
@@ -77,11 +71,9 @@ func (h *fakeHasher) verifyCallsWithEncoded(encoded string) int {
 type seqTokens struct {
 	n int
 
-	// failNextErr arms a one-shot failure for the next NewToken call, the
-	// same one-shot pattern as the other doubles' failNext* hooks. It exists
-	// so a signup test can exercise "token generation failed" -- entropy
-	// exhaustion in the real generator -- without needing any change to
-	// HashToken, which callers still use to look up the failed request's own
+	// failNextErr arms a one-shot failure for the next NewToken call, so a
+	// test can exercise "token generation failed" without changing
+	// HashToken, which callers still use to look up the failed request's
 	// address hash.
 	failNextErr error
 }
@@ -109,35 +101,26 @@ type userDouble struct {
 	byEmail map[string]string // email -> id
 	n       int
 
-	// byEmailCalls counts ByEmail invocations. RequestMagicLink is meant to
-	// call this exactly once per request regardless of outcome (see
-	// magicLinkDouble.countSinceCalls for the matching count on the other
-	// read) -- this field is how a test pins that down without resorting to
-	// wall-clock timing. It is safe unguarded because every test that reads
-	// it calls AuthService methods synchronously from the test goroutine
-	// itself; only the mailer double's state is touched from a background
-	// goroutine.
+	// byEmailCalls counts ByEmail invocations. RequestMagicLink must call it
+	// exactly once per request regardless of outcome (see
+	// magicLinkDouble.countSinceCalls). Safe unguarded: only mailerDouble's
+	// state is touched from a background goroutine.
 	byEmailCalls int
 
 	// log, when set, additionally records "Users.ByEmail" into a shared
-	// readLog -- SignupService.Request's ordered-read test uses this (see
-	// readLog's doc comment). nil by default so every other fixture that
-	// builds a userDouble is unaffected.
+	// readLog for SignupService.Request's ordered-read test (see readLog).
+	// nil by default, so other fixtures building a userDouble are unaffected.
 	log *readLog
 
-	// members is set once, after construction (userDouble and
-	// membershipDouble each need a reference to the other), and used only by
-	// CreateWithMembership to mirror UserRepo.CreateWithMembership's
-	// transaction: the user insert and the membership insert happen
-	// together, and a failure in the second undoes the first.
+	// members is set once after construction (userDouble and membershipDouble
+	// need a reference to each other), for CreateWithMembership's
+	// transaction (see that method).
 	members *membershipDouble
 
 	// failNextMembershipCreate arms a one-shot failure for the next
 	// CreateWithMembership call's membership half, mirroring the real
-	// owners_hold_all_capabilities constraint rejecting an invalid row
-	// mid-transaction. It exists so a usecase-level test can prove the
-	// double rolls back the user insert exactly as the real transaction
-	// does, not just that the happy path works.
+	// owners_hold_all_capabilities constraint rejecting a row
+	// mid-transaction.
 	failNextMembershipCreate error
 }
 
@@ -187,11 +170,9 @@ func (d *userDouble) Create(_ context.Context, email, passwordHash, displayName 
 // retry.
 func (d *userDouble) count() int { return len(d.byID) }
 
-// mustCreate creates a user with a password hash already set (Create's own
-// signature takes one, but most existing fixtures build a user with no
-// password and set it separately) and fails the test immediately if that
-// somehow errors, rather than asking every caller to check an error the
-// in-memory double can never actually return.
+// mustCreate creates a user with its password hash already set (most
+// fixtures build one with none, then set it separately), and fails the
+// test immediately on error.
 func (d *userDouble) mustCreate(t *testing.T, email, passwordHash, displayName string) domain.User {
 	t.Helper()
 	u, err := d.Create(context.Background(), email, passwordHash, displayName)
@@ -201,11 +182,10 @@ func (d *userDouble) mustCreate(t *testing.T, email, passwordHash, displayName s
 	return u
 }
 
-// addTelegramOnly writes a user with the given id and no email address --
-// the credential-less shape a Telegram sign-up leaves behind
-// (SignupRepository.Provision). TestUnlinkRefusesAnAccountWithNoEmail uses
-// it to put TelegramLinkService.Unlink in front of the one account
-// domain.ErrTelegramUnlinkWouldLockOut exists to protect.
+// addTelegramOnly writes a user with the given id and no email -- the
+// credential-less shape a Telegram sign-up leaves behind
+// (SignupRepository.Provision). It puts TelegramLinkService.Unlink in front
+// of the account domain.ErrTelegramUnlinkWouldLockOut protects.
 func (d *userDouble) addTelegramOnly(id string) {
 	d.byID[id] = usecase.StoredUser{User: domain.User{ID: id}}
 }
@@ -216,19 +196,17 @@ func (d *userDouble) addTelegramOnly(id string) {
 func (d *userDouble) setMembers(m *membershipDouble) { d.members = m }
 
 // failNextCreateWithMembership arms failNextMembershipCreate: the next
-// CreateWithMembership call's membership insert returns err instead of
-// succeeding, and the user insert that call already made is rolled back
-// (removed from byID/byEmail) to mirror the real transaction's rollback.
-// Every call after that succeeds normally again.
+// CreateWithMembership call fails its membership insert and rolls back
+// the user insert already made, mirroring the real transaction's
+// rollback. Every call after that succeeds normally again.
 func (d *userDouble) failNextCreateWithMembership(err error) {
 	d.failNextMembershipCreate = err
 }
 
-// CreateWithMembership mirrors UserRepo.CreateWithMembership: the user and
+// CreateWithMembership mirrors UserRepo.CreateWithMembership: user and
 // membership are created together, and a failure in the membership half
-// undoes the user insert rather than leaving it committed -- the same
-// all-or-nothing guarantee the real transaction gives, reproduced here
-// without an actual database.
+// undoes the user insert -- the same all-or-nothing guarantee the real
+// transaction gives, reproduced here without a database.
 func (d *userDouble) CreateWithMembership(ctx context.Context, email, passwordHash, displayName string,
 	m domain.Membership) (domain.User, domain.Membership, error) {
 	user, err := d.Create(ctx, email, passwordHash, displayName)
@@ -275,10 +253,9 @@ func (d *userDouble) SetPasswordHash(_ context.Context, userID, hash string) err
 }
 
 // FindOrphanedChild mirrors GetOrphanedCredentiallessUserByName: a
-// credential-less user (no email, no password) with this display name that
-// holds no membership row anywhere. It exists so seed.go's ensureChild can
-// detect the state removing a membership without deleting its user leaves
-// behind, instead of silently creating a duplicate under the same name.
+// credential-less user (no email, no password) with this display name and
+// no membership anywhere. seed.go's ensureChild uses it to detect that
+// state instead of creating a duplicate under the same name.
 func (d *userDouble) FindOrphanedChild(_ context.Context, displayName string) (domain.User, error) {
 	for _, u := range d.byID {
 		if u.DisplayName != displayName || u.Email != "" || u.PasswordHash != "" {
@@ -341,13 +318,12 @@ func (d *membershipDouble) Create(_ context.Context, m domain.Membership) (domai
 	return m, nil
 }
 
-// UpdateWithCheck honours the port's contract on the double's own state:
-// decide sees the household's current memberships and chooses what to write,
-// a refusal writes nothing and comes back unchanged, and a membership that is
-// not this household's is domain.ErrNotFound. The lock has no in-memory
-// equivalent to test -- the usecase tests are single-goroutine -- so the
-// races are covered against real Postgres (membership_repo_test.go and
-// member_patch_race_api_test.go).
+// UpdateWithCheck honours the port's contract: decide sees current
+// memberships and chooses what to write, a refusal writes nothing and is
+// returned unchanged, and an unknown or wrong-household membership is
+// domain.ErrNotFound. No lock to test (usecase tests are single-goroutine);
+// races are covered against real Postgres in membership_repo_test.go and
+// member_patch_race_api_test.go.
 func (d *membershipDouble) UpdateWithCheck(_ context.Context, householdID, membershipID string,
 	decide func([]domain.Membership) (domain.Role, domain.Capabilities, error)) error {
 	role, caps, err := decide(d.householdMemberships(householdID))
@@ -380,9 +356,8 @@ func (d *membershipDouble) DeleteWithCheck(_ context.Context, householdID, membe
 }
 
 // remove deletes a membership with no check at all. It is a fixture helper
-// for tests that need a member gone as a precondition (a departed owner, a
-// rolled-back provisioning), NOT part of the port -- production code has no
-// unguarded delete to call.
+// for setting up a precondition (a departed owner, a rolled-back
+// provisioning); production code has no unguarded delete to call.
 func (d *membershipDouble) remove(membershipID string) {
 	m, ok := d.byID[membershipID]
 	if !ok {
@@ -421,13 +396,11 @@ type sessionDouble struct {
 	created int
 
 	// failNextRevoke arms a one-shot failure for the next RevokeAllForUser
-	// call, the same one-shot pattern userDouble.failNextCreateWithMembership
-	// and magicLinkDouble.failNextCreate use. It exists so a usecase-level
-	// test can prove MemberService reports (and logs) a revocation failure
-	// distinctly from the membership mutation itself failing -- the real
-	// SessionRepository.RevokeAllForUser can fail (a dead connection, a
-	// statement timeout) even on an otherwise-successful Update or Remove,
-	// and nothing exercised that path before this existed.
+	// call, so a test can prove MemberService reports and logs a revocation
+	// failure distinctly from the membership mutation itself failing -- the
+	// real SessionRepository.RevokeAllForUser can fail on its own (a dead
+	// connection, a statement timeout) even after a successful Update or
+	// Remove.
 	failNextRevoke error
 }
 
@@ -524,12 +497,9 @@ func (d *sessionDouble) live() int {
 	return n
 }
 
-// liveForUser is live()'s per-user counterpart: it exists so a member-service
-// test can prove RevokeAllForUser was scoped to the one member it touched --
-// that member's live count drops to zero while an unrelated member's live
-// session is left standing -- rather than merely proving "some session
-// somewhere got revoked," which a bug that revoked every row in the table
-// would also satisfy.
+// liveForUser is live()'s per-user counterpart, for a member-service test
+// proving RevokeAllForUser was scoped to the one member touched -- that
+// member's count drops to zero while an unrelated member's stays standing.
 func (d *sessionDouble) liveForUser(userID string) int {
 	n := 0
 	for _, row := range d.rows {
@@ -633,18 +603,15 @@ type magicLinkDouble struct {
 	users *userDouble
 	rows  map[string]*magicLinkRow // keyed by string(tokenHash)
 
-	// countSinceCalls counts CountSince invocations, the matching half of
-	// userDouble.byEmailCalls for pinning "every outcome does the same
-	// reads." Safe unguarded for the same reason byEmailCalls is: it is only
-	// ever touched from the synchronous portion of RequestMagicLink, never
-	// from the background send goroutine.
+	// countSinceCalls counts CountSince invocations, matching
+	// userDouble.byEmailCalls for "every outcome does the same reads."
+	// Unguarded for the same reason: only touched from RequestMagicLink's
+	// synchronous portion.
 	countSinceCalls int
 
-	// failNextCreate arms a one-shot failure for the next Create call, the
-	// same one-shot pattern as mailerDouble.failNext. Unguarded for the same
-	// reason as countSinceCalls: Create runs synchronously on the request
-	// goroutine, never from sendMagicLinkAsync's goroutine, so nothing here
-	// is ever touched concurrently.
+	// failNextCreate arms a one-shot failure for the next Create call.
+	// Unguarded like countSinceCalls: Create runs synchronously on the
+	// request goroutine, never sendMagicLinkAsync's.
 	failNextCreate error
 }
 
@@ -652,10 +619,9 @@ func newMagicLinkDouble(clock *fixedClock, users *userDouble) *magicLinkDouble {
 	return &magicLinkDouble{clock: clock, users: users, rows: map[string]*magicLinkRow{}}
 }
 
-// count reports how many magic-link rows have ever been created, regardless
-// of whether they were later consumed. It exists so a test can confirm a
-// token was persisted even when the send that was supposed to follow it
-// failed.
+// count reports how many magic-link rows have ever been created, consumed
+// or not, so a test can confirm a token was persisted even when the send
+// that was supposed to follow it failed.
 func (d *magicLinkDouble) count() int { return len(d.rows) }
 
 // failNextMagicLinkCreate arms failNextCreate: the next call to Create
@@ -703,10 +669,9 @@ func (d *magicLinkDouble) CountSince(_ context.Context, email string, since time
 	return n, nil
 }
 
-// countFor counts magic-link rows minted for userID, consumed or not. It
-// exists for TelegramAuthService's tests, which mint a magic link by user id
-// directly -- there is no address involved on that path -- rather than by the
-// email CountSince joins through.
+// countFor counts magic-link rows minted for userID, consumed or not, for
+// TelegramAuthService's tests -- that path mints by user id directly, with
+// no address involved, rather than the email CountSince joins through.
 func (d *magicLinkDouble) countFor(userID string) int {
 	n := 0
 	for _, row := range d.rows {
@@ -729,9 +694,9 @@ type inviteRow struct {
 	InvitedBy    string
 	Channel      domain.InviteChannel
 	// The four knock columns, mirroring invites.knock_chat_id,
-	// knock_chat_username, knock_code and knocked_at. KnockedAt nil means
-	// no knock, the same "one column decides" rule invite_repo.go's
-	// ListPending applies when reading the real table.
+	// knock_chat_username, knock_code and knocked_at. KnockedAt nil means no
+	// knock -- the same "one column decides" rule invite_repo.go's
+	// ListPending applies to the real table.
 	KnockChatID   int64
 	KnockUsername string
 	KnockCode     string
@@ -745,15 +710,13 @@ type inviteRow struct {
 	Seq int
 }
 
-// inviteDouble plays the same role invite_repo.go's InviteRepo plays over
-// Postgres: ByTokenHash joins through users and a household name the same way
-// GetInviteByTokenHash's SQL does, and Accept performs the user creation,
-// membership creation and acceptance stamp together, mirroring the
-// one-transaction guarantee the real Accept gives (see
-// InviteRepository.Accept's doc comment). It holds the same userDouble and
-// membershipDouble the rest of the fixture uses, rather than private state of
-// its own, so a test can check "exactly one user, exactly one membership"
-// through those doubles after calling InviteService.Accept.
+// inviteDouble stands in for invite_repo.go's InviteRepo:
+// ByTokenHash joins through users and a household name like
+// GetInviteByTokenHash's SQL, and Accept creates the user, membership and
+// acceptance stamp together, mirroring the real Accept's one-transaction
+// guarantee. It shares the fixture's userDouble and membershipDouble
+// rather than private state, so a test can check "exactly one user, one
+// membership" after InviteService.Accept.
 type inviteDouble struct {
 	clock      *fixedClock
 	users      *userDouble
@@ -763,30 +726,25 @@ type inviteDouble struct {
 	rows       map[string]*inviteRow
 	n          int
 
-	// tokens hashes a raw token the same way the service that seeded this
-	// double did, so knockCode and knockChatID -- test-only introspection,
-	// standing in for reading the row back after a knock -- can find the
-	// row a raw token belongs to. Only newTelegramAuthService's fixture
-	// sets it; every other fixture leaves it nil because nothing else
-	// needs to look a row up by raw token.
+	// tokens hashes a raw token the same way the seeding service did, so
+	// knockCode and knockChatID -- test-only introspection standing in for
+	// reading the row back after a knock -- can find the row it belongs to.
+	// Only newTelegramAuthService's fixture sets it; others leave it nil.
 	tokens usecase.TokenGenerator
 
 	// raceNextCreate arms a one-shot simulated race: the next Create call
-	// writes its row (mirroring a concurrent writer's insert landing first)
-	// and returns domain.ErrAlreadyExists instead of the row's ID, exactly
-	// as translate maps the real UNIQUE (token_hash) constraint's violation.
-	// It exists so a test can exercise the tolerance branch a check-then-
-	// write caller (seed.go's issueChristineInviteAtNextRung) relies on for
-	// the window between its own existence check and this call -- a branch
-	// that plain concurrent double calls cannot otherwise reach
-	// deterministically.
+	// writes its row but returns domain.ErrAlreadyExists instead of the ID,
+	// exactly as translate maps the real UNIQUE (token_hash) violation. It
+	// lets a test exercise the check-then-write tolerance branch
+	// seed.go's issueChristineInviteAtNextRung relies on for the race
+	// window between its own existence check and this call.
 	raceNextCreate bool
 }
 
 // accounts is the same telegram_accounts double InviteDeps.Accounts is
-// wired to at every call site: Admit below writes the binding into it, the
-// same table Knock reads from before it ever touches an invite, so a test
-// sees the two calls agree exactly as they must against real Postgres.
+// wired to everywhere: Admit writes the binding into it, the same table
+// Knock reads before it touches an invite, so a test sees the two calls
+// agree exactly as they must against real Postgres.
 func newInviteDouble(clock *fixedClock, users *userDouble, members *membershipDouble,
 	accounts *telegramAccountRepoDouble) *inviteDouble {
 	return &inviteDouble{
@@ -832,29 +790,28 @@ func (d *inviteDouble) Create(_ context.Context, householdID, email, name string
 	d.rows[string(tokenHash)] = &inviteRow{
 		ID: id, HouseholdID: householdID, Email: email, Name: name, Role: role,
 		Capabilities: caps, InvitedBy: invitedBy, ExpiresAt: expiresAt,
-		// Every invite through this method is an email invite, the same
-		// default migration 00021 gives every existing row -- Create's
-		// callers always have a real address. CreateTelegram below is this
-		// double's other path, for the invite with none.
+		// Every invite through this method is an email invite -- the same
+		// default migration 00021 gives existing rows, since Create's callers
+		// always have a real address. CreateTelegram is the path for no
+		// address.
 		Channel:   domain.ChannelEmail,
 		CreatedAt: d.clock.Now(), Seq: d.n,
 	}
 
 	if d.raceNextCreate {
 		d.raceNextCreate = false
-		// The row above is exactly what a concurrent writer's insert would
-		// have produced, landing between the caller's own existence check
-		// and this call -- so the row must still exist afterwards, only the
-		// return value differs from the ordinary success case.
+		// The row above is what a concurrent writer's insert would have
+		// produced, landing between the caller's existence check and this
+		// call -- it still exists afterwards; only the return value differs
+		// from the ordinary success case.
 		return "", domain.ErrAlreadyExists
 	}
 	return id, nil
 }
 
-// CreateTelegram mirrors Create but writes a row with no address at all --
-// Email stays "", this double's stand-in for the real table's NULL -- and
-// Channel is domain.ChannelTelegram rather than Create's hardcoded
-// ChannelEmail.
+// CreateTelegram mirrors Create but writes a row with no address: Email
+// stays "" (this double's stand-in for the real table's NULL), and Channel
+// is domain.ChannelTelegram rather than Create's hardcoded ChannelEmail.
 func (d *inviteDouble) CreateTelegram(_ context.Context, householdID, name string, role domain.Role,
 	caps domain.Capabilities, tokenHash []byte, invitedBy string, expiresAt time.Time) (string, error) {
 	if _, exists := d.rows[string(tokenHash)]; exists {
@@ -926,9 +883,8 @@ func (d *inviteDouble) MarkAccepted(_ context.Context, inviteID string) error {
 
 // Accept performs the guarded acceptance stamp first, then the user and
 // membership creation, in that order -- the same order invite_repo.go's
-// Accept uses, and for the same reason: the guard is what makes a second,
-// concurrent acceptance fail cheaply rather than colliding on the first
-// acceptance's already-claimed email address.
+// Accept uses: the guard makes a second, concurrent acceptance fail
+// cheaply rather than colliding on the already-claimed email address.
 func (d *inviteDouble) Accept(ctx context.Context, inviteID, email, passwordHash, displayName string,
 	householdID string, role domain.Role, caps domain.Capabilities) (usecase.AcceptedInvite, error) {
 	row := d.byID(inviteID)
@@ -955,11 +911,10 @@ func (d *inviteDouble) Accept(ctx context.Context, inviteID, email, passwordHash
 
 // Admit mirrors invite_repo.go's own Admit: the guard is checked, and the
 // chat's availability re-checked, before anything is written -- the same
-// "all four or nothing" property the real transaction gives, proved here by
-// never writing until every check has already passed rather than by
-// unwinding partial writes. There is no concurrent writer in a test to race
-// the way a real transaction can, so checking first is observably identical
-// to a rollback: nothing is written when a check fails.
+// "all four or nothing" property the real transaction gives, proved by
+// never writing until every check has passed rather than unwinding partial
+// writes. No concurrent writer exists in a test to race, so checking first
+// is observably identical to a rollback.
 func (d *inviteDouble) Admit(ctx context.Context, householdID, inviteID string, now time.Time) (usecase.AdmittedInvite, error) {
 	row := d.byID(inviteID)
 	if row == nil || row.HouseholdID != householdID {
@@ -975,8 +930,9 @@ func (d *inviteDouble) Admit(ctx context.Context, householdID, inviteID string, 
 		return usecase.AdmittedInvite{}, domain.ErrInviteNotKnocked
 	}
 
-	// The re-check spec decision 15 asks for: the chat may have bound
-	// itself to a different account between the knock and this call.
+	// Re-checks that the chat hasn't bound itself to a different account
+	// between the knock and this call -- only the real UNIQUE constraint
+	// can catch that race atomically.
 	if _, err := d.accounts.ByChatID(ctx, row.KnockChatID); err == nil {
 		return usecase.AdmittedInvite{}, domain.ErrChatAlreadyBound
 	} else if !errors.Is(err, domain.ErrNotFound) {
@@ -1058,10 +1014,9 @@ func (d *inviteDouble) Delete(_ context.Context, householdID, inviteID string) e
 
 // RecordKnock mirrors RecordInviteKnock's guarded UPDATE: every condition
 // the real WHERE clause carries -- known token, telegram channel, not yet
-// accepted, not expired, not already knocked -- is checked here too, so a
-// test against this double proves the same thing a test against Postgres
-// proves. Any mismatch reports domain.ErrNotFound, one answer for every
-// case, exactly as the real guard's zero-rows result does.
+// accepted, not expired, not already knocked -- is checked here too. Any
+// mismatch reports domain.ErrNotFound, one answer for every case, exactly
+// as the real guard's zero-rows result does.
 func (d *inviteDouble) RecordKnock(_ context.Context, tokenHash []byte, chatID int64,
 	username, code string, now time.Time) error {
 	row, ok := d.rows[string(tokenHash)]
@@ -1080,9 +1035,8 @@ func (d *inviteDouble) RecordKnock(_ context.Context, tokenHash []byte, chatID i
 // knockCode and knockChatID read back what RecordKnock stored for rawToken,
 // hashing it the same way InviteService.Knock did -- test-only
 // introspection standing in for a row read after a real knock. "" and 0
-// mean either the token is unknown or nothing has knocked yet; every test
-// that calls these has already asserted the knock it is reading back
-// succeeded, so the two cases are not distinguished here.
+// mean either unknown token or no knock yet; callers already know which,
+// so the two cases are not distinguished here.
 func (d *inviteDouble) knockCode(rawToken string) string {
 	row, ok := d.rows[string(d.tokens.HashToken(rawToken))]
 	if !ok {
@@ -1101,13 +1055,12 @@ func (d *inviteDouble) knockChatID(rawToken string) int64 {
 
 // ReplaceToken mirrors invite_repo.go's own ReplaceToken: the guarded
 // match -- this household, telegram channel, not yet accepted -- decides
-// success the same way the real UPDATE's WHERE does, and a miss is
-// resolved the same two-branch way the real fallback read is: an
-// unaccepted row in this household with some other channel is
-// domain.ErrInviteNotTelegram, anything else (wrong household, unknown id,
-// or already accepted) is domain.ErrNotFound. The row is re-keyed by its
-// new token hash, exactly as a real UPDATE of token_hash would move which
-// hash finds it.
+// success like the real UPDATE's WHERE. A miss resolves the same
+// two-branch way the real fallback read does: an unaccepted row in this
+// household with some other channel is domain.ErrInviteNotTelegram;
+// anything else (wrong household, unknown id, already accepted) is
+// domain.ErrNotFound. The row is re-keyed by its new token hash, exactly
+// as a real UPDATE of token_hash would move which hash finds it.
 func (d *inviteDouble) ReplaceToken(_ context.Context, householdID, inviteID string,
 	tokenHash []byte, expiresAt time.Time) (int64, error) {
 	var oldHash string
@@ -1147,16 +1100,13 @@ type signupRow struct {
 	ConsumedAt     *time.Time
 }
 
-// signupDouble plays the same role postgres's (future) SignupRepo plays over
-// Postgres: Provision performs the household, owner user, owner membership,
-// builtin-space and notification-preference writes together, mirroring the
-// one-transaction guarantee the real Provision gives (see
-// SignupRepository.Provision's doc comment). It holds the same
-// household/user/membership/space/notification doubles the rest of the fixture
-// uses, rather than private state of its own, so a test can check "exactly one
-// household, exactly one user, exactly one membership" through those doubles
-// after calling SignupService.Complete -- exactly the pattern inviteDouble
-// already establishes for Accept.
+// signupDouble plays postgres.SignupRepo's role: Provision
+// performs the household, owner user, owner membership, builtin-space and
+// notification-preference writes together, mirroring the real Provision's
+// one-transaction guarantee. It shares the fixture's
+// household/user/membership/space/notification doubles rather than
+// private state, so a test can check "exactly one household, one user,
+// one membership" after SignupService.Complete.
 type signupDouble struct {
 	clock         *fixedClock
 	households    *householdDouble
@@ -1169,35 +1119,29 @@ type signupDouble struct {
 	n    int
 
 	// log, when set, additionally records "Signups.CountSince" and
-	// "Signups.CountForEmailSince" into a shared readLog -- see readLog's
-	// doc comment. nil by default so every other fixture that builds a
-	// signupDouble is unaffected.
+	// "Signups.CountForEmailSince" into a shared readLog (see readLog). nil
+	// by default, so other fixtures building a signupDouble are unaffected.
 	log *readLog
 
-	// emailCountOverride and globalCountOverride force CountForEmailSince and
-	// CountSince to report a value regardless of how many rows actually
-	// exist, so a test can put an address "at its hourly limit" or the
-	// service "over its daily ceiling" without first creating however many
-	// real rows that would take. A map entry's presence (not its value) is
-	// what "overridden" means for emailCountOverride, so a forced count of 0
-	// is still distinguishable from "no override set"; globalCountOverride
-	// is a pointer for the identical reason.
+	// emailCountOverride and globalCountOverride force CountForEmailSince
+	// and CountSince to report a value without creating that many rows. A
+	// map entry's presence, not its value, means "overridden" for
+	// emailCountOverride, so a forced 0 stays distinguishable from "no
+	// override"; globalCountOverride is a pointer for the same reason.
 	emailCountOverride  map[string]int
 	globalCountOverride *int
 
 	// provisions counts Provision invocations, successful or not, so a test
-	// can confirm exactly one provision happened for one request -- the same
+	// can confirm exactly one provision happened per request -- the same
 	// question userDouble.count/membershipDouble.count answer for invite
-	// acceptance. Named provisions, not provisionCalls, so it does not
-	// collide with the provisionCalls() method below -- Go forbids a field
-	// and a method sharing a name on the same type.
+	// acceptance. Named provisions, not provisionCalls, since Go forbids a
+	// field and a method of the same name (see provisionCalls below).
 	provisions int
 
-	// failProvide arms a one-shot failure for the next Provision call, the
-	// same one-shot pattern as the other doubles' failNext* hooks. Named
-	// failProvide, not failNextProvision, for the same reason provisions is
-	// not named provisionCalls: failNextProvision is the method a test calls
-	// to arm it.
+	// failProvide arms a one-shot failure for the next Provision call (the
+	// same pattern as the other doubles' failNext* hooks). Named failProvide,
+	// not failNextProvision, for the same field/method-name reason provisions
+	// is not named provisionCalls -- failNextProvision is the arming method.
 	failProvide error
 
 	// failCreate arms a one-shot failure for the next Create call, letting a
@@ -1207,20 +1151,16 @@ type signupDouble struct {
 	failCreate error
 
 	// lastPasswordHash records the passwordHash argument Provision was most
-	// recently handed, so a test can confirm Complete hashed the caller's
-	// password before ever reaching the repository rather than passing it
-	// through raw.
+	// recently handed, so a test can confirm Complete hashed the password
+	// before reaching the repository, not passed it through raw.
 	lastPasswordHash string
 
-	// countSinceArg records the since argument CountSince was most recently
-	// called with. It exists so a test can confirm a caller computed the
-	// cutoff it meant to -- e.g. TelegramAuthService's R5 ceiling check must
-	// pass startOfDay(now), a calendar-day boundary, not now itself or a
-	// rolling 24-hour window (see signup.go's Request doc comment for why
-	// that distinction matters). globalCountOverride answers before since is
-	// ever inspected, so nothing about arming that override on its own would
-	// catch a caller that computed the wrong cutoff; this field is what
-	// does.
+	// countSinceArg records the since argument CountSince was last called
+	// with, so a test can confirm a caller computed the right cutoff -- e.g.
+	// TelegramAuthService's ceiling check must pass startOfDay(now), a
+	// calendar-day boundary, not a rolling 24-hour window (signup.go's
+	// Request). globalCountOverride answers before since is ever inspected,
+	// so arming it alone would not catch a wrong cutoff.
 	countSinceArg time.Time
 }
 
@@ -1305,11 +1245,10 @@ func (d *signupDouble) Create(_ context.Context, email string, tokenHash []byte,
 	return nil
 }
 
-// CreateConsumed mirrors CreateConsumedSignup: a row is written exactly like
+// CreateConsumed mirrors CreateConsumedSignup: a row is written like
 // Create's, except ConsumedAt is stamped at insertion rather than left nil.
-// It shares failCreate with Create -- both are "the signup insert failed",
-// and a test arming one has no reason to care which of the two branches
-// happens to call it.
+// It shares failCreate with Create -- both mean "the signup insert failed",
+// and a test arming one need not care which branch calls it.
 func (d *signupDouble) CreateConsumed(_ context.Context, email string, tokenHash []byte, expiresAt time.Time) error {
 	if d.failCreate != nil {
 		err := d.failCreate
@@ -1325,10 +1264,10 @@ func (d *signupDouble) CreateConsumed(_ context.Context, email string, tokenHash
 	return nil
 }
 
-// CreateForTelegram mirrors Create, except the row names a chat id instead of
-// an address -- SignupRepository.CreateForTelegram's doc comment says why the
-// two are mutually exclusive per row. It shares failCreate with Create and
-// CreateConsumed, for the same reason CreateConsumed does.
+// CreateForTelegram mirrors Create, except the row names a chat id instead
+// of an address (see SignupRepository.CreateForTelegram for why the two are
+// mutually exclusive per row). It shares failCreate with Create and
+// CreateConsumed for the same reason.
 func (d *signupDouble) CreateForTelegram(_ context.Context, chatID int64, tokenHash []byte, expiresAt time.Time) error {
 	if d.failCreate != nil {
 		err := d.failCreate
@@ -1355,10 +1294,10 @@ func (d *signupDouble) ByTokenHash(_ context.Context, tokenHash []byte) (usecase
 }
 
 // CountForEmailSince mirrors CountSignupsForEmailSince: created_at >= since,
-// matched by address, with no join through users -- there is no user to join
-// to for a brand-new address. An override set via setEmailCount takes
-// precedence over the real count, for a test that wants an address "at its
-// hourly limit" without creating that many rows.
+// matched by address, with no join through users -- there is no user yet
+// for a brand-new address. An override set via setEmailCount takes
+// precedence, for a test that wants an address "at its hourly limit"
+// without creating that many rows.
 func (d *signupDouble) CountForEmailSince(_ context.Context, email string, since time.Time) (int, error) {
 	if d.log != nil {
 		d.log.record("Signups.CountForEmailSince")
@@ -1376,9 +1315,8 @@ func (d *signupDouble) CountForEmailSince(_ context.Context, email string, since
 }
 
 // CountSince mirrors CountSignupsSince: created_at >= since, over every row
-// regardless of address. An override set via setGlobalCount takes precedence
-// over the real count, for the same reason CountForEmailSince's override
-// does.
+// regardless of address. An override set via setGlobalCount takes
+// precedence, for the same reason CountForEmailSince's override does.
 func (d *signupDouble) CountSince(_ context.Context, since time.Time) (int, error) {
 	if d.log != nil {
 		d.log.record("Signups.CountSince")
@@ -1401,21 +1339,17 @@ func (d *signupDouble) CountSince(_ context.Context, since time.Time) (int, erro
 func (d *signupDouble) lastCountSinceArg() time.Time { return d.countSinceArg }
 
 // Provision mirrors the real Provision's guarded consume-then-build: a
-// signup that is already consumed or expired reports domain.ErrTokenExpired,
-// collapsing the two cases into one answer exactly as
-// InviteRepository.Accept's guarded UPDATE does, with nothing written in
-// either case. Otherwise it builds the household from b, creates the owner
-// user and membership, seeds the builtin spaces and sets the notification
-// preferences, and stamps the signup consumed.
+// consumed or expired signup reports domain.ErrTokenExpired, collapsing
+// both cases into one answer like InviteRepository.Accept's guarded
+// UPDATE, with nothing written either way. Otherwise it builds the
+// household, creates the owner user and membership, seeds the builtin
+// spaces, sets notification preferences and stamps the signup consumed.
 //
-// Every write is undone on any later step's failure -- the same all-or-nothing
-// guarantee userDouble.CreateWithMembership gives its two writes, extended
-// here to five. This is not a nicety: Provision's whole reason to exist is
-// that a partial provision leaves a users row occupying users.email's unique
-// index with no membership under it, permanently blocking that address (see
-// SignupRepository.Provision's doc comment). A double that left a partial
-// write in place on a mid-sequence failure would hide exactly the defect this
-// method is supposed to make impossible.
+// Every write is undone on a later step's failure -- the same
+// all-or-nothing guarantee CreateWithMembership gives its two writes,
+// extended to five: a partial provision would leave a users row occupying
+// users.email's unique index with no membership under it, permanently
+// blocking that address.
 func (d *signupDouble) Provision(ctx context.Context, signupID, passwordHash string,
 	b usecase.HouseholdBlueprint) (usecase.ProvisionedHousehold, error) {
 	d.provisions++
@@ -1485,10 +1419,10 @@ func (d *signupDouble) Provision(ctx context.Context, signupID, passwordHash str
 	}, nil
 }
 
-// removeSpaces undoes a partial run of Provision's builtin-space loop, for
-// its own rollback paths -- spaceDouble has no Delete of its own (nothing
-// else in this codebase ever removes a space), so this reaches into its
-// rows directly rather than adding a method no real caller needs.
+// removeSpaces undoes a partial run of Provision's builtin-space loop for
+// its own rollback paths. spaceDouble has no Delete of its own (nothing
+// else removes a space), so this reaches into its rows directly rather
+// than adding a method no real caller needs.
 func (d *signupDouble) removeSpaces(ids []string) {
 	if len(ids) == 0 {
 		return
@@ -1538,15 +1472,12 @@ type signupMail struct {
 	URL string
 }
 
-// mailerDouble is touched from two goroutines now that
+// mailerDouble is touched from two goroutines, since
 // AuthService.RequestMagicLink sends off the request path: the test's own
-// goroutine, and the background goroutine the service spawns to call
-// SendMagicLink. mu guards every field below for that reason. sent is
-// signalled once per SendMagicLink call, success or failure alike, purely
-// as a synchronization point -- "the double has been called and its state
-// is now settled" -- so a test can wait for the async send to land instead
-// of racing it. Waiting on a channel rather than sleeping is what keeps
-// these tests race-detector-clean and non-flaky.
+// goroutine, and the goroutine spawned to call SendMagicLink. mu guards
+// every field for that reason. sent signals once per SendMagicLink call,
+// success or failure alike, so a test can wait for the async send instead
+// of racing it.
 type mailerDouble struct {
 	mu                     sync.Mutex
 	magicLinks             []sentMail
@@ -1556,12 +1487,11 @@ type mailerDouble struct {
 	failNext               error
 	panicNext              string
 
-	// sendErr, unlike failNext, is not one-shot: it stays armed until cleared,
-	// mirroring a relay that is down for the rest of the test rather than one
-	// bad send. It gates only the two sign-up sends -- SendSignupLink and
-	// SendSignupForExistingAccount -- because failNext already covers
-	// SendMagicLink's one-shot failure case and nothing here needs to change
-	// that behaviour.
+	// sendErr, unlike failNext, is not one-shot: it stays armed until
+	// cleared, mirroring a relay down for the rest of the test. It gates
+	// only the two sign-up sends -- SendSignupLink and
+	// SendSignupForExistingAccount -- since failNext already covers
+	// SendMagicLink's one-shot case.
 	sendErr error
 
 	sent chan struct{}
@@ -1582,10 +1512,9 @@ func (d *mailerDouble) failNextMagicLink(err error) {
 
 // panicNextMagicLink arms a one-shot panic: the next SendMagicLink call
 // panics with msg instead of returning, and every call after that behaves
-// normally again. It exists to prove sendMagicLinkAsync's recover() (see
-// auth.go) actually stops a panic in the send from escaping its goroutine —
-// without it, this panic would crash the whole test binary, not just fail
-// an assertion.
+// normally again. It proves sendMagicLinkAsync's recover() (auth.go) stops
+// a panic in the send from escaping its goroutine -- without it, this
+// panic would crash the whole test binary, not just fail an assertion.
 func (d *mailerDouble) panicNextMagicLink(msg string) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -1618,9 +1547,9 @@ func (d *mailerDouble) SendInvite(_ context.Context, to, name, inviterName, u st
 }
 
 // invitesSentCount is a mutex-guarded read of len(invites). Unlike
-// SendMagicLink, InviteService.Create calls SendInvite synchronously on the
-// caller's goroutine, so there is no background send to wait for here —
-// this can be read immediately after Create returns.
+// SendMagicLink, InviteService.Create calls SendInvite synchronously, so
+// there is no background send to wait for -- this can be read immediately
+// after Create returns.
 func (d *mailerDouble) invitesSentCount() int {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -1637,11 +1566,9 @@ func (d *mailerDouble) lastInviteURL() string {
 }
 
 // SendSignupLink and SendSignupForExistingAccount record into their own
-// slices rather than sharing one -- so a test can assert *which* of the two
-// sign-up emails went out, the same distinction that oracle
-// (Mailer.SendSignupForExistingAccount's doc comment) depends on a test
-// being able to make. Both are signalled through the same sent channel every
-// other Send* method uses, and both honour sendErr, since
+// slices, so a test can assert which of the two sign-up emails went out --
+// the distinction Mailer.SendSignupForExistingAccount's oracle guard
+// depends on. Both signal through sent and honour sendErr, since
 // SignupService.sendAsync fires them off the request path exactly as
 // sendMagicLinkAsync does.
 func (d *mailerDouble) SendSignupLink(_ context.Context, to, url string) error {
@@ -1667,28 +1594,23 @@ func (d *mailerDouble) SendSignupForExistingAccount(_ context.Context, to, signI
 }
 
 // failEverySend arms sendErr: every subsequent SendSignupLink and
-// SendSignupForExistingAccount call returns err instead of recording a sent
-// mail, until a test clears it (no test currently does; the scenario it
-// models -- a relay that stays down -- has no reason to recover mid-test).
+// SendSignupForExistingAccount call returns err instead of recording a
+// sent mail, until cleared. It models a relay that stays down for the
+// rest of the test, so nothing here clears it.
 func (d *mailerDouble) failEverySend(err error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.sendErr = err
 }
 
-// signalSent must be called with mu held. The channel is large enough that
-// no realistic test sequence fills it; a full channel drops the signal
-// rather than blocking the mailer (and thus the service's background
-// goroutine) forever.
+// signalSent must be called with mu held. The channel is large enough
+// that no realistic test sequence fills it; a full channel drops the
+// signal rather than blocking the mailer's goroutine forever.
 //
-// Invariant callers of waitForSend must respect: drain exactly one signal
-// per send you expect to have happened, in order, before reading
-// magicLinks/sentCount. The channel is a bare counter with no identity —
-// draining fewer signals than were sent leaves extras buffered (harmless,
-// the next waitForSend just returns immediately), but draining fewer than
-// expected before *reading state* means you may be reading a snapshot from
-// an earlier send than the one you meant to wait for. Every test in this
-// package drains exactly once per expected send for exactly this reason.
+// Invariant: drain exactly one signal per send you expect, in order,
+// before reading state. The channel is a bare counter with no identity,
+// so draining too few risks reading a stale snapshot from an earlier
+// send.
 func (d *mailerDouble) signalSent() {
 	select {
 	case d.sent <- struct{}{}:
@@ -1697,11 +1619,11 @@ func (d *mailerDouble) signalSent() {
 }
 
 // waitForSend blocks until RequestMagicLink's background goroutine has
-// called SendMagicLink at least once since the last time this was drained,
-// or fails the test after a generous timeout. Tests need this because the
-// send is fire-and-forget from the caller's point of view: by the time
-// RequestMagicLink returns, the goroutine may not have run yet, so reading
-// magicLinks immediately afterward would be a data race as well as flaky.
+// called SendMagicLink at least once since this was last drained, or fails
+// the test after a generous timeout. It exists because the send is
+// fire-and-forget: RequestMagicLink can return before the goroutine runs,
+// so reading magicLinks immediately after would be a data race as well as
+// flaky.
 func (d *mailerDouble) waitForSend(t *testing.T) {
 	t.Helper()
 	select {
@@ -1711,12 +1633,11 @@ func (d *mailerDouble) waitForSend(t *testing.T) {
 	}
 }
 
-// waitForSends is waitForSend's counted form: it drains n signals from sent,
-// each with the same generous timeout, for a signup test that needs to know
-// the background send has landed before reading signupLinks or
-// existingAccountNotices. Like waitForSend, it exists because the send is
-// fire-and-forget from SignupService.Request's point of view -- by the time
-// Request returns, sendAsync's goroutine may not have run yet.
+// waitForSends is waitForSend's counted form: it drains n signals from
+// sent, each with the same generous timeout, so a signup test knows the
+// background send landed before reading signupLinks or
+// existingAccountNotices. Like waitForSend, it exists because
+// SignupService.Request's send is fire-and-forget.
 func (d *mailerDouble) waitForSends(t *testing.T, n int) {
 	t.Helper()
 	for i := 0; i < n; i++ {
@@ -1729,10 +1650,9 @@ func (d *mailerDouble) waitForSends(t *testing.T, n int) {
 }
 
 // assertNoSendsWithin is the one place a signup test waits on the clock
-// rather than a synchronization channel, because proving a *negative* about
-// an asynchronous send -- "nothing was sent" -- has no alternative: there is
-// no event to wait for when the correct behaviour is that no event occurs.
-// It fails the test if any send signal arrives before d elapses.
+// rather than a synchronization channel: proving the negative "nothing was
+// sent" has no event to wait for. It fails the test if any send signal
+// arrives before d elapses.
 func (d *mailerDouble) assertNoSendsWithin(t *testing.T, wait time.Duration) {
 	t.Helper()
 	select {
@@ -1806,10 +1726,9 @@ func (d *householdDouble) Get(_ context.Context, householdID string) (domain.Hou
 }
 
 // Update mirrors HouseholdRepo.Update: it persists every field on h, not a
-// narrowed subset -- see that repo's doc comment in
-// internal/adapter/postgres/household_repo.go for the defect this guards
-// against (a query that silently dropped Name and SecondaryCurrency while
-// still returning a nil error).
+// narrowed subset (see household_repo.go for the defect this guards
+// against -- a query that silently dropped Name and SecondaryCurrency
+// while still returning a nil error).
 func (d *householdDouble) Update(_ context.Context, h domain.Household) (domain.Household, error) {
 	if _, ok := d.rows[h.ID]; !ok {
 		return domain.Household{}, domain.ErrNotFound
@@ -1818,11 +1737,10 @@ func (d *householdDouble) Update(_ context.Context, h domain.Household) (domain.
 	return h, nil
 }
 
-// Create mirrors HouseholdRepo.Create: it persists every field on h except ID
-// (assigned here, the way the database assigns it) and FXRateMode (always
-// "auto", the column default -- see that repo's doc comment in
-// internal/adapter/postgres/household_repo.go for why nothing else is safe to
-// assume at creation time).
+// Create mirrors HouseholdRepo.Create: it persists every field on h except
+// ID (assigned here, the way the database assigns it) and FXRateMode
+// (always "auto", the column default -- see household_repo.go for why
+// nothing else is safe to assume at creation time).
 func (d *householdDouble) Create(_ context.Context, h domain.Household) (domain.Household, error) {
 	d.n++
 	h.ID = fmt.Sprintf("household-%d", d.n)
@@ -1834,32 +1752,27 @@ func (d *householdDouble) Create(_ context.Context, h domain.Household) (domain.
 // --- SpaceRepository -----------------------------------------------------
 
 // spaceDouble sorts List's result by Position, mirroring ListSpaces' own
-// ORDER BY position (internal/adapter/postgres/queries/identity.sql) --
-// domain.VisibleSpaces relies on its input already being in that order and
-// does not sort itself, so a double that returned insertion order instead
-// would let a test pass even if a caller forgot the sort was the repo's job,
-// not the domain's.
+// ORDER BY position (identity.sql). domain.VisibleSpaces relies on its
+// input already being in that order and does not sort itself, so a double
+// returning insertion order would let a test pass even if a caller forgot
+// the sort is the repo's job, not the domain's.
 type spaceDouble struct {
 	rows []domain.Space
 	n    int
 
-	// failNextCreate arms a one-shot failure for the next Create call, the
-	// same one-shot pattern magicLinkDouble.failNextCreate uses. It exists so
-	// a test can simulate the race HouseholdService.CreateSpace's
-	// list-then-compare pre-check cannot close on its own: a concurrent
-	// creator wins on the same derived key, the real Postgres adapter
-	// reports that as domain.ErrAlreadyExists (translate's pgconn.PgError/
-	// 23505 case), and this double reproduces exactly that error without
-	// needing two real concurrent callers.
+	// failNextCreate arms a one-shot failure for the next Create call, to
+	// simulate the race HouseholdService.CreateSpace's list-then-compare
+	// pre-check cannot close: a concurrent creator wins on the same derived
+	// key, and the real Postgres adapter reports that as
+	// domain.ErrAlreadyExists (translate's pgconn.PgError/23505 case).
 	failNextCreate error
 }
 
 func newSpaceDouble() *spaceDouble { return &spaceDouble{} }
 
 // seed adds spaces with IDs already assigned, for builtins constructed via
-// domain.BuiltinSpaces (which deliberately leaves ID empty -- see that
-// function's doc comment) that a fixture wants to look pre-seeded, as if the
-// database had already assigned them.
+// domain.BuiltinSpaces (which deliberately leaves ID empty) that a fixture
+// wants to look pre-seeded, as if the database had already assigned them.
 func (d *spaceDouble) seed(spaces ...domain.Space) {
 	for _, s := range spaces {
 		d.n++
@@ -1999,9 +1912,8 @@ func newFixture(t *testing.T) *fixture {
 	ethan := usecase.StoredUser{
 		User: domain.User{ID: "user-ethan", Email: "ethan@hearth.family", DisplayName: "Ethan"},
 		// PasswordHash left empty: a credential-less member cannot sign in.
-		// Ethan still has an email so TestUsersWithoutAPasswordCannotSignIn
-		// exercises the "found but no password" branch, not the
-		// unknown-address branch.
+		// Ethan still has an email, so TestUsersWithoutAPasswordCannotSignIn
+		// exercises "found but no password," not the unknown-address branch.
 	}
 	users.put(ethan)
 	members.put(domain.Membership{
@@ -2024,9 +1936,9 @@ func newFixture(t *testing.T) *fixture {
 	})
 
 	// Read by Knock, before it ever touches the invite (see InviteDeps'
-	// own doc comment on Accounts) -- empty of bindings, so every chat here
-	// starts unbound. Built before inviteRepo so Admit can write into the
-	// same double Knock reads from, exactly as production wires one real
+	// doc comment on Accounts) -- empty of bindings, so every chat starts
+	// unbound. Built before inviteRepo so Admit writes into the same double
+	// Knock reads from, exactly as production wires one real
 	// telegram_accounts table behind both.
 	inviteAccounts := newTelegramAccountRepoDouble()
 	inviteRepo := newInviteDouble(clock, users, members, inviteAccounts)
@@ -2147,10 +2059,10 @@ func (r *fakeAccountRepo) addMovement(m usecase.AccountMonthMovement) {
 	r.movements = append(r.movements, m)
 }
 
-// MonthlyMovements honours `since` and nothing else. It deliberately does not
-// filter by household or by opening date: every AccountService test runs one
-// household, and re-implementing the real query's filters here would be test
-// code asserting itself. Those filters have their own Postgres test.
+// MonthlyMovements honours `since` and nothing else. It does not filter by
+// household or opening date: every AccountService test runs one household,
+// and re-implementing the real query's filters here would be test code
+// asserting itself. Those filters have their own Postgres test.
 func (r *fakeAccountRepo) MonthlyMovements(_ context.Context, _ string, since time.Time) ([]usecase.AccountMonthMovement, error) {
 	var out []usecase.AccountMonthMovement
 	for _, m := range r.movements {
@@ -2320,10 +2232,10 @@ func (f *fakeCategoryRepo) SetArchived(_ context.Context, householdID, categoryI
 }
 
 // budgetKey collapses a household and month into the map key fakeBudgetRepo
-// uses. Budget.Month is documented as "any instant in the month", so the key
-// normalizes to the first of the month the same way the database's UNIQUE
-// (household_id, month) constraint would, rather than trusting every caller
-// to have already truncated it.
+// uses. Budget.Month is "any instant in the month", so the key normalizes
+// to the first of the month the same way the database's UNIQUE
+// (household_id, month) constraint would, rather than trusting callers to
+// have already truncated it.
 func budgetKey(householdID string, month time.Time) string {
 	return householdID + "|" + time.Date(month.Year(), month.Month(), 1, 0, 0, 0, 0, time.UTC).Format("2006-01")
 }
@@ -2336,33 +2248,26 @@ type fakeBudgetRepo struct {
 	nextID  int
 
 	// knownCategoryIDs, when non-nil, is the set Upsert checks every line's
-	// CategoryID against before writing anything -- mirroring the real
-	// repository's own validateLineCategories (budget_repo.go), which
-	// refuses a line whose category is not this household's inside the same
-	// transaction as the write. It exists so a usecase-level test can prove
-	// BudgetService.Save lets that error pass through untouched rather than
-	// pre-validating category ownership itself (a check that belongs to the
-	// repository, which is the thing that actually knows what a household
-	// owns). nil means "accept anything", the default every other test gets.
+	// CategoryID against, mirroring the real repository's
+	// validateLineCategories (budget_repo.go), which refuses a line whose
+	// category isn't this household's inside the write's transaction, so a
+	// test can prove BudgetService.Save passes that error through rather
+	// than pre-validating. nil means "accept anything," the default.
 	knownCategoryIDs map[string]bool
 
-	// rolledOver holds, per household-month key (the same key r.budgets
-	// uses), the goal id a month's unspent money was rolled into. Task 9
-	// widened domain.Budget itself to carry RolledOverAt/RolloverGoalID, so
-	// this map is no longer the only place that state lives -- RollOverToGoal
-	// and clearRolloverStamp below keep both in sync -- but it stays as the
-	// quick "is this month currently rolled over" read
-	// rolledOverGoalID gives tests, rather than every caller re-deriving that
-	// from a stored domain.Budget's own fields.
+	// rolledOver holds, per household-month key, the goal id a month's
+	// unspent money was rolled into. domain.Budget also carries
+	// RolledOverAt/RolloverGoalID, so this map is not the only place that
+	// state lives -- RollOverToGoal and clearRolloverStamp must keep both
+	// in sync. It stays as the quick "is this month rolled over" read
+	// rolledOverGoalID gives tests.
 	rolledOver map[string]string
 
 	// goals is the GoalRepository double RollOverToGoal writes its
-	// contribution into, and that DeleteContribution reaches back through to
+	// contribution into, and DeleteContribution reaches back through it to
 	// clear rolledOver -- the same mutual-reference pattern userDouble and
 	// membershipDouble use for CreateWithMembership. nil until setGoals is
-	// called; a fixture that never exercises rollover (every fixture as of
-	// Task 3, since nothing consumes RollOverToGoal yet) has no reason to
-	// wire it up.
+	// called.
 	goals *goalDouble
 }
 
@@ -2372,27 +2277,26 @@ func newFakeBudgetRepo() *fakeBudgetRepo {
 
 // setGoals completes the mutual reference RollOverToGoal and
 // goalDouble.DeleteContribution both need: this double writes into goals on
-// a rollover, and goalDouble reaches back through its own budgets field to
+// a rollover, and goalDouble reaches back through its budgets field to
 // clear rolledOver when a rollover contribution is deleted. Call it once,
-// after both doubles are constructed, exactly as userDouble.setMembers is
-// called for its pair.
+// after both doubles are constructed, as userDouble.setMembers is for its
+// pair.
 func (r *fakeBudgetRepo) setGoals(g *goalDouble) { r.goals = g }
 
 // rolledOverGoalID is a read of rolledOver, for a test proving
-// RollOverToGoal stamped a month or DeleteContribution cleared it back off
-// again -- the double's only way to answer "is this month currently
-// rolled over" without a domain.Budget field to hold the question.
+// RollOverToGoal stamped a month or DeleteContribution cleared it again --
+// the double's only way to answer "is this month rolled over" without
+// reading a domain.Budget field.
 func (r *fakeBudgetRepo) rolledOverGoalID(householdID string, month time.Time) (string, bool) {
 	goalID, ok := r.rolledOver[budgetKey(householdID, month)]
 	return goalID, ok
 }
 
-// clearRolloverStamp removes household+month's rollover stamp, if any. It is
-// unexported and called only from goalDouble.DeleteContribution, mirroring
-// RollOverToGoal's own port doc comment: deleting a budget_rollover
-// contribution must clear the month's stamp in the same operation, or the
-// household is left claiming a rollover that no longer has a contribution
-// behind it.
+// clearRolloverStamp removes household+month's rollover stamp, if any. It
+// is unexported, called only from goalDouble.DeleteContribution, mirroring
+// RollOverToGoal's contract: deleting a budget_rollover contribution must
+// clear the month's stamp in the same operation, or the household is left
+// claiming a rollover with no contribution behind it.
 func (r *fakeBudgetRepo) clearRolloverStamp(householdID string, month time.Time) {
 	key := budgetKey(householdID, month)
 	delete(r.rolledOver, key)
@@ -2421,9 +2325,9 @@ func (r *fakeBudgetRepo) Get(_ context.Context, householdID string, month time.T
 }
 
 // Upsert always replaces every line wholesale, never merges -- the same
-// full-replace contract Upsert's port doc comment requires of the real
-// repository. b.ID and any line IDs the caller passed are ignored; an
-// existing row keeps its own ID, a new one is assigned here.
+// full-replace contract the port requires of the real repository. b.ID and
+// any line IDs the caller passed are ignored; an existing row keeps its own
+// ID, a new one is assigned here.
 func (r *fakeBudgetRepo) Upsert(_ context.Context, b domain.Budget) (domain.Budget, error) {
 	if r.knownCategoryIDs != nil {
 		for _, line := range b.Lines {
@@ -2451,9 +2355,8 @@ func (r *fakeBudgetRepo) Upsert(_ context.Context, b domain.Budget) (domain.Budg
 
 // History walks backward from the viewed month, including it only if
 // budgeted, then the `months` closed months before it -- skipping any month
-// with no row rather than zero-filling it, exactly as the port's doc
-// comment describes. Order is newest first because the walk itself runs
-// newest to oldest.
+// with no row rather than zero-filling it, exactly as the port requires.
+// Order is newest first, since the walk runs newest to oldest.
 func (r *fakeBudgetRepo) History(_ context.Context, householdID string, month time.Time, months int) ([]domain.Budget, error) {
 	viewed := time.Date(month.Year(), month.Month(), 1, 0, 0, 0, 0, time.UTC)
 	var out []domain.Budget
@@ -2469,16 +2372,13 @@ func (r *fakeBudgetRepo) History(_ context.Context, householdID string, month ti
 	return out, nil
 }
 
-// RollOverToGoal mirrors the real one-transaction write the port's doc
-// comment describes: stamp the month first, then write the contribution
-// through r.goals, undoing the stamp if that write somehow fails -- so a
-// test can never observe a stamped month with no contribution behind it, the
-// exact strand DeleteContribution's own doc comment exists to prevent from
-// the other direction. The stamp is checked and set before the write, not
-// after, mirroring the real conditional UPDATE (... AND rolled_over_at IS
-// NULL): a second call for the same month finds it already stamped and never
-// reaches the contribution write at all, the same way a second concurrent
-// UPDATE finds zero rows to touch.
+// RollOverToGoal mirrors the real one-transaction write: stamp the month
+// first, then write the contribution through r.goals, undoing the stamp
+// if that write fails -- so a test never observes a stamped month with no
+// contribution behind it. The stamp is checked and set before the write,
+// mirroring the real conditional UPDATE (... AND rolled_over_at IS NULL):
+// a second call for the same month finds it already stamped, the same way
+// a second concurrent UPDATE finds zero rows to touch.
 func (r *fakeBudgetRepo) RollOverToGoal(ctx context.Context, in usecase.RollOverToGoalInput) (domain.GoalContribution, error) {
 	month := time.Date(in.Month.Year(), in.Month.Month(), 1, 0, 0, 0, 0, time.UTC)
 	key := budgetKey(in.HouseholdID, month)
@@ -2505,19 +2405,17 @@ func (r *fakeBudgetRepo) RollOverToGoal(ctx context.Context, in usecase.RollOver
 	}
 
 	// Stamp the stored row itself, not just the parallel rolledOver map, so
-	// a caller reading it back through Get (BudgetService.Month does exactly
-	// that) sees the same domain.Budget fields the real Postgres repository
-	// would return after RollOverToGoal.
+	// a caller reading it back through Get (BudgetService.Month does this)
+	// sees the same domain.Budget fields the real Postgres repository would
+	// return after RollOverToGoal.
 	stampedAt := in.OccurredOn
 	b.RolledOverAt = &stampedAt
 	b.RolloverGoalID = in.GoalID
 	// Amount is frozen here, at write time -- the real Postgres repository's
-	// Get reads it back off the goal_contributions row this same call wrote
-	// (RollOverToGoal's own comment), never off a later recomputation. A
-	// test that changes what this household-month's Remaining would compute
-	// to AFTER this call (a late addExpense, most concretely) must still see
-	// this exact figure back from Get -- that is the whole of what
-	// TestBudgetMonthRolloverAmountSurvivesALaterTransaction pins.
+	// Get reads it back off the goal_contributions row this call wrote,
+	// never off a later recomputation.
+	// TestBudgetMonthRolloverAmountSurvivesALaterTransaction pins this: a
+	// later addExpense must not change what Get returns here.
 	amount := in.Amount.Amount
 	b.RolloverAmountMinor = &amount
 	r.budgets[key] = b
@@ -2526,12 +2424,12 @@ func (r *fakeBudgetRepo) RollOverToGoal(ctx context.Context, in usecase.RollOver
 
 // --- GoalRepository --------------------------------------------------
 
-// goalDouble is the in-memory GoalRepository every GoalService test (Task 6)
-// and every BudgetService.RollOver test (Task 7) runs against -- the same
-// map-backed shape the rest of this file uses. contributions is keyed by
-// goal id; AddContribution only ever appends to its slice, so that slice's
-// own order is a faithful creation-time record even though
-// domain.GoalContribution itself carries no created_at column to sort by.
+// goalDouble is the in-memory GoalRepository every GoalService test and
+// every BudgetService.RollOver test runs against -- the same map-backed
+// shape the rest of this file uses. contributions is keyed by goal id;
+// AddContribution only ever appends to its slice, so that slice's own
+// order is a faithful creation-time record even though
+// domain.GoalContribution carries no created_at column to sort by.
 type goalDouble struct {
 	goals         map[string]domain.Goal
 	contributions map[string][]domain.GoalContribution // goal id -> contributions, in creation order
@@ -2542,7 +2440,7 @@ type goalDouble struct {
 	// DeleteContribution clears when the removed row is a budget_rollover --
 	// the reverse half of fakeBudgetRepo.setGoals's mutual reference. nil is
 	// fine for a GoalService test that never touches a rollover
-	// contribution; DeleteContribution then simply has nothing to clear.
+	// contribution.
 	budgets *fakeBudgetRepo
 }
 
@@ -2568,10 +2466,10 @@ func (d *goalDouble) nameTaken(householdID, name, excludeID string) bool {
 }
 
 // contributedMinor sums every contribution a goal has -- starting balance
-// and rollovers included -- which is GoalRecord.ContributedMinor, the "how
-// much has actually accumulated" figure. MonthContributionTotals below
-// answers a narrower question, "how much arrived this month," and excludes
-// starting_balance for its own, separately load-bearing reason.
+// and rollovers included -- which is GoalRecord.ContributedMinor, "how much
+// has actually accumulated." MonthContributionTotals answers the narrower
+// "how much arrived this month" and excludes starting_balance for its own,
+// separately load-bearing reason.
 func (d *goalDouble) contributedMinor(goalID string) int64 {
 	var total int64
 	for _, c := range d.contributions[goalID] {
@@ -2592,11 +2490,10 @@ func (d *goalDouble) List(_ context.Context, householdID string, includeArchived
 		out = append(out, usecase.GoalRecord{Goal: g, ContributedMinor: d.contributedMinor(g.ID)})
 	}
 	// Dated goals first (newest TargetMonth first), then dateless goals last
-	// -- the port's own doc comment pins this NULL placement explicitly, so
-	// Task 4's ORDER BY cannot silently choose the other one. Name is the
-	// tiebreak throughout: among dateless goals, and within an equal
-	// TargetMonth, so the order is fully deterministic and no test can flake
-	// on map iteration.
+	// -- the port pins this NULL placement explicitly, so the ORDER BY
+	// cannot silently choose the other one. Name is the tiebreak throughout,
+	// so the order is fully deterministic and no test can flake on map
+	// iteration.
 	sort.Slice(out, func(i, j int) bool {
 		ti, tj := out[i].Goal.TargetMonth, out[j].Goal.TargetMonth
 		switch {
@@ -2623,12 +2520,12 @@ func (d *goalDouble) Get(_ context.Context, householdID, goalID string) (usecase
 	return usecase.GoalRecord{Goal: g, ContributedMinor: d.contributedMinor(goalID)}, nil
 }
 
-// Create mirrors the real Create's own transaction: the goal row, then --
-// only when startingBalanceMinor is non-zero -- its opening contribution,
-// dated createdOn and sourced starting_balance. A zero startingBalanceMinor
-// writes no contribution row at all, never a zero-amount one:
-// goal_contributions' own CHECK (amount_minor <> 0) refuses a zero row on
-// the real table, and this double must never attempt to write one either.
+// Create mirrors the real Create's transaction: the goal row, then -- only
+// when startingBalanceMinor is non-zero -- its opening contribution, dated
+// createdOn and sourced starting_balance. A zero startingBalanceMinor
+// writes no contribution row at all: goal_contributions' CHECK
+// (amount_minor <> 0) refuses a zero row on the real table, and this
+// double must never attempt one either.
 func (d *goalDouble) Create(_ context.Context, g domain.Goal, startingBalanceMinor int64, createdOn time.Time) (domain.Goal, error) {
 	if d.nameTaken(g.HouseholdID, g.Name, "") {
 		return domain.Goal{}, domain.ErrGoalNameTaken
@@ -2653,14 +2550,11 @@ func (d *goalDouble) Create(_ context.Context, g domain.Goal, startingBalanceMin
 }
 
 // Update replaces name, target amount, target month and planned monthly --
-// the port's own "every mutable column" list -- but never currency or
-// ArchivedAt: a real UPDATE's SET list would simply omit both columns, so
-// g.Target.Currency and g.ArchivedAt are read back off the existing row
-// regardless of what the caller passed, rather than trusted from g.
-// GoalService.Update is what refuses a currency change outright
-// (domain.ErrGoalCurrencyImmutable) before this is ever reached; this double
-// honours the immutability contract even if a future caller forgets to
-// check, the same way a real SET list without a currency column would.
+// the port's "every mutable column" list -- but never currency or
+// ArchivedAt: a real UPDATE's SET list omits both, so g.Target.Currency
+// and g.ArchivedAt are read back off the existing row, never trusted from
+// g. GoalService.Update already refuses a currency change before reaching
+// here; this double honours that immutability too.
 func (d *goalDouble) Update(_ context.Context, g domain.Goal) (domain.Goal, error) {
 	existing, ok := d.goals[g.ID]
 	if !ok || existing.HouseholdID != g.HouseholdID {
@@ -2676,15 +2570,12 @@ func (d *goalDouble) Update(_ context.Context, g domain.Goal) (domain.Goal, erro
 }
 
 // SetArchived takes at as a parameter rather than reaching for time.Now()
-// itself -- the port's own doc comment requires this, following
-// AccountRepository.SetArchived's signature, so that today is always
-// supplied by the caller (GoalService, reading its injected Clock) and never
-// read from the wall clock inside a port implementation. It only stamps
-// ArchivedAt the first time a goal is archived, so calling it again with
-// archived=true is a true no-op that keeps the FIRST at rather than moving
-// the timestamp forward -- the same idempotence CategoryRepository.SetArchived's
-// own COALESCE(archived_at, now()) gives categories, adapted here for a
-// caller-supplied timestamp instead of the database's now().
+// itself -- the port requires this, so today is always supplied by the
+// caller (GoalService's injected Clock), never read from the wall clock
+// inside a port implementation. It stamps ArchivedAt only the first time a
+// goal is archived; a repeated archived=true call is a no-op that keeps
+// the FIRST timestamp -- the same idempotence CategoryRepository.SetArchived
+// gives categories.
 func (d *goalDouble) SetArchived(_ context.Context, householdID, goalID string, archived bool, at time.Time) (domain.Goal, error) {
 	g, ok := d.goals[goalID]
 	if !ok || g.HouseholdID != householdID {
@@ -2709,15 +2600,14 @@ func (d *goalDouble) AddContribution(_ context.Context, c domain.GoalContributio
 	return c, nil
 }
 
-// DeleteContribution scopes by household AND by goal, not by contribution id
-// alone -- GoalRepository's own interface doc comment requires this, because
-// 00007_goals.sql gives goal_contributions.household_id no database-level
-// guarantee of agreeing with its own goal_id's household. When the removed
-// row is a budget_rollover, it also clears that month's stamp on the paired
-// fakeBudgetRepo (through d.budgets, wired by setBudgets) in the same call --
-// the in-memory equivalent of the real one-transaction guarantee the port's
-// doc comment describes; leaving the stamp would strand the household
-// exactly as that comment warns.
+// DeleteContribution scopes by household AND by goal, not by contribution
+// id alone -- the port requires this because 00007_goals.sql gives
+// goal_contributions.household_id no database-level guarantee of agreeing
+// with its own goal_id's household. When the removed row is a
+// budget_rollover, it also clears that month's stamp on the paired
+// fakeBudgetRepo (through d.budgets, wired by setBudgets) in the same call
+// -- the in-memory equivalent of the real one-transaction guarantee;
+// leaving the stamp would strand the household.
 func (d *goalDouble) DeleteContribution(_ context.Context, householdID, goalID, contributionID string) error {
 	rows := d.contributions[goalID]
 	for i, c := range rows {
@@ -2735,10 +2625,9 @@ func (d *goalDouble) DeleteContribution(_ context.Context, householdID, goalID, 
 
 // defaultContributionLimit and maxContributionLimit are ListContributions'
 // own copy of TransactionRepository.List's clamp -- limit <= 0 becomes 50,
-// anything above 200 is pulled down to it -- rather than a second, competing
-// convention: a real SQL LIMIT 0 returns zero rows, the opposite of "no
-// cap", so "no cap" was never a safe reading for this double to give limit
-// <= 0 in the first place.
+// anything above 200 is pulled down to it. A real SQL LIMIT 0 returns zero
+// rows, the opposite of "no cap," so "no cap" was never a safe reading for
+// limit <= 0 to give.
 const (
 	defaultContributionLimit = 50
 	maxContributionLimit     = 200
@@ -2747,9 +2636,9 @@ const (
 // ListContributions reports newest first by OccurredOn, tie-broken by
 // creation order (most recently added first): domain.GoalContribution
 // carries no created_at the way the goal_contributions table does, so the
-// double stands in for "created_at DESC" with the only ordering information
-// it actually has -- AddContribution only ever appends, so the slice's own
-// order already is chronological.
+// double stands in for "created_at DESC" with the only ordering
+// information it has -- AddContribution only ever appends, so the slice's
+// order is already chronological.
 func (d *goalDouble) ListContributions(_ context.Context, householdID, goalID string, limit int) ([]domain.GoalContribution, error) {
 	if limit <= 0 {
 		limit = defaultContributionLimit
@@ -2774,11 +2663,10 @@ func (d *goalDouble) ListContributions(_ context.Context, householdID, goalID st
 }
 
 // MonthContributionTotals sums each unarchived goal's contributions inside
-// one calendar month, excluding source starting_balance -- the exclusion the
-// port's own doc comment calls load-bearing. An archived goal is left out of
-// the result entirely, matching "sums each unarchived goal's contributions."
-// The result is sorted by goal id purely for test determinism; nothing in
-// the port promises an order.
+// one calendar month, excluding source starting_balance -- the exclusion
+// the port calls load-bearing. An archived goal is left out entirely. The
+// result is sorted by goal id purely for test determinism; the port
+// promises no order.
 func (d *goalDouble) MonthContributionTotals(_ context.Context, householdID string, month time.Time) ([]usecase.GoalMonthTotal, error) {
 	totals := map[string]int64{}
 	for goalID, rows := range d.contributions {
@@ -2807,11 +2695,11 @@ func (d *goalDouble) MonthContributionTotals(_ context.Context, householdID stri
 	return out, nil
 }
 
-// var _ usecase.GoalRepository = (*goalDouble)(nil) below is load-bearing, not
-// decoration: without this assertion a signature drift between this double and
-// GoalRepository would surface only when a test first builds a GoalService
-// with it -- the same reasoning convert.go's own compile-time repository
-// assertions give for the postgres adapters.
+// var _ usecase.GoalRepository = (*goalDouble)(nil) below is load-bearing,
+// not decoration: without it, a signature drift between this double and
+// GoalRepository would surface only when a test first builds a
+// GoalService with it -- the same reasoning convert.go's compile-time
+// repository assertions give for the postgres adapters.
 var _ usecase.GoalRepository = (*goalDouble)(nil)
 
 // fxDouble is the one FX double. By default it knows exactly the pair
@@ -2869,16 +2757,15 @@ type fakeTransactionRepo struct {
 	// beforeFromOpening is the set of transaction ids MonthTotals reports as
 	// dated before their from-account's opening balance -- the same
 	// BeforeFromAccountOpening flag the real repository computes via a join
-	// to Account.OpeningBalanceAsOf (see transaction_repo.go). This fake has
-	// no accounts to join against, so a test that needs the flag set marks it
-	// directly with markBeforeFromAccountOpening rather than the fake
-	// inferring it from a date comparison it cannot actually make.
+	// to Account.OpeningBalanceAsOf (transaction_repo.go). This fake has no
+	// accounts to join against, so a test marks it directly with
+	// markBeforeFromAccountOpening instead.
 	beforeFromOpening map[string]bool
 }
 
-// markBeforeFromAccountOpening flags transactionID so MonthTotals reports its
-// BeforeFromAccountOpening as true, for a test proving that a transaction the
-// balance ignores still counts toward spend (decision 6).
+// markBeforeFromAccountOpening flags transactionID so MonthTotals reports
+// its BeforeFromAccountOpening as true, for a test proving that a
+// transaction the balance ignores still counts toward spend.
 func (f *fakeTransactionRepo) markBeforeFromAccountOpening(transactionID string) {
 	if f.beforeFromOpening == nil {
 		f.beforeFromOpening = map[string]bool{}
@@ -2989,9 +2876,9 @@ func (f *fakeCategoryLookup) Kind(_ context.Context, _, categoryID string) (doma
 }
 
 // fakeAccountRecord is one account's currency and the household it actually
-// belongs to. archived, added in Task 6 for BillService's own archived-account
-// guards (Create's pay-from check, MarkPaid's in Task 7), defaults to false so
-// every existing fakeAccountRecord{...} literal elsewhere in this package --
+// belongs to. archived is used by BillService's archived-account guards
+// (Create's pay-from check, MarkPaid's), and defaults to false so every
+// existing fakeAccountRecord{...} literal elsewhere in this package --
 // none of which name the field -- is unaffected.
 type fakeAccountRecord struct {
 	householdID string
@@ -3001,20 +2888,17 @@ type fakeAccountRecord struct {
 
 // fakeAccountLookup holds accounts keyed by id, each carrying its own
 // household. Get refuses both an id it has never heard of and one that
-// belongs to a household other than the one asked about -- the same collapse
-// AccountLookup.Get's contract requires, so a test can plant an account that
-// genuinely exists, just not here, rather than relying on an unknown id to
-// stand in for that case.
+// belongs to a different household -- the same collapse AccountLookup.Get's
+// contract requires.
 type fakeAccountLookup struct {
 	accounts    map[string]fakeAccountRecord
 	memberships map[string]string // membership id -> owning household
 }
 
 // archivedStamp is the fixed ArchivedAt every archived fakeAccountRecord
-// gets. No test reads its value, only its non-nilness (domain.Account.
-// IsArchived), so a fixed constant is used rather than time.Now() -- a test
-// double has no more business reading the wall clock than the service it
-// stands in for.
+// gets. No test reads its value, only its non-nilness
+// (domain.Account.IsArchived), so a fixed constant is used rather than
+// time.Now() -- a test double has no business reading the wall clock.
 var archivedStamp = time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)
 
 func (f *fakeAccountLookup) Get(_ context.Context, householdID, accountID string) (usecase.AccountView, error) {
@@ -3044,34 +2928,30 @@ func (f *fakeAccountLookup) MembershipBelongsToHousehold(_ context.Context, hous
 // --- BillRepository ------------------------------------------------------
 
 // fakeBillRepo implements usecase.BillRepository entirely in memory. add
-// assigns a sequential id ("bill-1", "bill-2", ...) to any record arriving
-// with no id of its own, mirroring how the postgres adapter's INSERT assigns
-// one -- Task 6's own fixtures rely on this, and so does Task 7's
-// repo.add(bill(...)) followed by a literal "bill-1" in the same test.
+// assigns a sequential id ("bill-1", "bill-2", ...) to any record with no
+// id of its own, mirroring how the postgres adapter's INSERT assigns one.
 //
-// RecordPayment and UndoPayment are deliberately minimal: Task 6 does not
-// implement BillService.MarkPaid/UndoPayment (that is Task 7's job), so
-// these two exist only to satisfy the interface and to give Task 7 something
-// to extend -- RecordPayment records lastWrite and advances the matching
-// bill's NextDue but does not yet enforce the real port's ErrAlreadyExists
-// duplicate-occurrence rule, and UndoPayment is a plain delete rather than
-// the real port's most-recent-only guard (undoErr lets a test force that
-// refusal directly instead).
+// RecordPayment and UndoPayment are deliberately minimal: RecordPayment
+// records lastWrite and advances the matching bill's NextDue but does not
+// enforce the real port's ErrAlreadyExists duplicate-occurrence rule;
+// UndoPayment is a plain delete rather than the real port's
+// most-recent-only guard (undoErr lets a test force that refusal
+// directly).
 type fakeBillRepo struct {
 	records  []usecase.BillRecord
 	payments []usecase.BillPaymentRecord
 	n, payN  int
 
 	// err, when set, is returned unconditionally by every method below
-	// except RecordPayment/UndoPayment, which have their own dedicated
-	// force-failure hooks -- a single shared err would make "the list call
-	// failed" and "the payment call failed" indistinguishable to a test that
-	// armed it.
+	// except UndoPayment, which has its own dedicated force-failure hook
+	// (RecordPayment still checks err, but shares this one) -- a single
+	// shared err would otherwise make "the list call failed"
+	// indistinguishable from "the payment call failed."
 	err error
 
 	// lastWrite is the PaymentWrite RecordPayment most recently received --
-	// Task 7's MarkPaid assertions read this directly, since it is what the
-	// SERVICE assembled and is the thing actually worth pinning down.
+	// MarkPaid assertions read this directly, since it is what the service
+	// assembled and is the thing actually worth pinning down.
 	lastWrite usecase.PaymentWrite
 
 	// undoErr, when set, is what UndoPayment returns unconditionally, letting
@@ -3080,11 +2960,9 @@ type fakeBillRepo struct {
 	undoErr error
 }
 
-// add appends rec, assigning a "bill-N" id when rec.Bill.ID is empty and "h1"
-// as the household when rec.Bill.HouseholdID is empty -- every fixture
-// helper in bill_test.go already sets HouseholdID, but leaving this fallback
-// costs nothing and matches goalDouble.Create's own "assign what a real
-// INSERT would" convention.
+// add appends rec, assigning a "bill-N" id when rec.Bill.ID is empty and
+// "h1" as the household when rec.Bill.HouseholdID is empty -- fixture
+// helpers in bill_test.go already set HouseholdID; this is a fallback.
 func (r *fakeBillRepo) add(rec usecase.BillRecord) usecase.BillRecord {
 	if rec.Bill.ID == "" {
 		r.n++
@@ -3128,8 +3006,8 @@ func (r *fakeBillRepo) Get(_ context.Context, householdID, billID string) (useca
 
 // nameTaken mirrors goalDouble.nameTaken/fakeCategoryRepo.nameTaken for
 // bills: a name already used in this household, archived rows included,
-// collides -- the same UNIQUE (household_id, name) contract BillRepository's
-// own doc comment states for Create and Update alike.
+// collides -- the same UNIQUE (household_id, name) contract BillRepository
+// states for Create and Update alike.
 func (r *fakeBillRepo) nameTaken(householdID, name, excludeID string) bool {
 	for _, rec := range r.records {
 		if rec.Bill.HouseholdID == householdID && rec.Bill.Name == name && rec.Bill.ID != excludeID {
@@ -3139,14 +3017,13 @@ func (r *fakeBillRepo) nameTaken(householdID, name, excludeID string) bool {
 	return false
 }
 
-// Create mirrors BillRepository.Create's own contract, with one known gap:
-// BillRecord.Amount.Currency is meant to come from the pay-from account's
-// join (that type's own doc comment), but this double holds no accounts
-// table to join against -- NewBillRow itself carries no currency for Create
-// to fall back on either. No test in this package's suite reads the
-// resulting Amount.Currency, so the gap is left undocumented-but-real rather
-// than papered over with a guess; a future test that needs it should wire
-// this double to the fakeAccountLookup it is already built alongside.
+// Create mirrors BillRepository.Create's contract, with one known gap:
+// BillRecord.Amount.Currency should come from the pay-from account's join,
+// but this double has no accounts table to join against, and NewBillRow
+// carries no currency to fall back on either. No test reads the resulting
+// Amount.Currency, so the gap is left real rather than papered over with a
+// guess; a future test that needs it should wire this double to the
+// fakeAccountLookup it is already built alongside.
 func (r *fakeBillRepo) Create(_ context.Context, in usecase.NewBillRow) (usecase.BillRecord, error) {
 	if r.err != nil {
 		return usecase.BillRecord{}, r.err
@@ -3173,11 +3050,11 @@ func (r *fakeBillRepo) Create(_ context.Context, in usecase.NewBillRow) (usecase
 	return r.add(rec), nil
 }
 
-// Update mirrors BillRepository.Update: it replaces b wholesale. CategoryName
-// and AccountName are carried over from the existing record unchanged, since
-// b (a domain.Bill) carries no names of its own to promote into them -- the
+// Update mirrors BillRepository.Update: it replaces b wholesale.
+// CategoryName and AccountName are carried over from the existing record
+// unchanged, since b (a domain.Bill) carries no names of its own -- the
 // same "read the names back off the existing row" contract goalDouble.Update
-// follows for a currency neither side is allowed to touch.
+// follows for a currency neither side may touch.
 func (r *fakeBillRepo) Update(_ context.Context, b domain.Bill) (usecase.BillRecord, error) {
 	if r.err != nil {
 		return usecase.BillRecord{}, r.err
@@ -3220,7 +3097,7 @@ func (r *fakeBillRepo) SetArchived(_ context.Context, householdID, billID string
 }
 
 // RecordPayment -- see this type's own doc comment for what it deliberately
-// does not yet do.
+// does not do.
 func (r *fakeBillRepo) RecordPayment(_ context.Context, in usecase.PaymentWrite) (usecase.BillPaymentRecord, error) {
 	if r.err != nil {
 		return usecase.BillPaymentRecord{}, r.err
@@ -3248,7 +3125,7 @@ func (r *fakeBillRepo) RecordPayment(_ context.Context, in usecase.PaymentWrite)
 }
 
 // UndoPayment -- see this type's own doc comment for what it deliberately
-// does not yet do.
+// does not do.
 func (r *fakeBillRepo) UndoPayment(_ context.Context, householdID, billID, paymentID string) error {
 	if r.undoErr != nil {
 		return r.undoErr
@@ -3286,12 +3163,11 @@ func (r *fakeBillRepo) ListPayments(_ context.Context, householdID string, month
 	return out, nil
 }
 
-// MonthTotals reproduces the port's own union rule (see BillRepository's
-// header comment): dueMinor is every unarchived bill's amount still due in
-// month, PLUS every payment due in month; paidMinor is payments due in month
-// alone. Both are keyed by currency -- bills.Amount.Currency (via its
-// pay-from account) is the only currency this double, like the real schema,
-// ever carries.
+// MonthTotals reproduces the port's own union rule (see BillRepository):
+// dueMinor is every unarchived bill's amount still due in month, plus every
+// payment due in month; paidMinor is payments due in month alone. Both are
+// keyed by currency -- bills.Amount.Currency (via its pay-from account) is
+// the only currency this double, like the real schema, ever carries.
 func (r *fakeBillRepo) MonthTotals(_ context.Context, householdID string, month time.Time) (map[string]int64, map[string]int64, error) {
 	if r.err != nil {
 		return nil, nil, r.err
@@ -3327,52 +3203,41 @@ var _ usecase.BillRepository = (*fakeBillRepo)(nil)
 // --- RetroRepository ---------------------------------------------------
 
 // retroRow is one retro as the double stores it: RetroRecord plus the
-// household scope, which RetroRecord itself has no field for (the same
-// split goalDouble's own map -- keyed data, HouseholdID read off the
-// embedded domain.Goal -- draws for a different reason; RetroRecord embeds
-// no domain type to carry it, so the row keeps it alongside instead).
+// household scope, which RetroRecord has no field for (RetroRecord embeds
+// no domain type to carry it, unlike goalDouble's map, which reads
+// HouseholdID off the embedded domain.Goal -- so the row keeps it
+// alongside instead).
 type retroRow struct {
 	usecase.RetroRecord
 	HouseholdID string
 }
 
 // retroRepoDouble is the in-memory RetroRepository every RetroService test
-// runs against -- Task 3's own List/Month tests, and Task 4's write-path
-// tests reusing this same double. It implements every method the port
-// declares, including the ones Task 3's tests never call (Create, Update,
-// Complete, DeleteDraft): a double that only satisfies the methods its own
-// author happened to test is not honouring the port's whole contract
-// (Liskov, CLAUDE.md), and Task 4 needs the rest of this double to already
-// behave correctly when it arrives.
+// runs against, both read-path and write-path tests sharing this double.
+// It implements every method the port declares, including ones no test
+// calls directly (Create, Update, Complete, DeleteDraft): satisfying only
+// the tested methods would violate Liskov (CLAUDE.md).
 //
-// Every seeded and created row lives under householdID "hh" -- the brief's
-// own test fixtures never pass a household id into seed, so this is the one
-// value every test in this package actually uses; List/ByMonth/etc still
-// filter on it explicitly, the same as a real repository would for any
-// other household id.
+// Every seeded and created row lives under householdID "hh," the one value
+// every test in this package uses; List/ByMonth/etc still filter on it
+// explicitly.
 type retroRepoDouble struct {
 	rows map[string]*retroRow // keyed by id
 	n    int
 
 	// writes counts every call that mutates a row -- Create, Update,
 	// Complete, DeleteDraft -- the same role userDouble.count and
-	// sessionDouble.count play for their own repositories. Task 3's own
-	// tests never touch it (List and Month write nothing). It exists for
-	// Task 4's TestRetroSaveRefusesAnImpossibleMood, which reads
-	// retros.writes after a refused Save to prove the refusal happened
-	// before any repository call, not just that Save returned an error --
-	// the same "no partial write" question this codebase's guarding-partial-
-	// writes concern asks everywhere else.
+	// sessionDouble.count play for their own repositories.
+	// TestRetroSaveRefusesAnImpossibleMood reads it after a refused Save to
+	// prove the refusal happened before any repository call, the "no
+	// partial write" question guarding-partial-writes asks everywhere else.
 	writes int
 
 	// actions, when wired via setActions, is the RetroActionRepository
-	// double List reads ActionCount from -- the mutual reference
-	// goalDouble.budgets/fakeBudgetRepo.setGoals already establishes for a
-	// different pair of doubles, for the identical reason: one double
-	// supplies a figure a real repository would only know via a SQL join.
-	// nil is fine for a test that never calls setActions; List then reports
-	// ActionCount 0 for every row, which is what every Task 3 test that
-	// doesn't wire this already expects.
+	// double List reads ActionCount from -- the same mutual-reference
+	// pattern goalDouble.budgets/fakeBudgetRepo.setGoals uses, since one
+	// double supplies a figure a real repository would only know via a SQL
+	// join. nil means List reports ActionCount 0 for every row.
 	actions *retroActionRepoDouble
 }
 
@@ -3385,15 +3250,12 @@ func newRetroRepoDouble() *retroRepoDouble {
 // isolation.
 func (d *retroRepoDouble) setActions(a *retroActionRepoDouble) { d.actions = a }
 
-// seed inserts a retro directly, bypassing Create, for a test that wants one
-// to already exist. mood == 0 means "nobody has picked one" (RetroRecord.Mood
-// is a pointer for exactly this reason -- 0 is not a mood); any other value
-// is stored as that mood, draft or finished alike, so a test can seed a
-// draft that already carries a mood (decision 2's own scenario: a mood is
-// picked before the rest of the retro is finished). finished stamps
-// CompletedAt at the retro's own month -- an arbitrary but deterministic
-// instant; no test in this package reads it -- and leaves a draft's
-// CompletedAt nil, the same state Create leaves behind.
+// seed inserts a retro directly, bypassing Create, for a test that wants
+// one to already exist. mood == 0 means "nobody has picked one"
+// (RetroRecord.Mood is a pointer for that reason); any other value is
+// stored as that mood, since a mood can be picked before the retro is
+// finished. finished stamps CompletedAt at the retro's own month; a
+// draft's CompletedAt stays nil, the same state Create leaves.
 func (d *retroRepoDouble) seed(month time.Time, mood int, notes string, finished bool) usecase.RetroRecord {
 	d.n++
 	row := &retroRow{
@@ -3450,18 +3312,12 @@ func (d *retroRepoDouble) ByMonth(_ context.Context, householdID string, month t
 }
 
 // List returns every retro for householdID, newest month first -- the
-// port's own ordering contract, which RetroService.List relies on rather
-// than re-sorting. ActionCount and OpenActionCount are both computed from
-// the wired actions double (see setActions) when one is set -- the
-// double's own stand-in for the real repository's two correlated
-// subqueries against retro_actions -- and 0 when none is wired, which is
-// every Task 3 test that doesn't call setActions: this double must not
-// hardcode either figure regardless, since the port's own doc comment
-// ("each carrying its own action count AND open action count") is a real
-// part of the contract, not decoration a double is free to skip -- the
-// same finding that already applies to ActionCount above (see this
-// comment's own history) would apply again to OpenActionCount if it were
-// left at its zero value.
+// port's ordering contract, which RetroService.List relies on rather than
+// re-sorting. ActionCount and OpenActionCount are computed from the wired
+// actions double (see setActions) when one is set -- standing in for the
+// real repository's two correlated subqueries against retro_actions -- and
+// 0 when none is wired. Neither figure may be hardcoded: the port
+// documents both as real contract, not decoration.
 func (d *retroRepoDouble) List(_ context.Context, householdID string) ([]usecase.RetroSummary, error) {
 	var out []usecase.RetroSummary
 	for _, row := range d.rows {
@@ -3485,13 +3341,12 @@ func (d *retroRepoDouble) List(_ context.Context, householdID string) ([]usecase
 	return out, nil
 }
 
-// Update mirrors the real repository's guarded UPDATE: a row is matched by
-// id, household AND month (RetroUpdate.Month's own doc comment explains
-// why -- a zero-row match on id+household alone cannot tell "no such retro"
-// apart from "the version moved," so the real adapter re-reads ByMonth to
-// decide, reproduced here by keying the match on Month directly). A version
-// that no longer matches the stored one reports domain.ErrRetroChanged and
-// writes nothing; the returned record always carries the NEW version.
+// Update mirrors the real repository's guarded UPDATE: a row is matched
+// by id, household AND month (a zero-row match on id+household alone
+// cannot tell "no such retro" apart from "the version moved," so the real
+// adapter re-reads ByMonth to decide; this double keys the match on Month
+// directly instead). A stale version reports domain.ErrRetroChanged and
+// writes nothing; a success returns the record with the new version.
 func (d *retroRepoDouble) Update(_ context.Context, u usecase.RetroUpdate) (usecase.RetroRecord, error) {
 	row, ok := d.rows[u.RetroID]
 	if !ok || row.HouseholdID != u.HouseholdID || !row.Month.Equal(u.Month) {
@@ -3527,8 +3382,8 @@ func (d *retroRepoDouble) Complete(_ context.Context, householdID, retroID strin
 
 // DeleteDraft mirrors the real repository's WHERE ... AND completed_at IS
 // NULL: a finished retro's zero-row match reports domain.ErrNotFound, the
-// same as a retro that never existed -- deleting a draft is not this
-// double's job to allow just because the id and household matched.
+// same as a retro that never existed -- id and household matching alone
+// is not enough to delete a draft.
 func (d *retroRepoDouble) DeleteDraft(_ context.Context, householdID, retroID string) error {
 	row, ok := d.rows[retroID]
 	if !ok || row.HouseholdID != householdID || row.CompletedAt != nil {
@@ -3548,10 +3403,9 @@ var _ usecase.RetroRepository = (*retroRepoDouble)(nil)
 
 // retroActionRow is one action as the double stores it: RetroActionRecord
 // plus the household scope and the month it belongs to. RetroActionRecord
-// itself carries neither -- only RetroID -- so a real repository answers
-// OpenInMonth by joining retro_actions back to retros for the month; this
-// double keeps that joined fact on the row directly rather than reaching
-// into a retroRepoDouble it is not guaranteed to share a test with.
+// carries neither -- only RetroID -- so a real repository answers
+// OpenInMonth by joining retro_actions back to retros; this double keeps
+// that joined fact on the row directly.
 type retroActionRow struct {
 	usecase.RetroActionRecord
 	HouseholdID string
@@ -3571,15 +3425,12 @@ func newRetroActionRepoDouble() *retroActionRepoDouble {
 }
 
 // seedOpen inserts an open (unticked) action for retroID, against month,
-// for the "Still open from July" fixture OpenInMonth answers -- and for
-// ForRetro, since a real row always belongs to a real retro. retroID is a
-// caller-supplied parameter, not left empty: a double that let RetroID
-// default to "" would make ForRetro(ctx, hh, someRetroID) return nothing
-// for a seeded action regardless of which retro a test meant it for, which
-// is exactly the gap a Month implementation that never called ForRetro at
-// all could hide behind (code review finding, Task 3 fix round). Household
-// "hh", matching retroRepoDouble.seed's own fixed household -- see that
-// method's comment for why.
+// for the "Still open from July" fixture OpenInMonth answers, and for
+// ForRetro. retroID must stay caller-supplied, never defaulted to "":
+// ForRetro(ctx, hh, someRetroID) would then return nothing for a seeded
+// action regardless of which retro a test meant, hiding a Month
+// implementation that never calls ForRetro. Household "hh" matches
+// retroRepoDouble.seed's fixed household.
 func (d *retroActionRepoDouble) seedOpen(retroID string, month time.Time, body string) usecase.RetroActionRecord {
 	d.n++
 	row := &retroActionRow{
@@ -3592,11 +3443,11 @@ func (d *retroActionRepoDouble) seedOpen(retroID string, month time.Time, body s
 }
 
 // Add writes one action. RetroActionInput carries a RetroID but no month
-// (an action has no month column of its own -- only its retro does), and
-// this double does not join back to a retro, so Month stays the zero value:
-// an action created through Add is findable through ForRetro, never
-// OpenInMonth. A test that needs an open action in a month seeds it with
-// seedOpen, which is told the month directly.
+// (an action has no month column -- only its retro does), and this double
+// does not join back to a retro, so Month stays the zero value: an action
+// created through Add is findable through ForRetro, never OpenInMonth. A
+// test that needs an open action in a month seeds it with seedOpen, which
+// is told the month directly.
 func (d *retroActionRepoDouble) Add(_ context.Context, in usecase.RetroActionInput) (usecase.RetroActionRecord, error) {
 	d.n++
 	row := &retroActionRow{
@@ -3613,10 +3464,9 @@ func (d *retroActionRepoDouble) Add(_ context.Context, in usecase.RetroActionInp
 	return row.RetroActionRecord, nil
 }
 
-// ForRetro returns a retro's actions in insertion order -- map iteration
-// order is not that, so this sorts by id, which encodes creation order for
-// every row this double ever produces (both seedOpen and Add assign
-// "action-N" with N increasing).
+// ForRetro returns a retro's actions in insertion order. Map iteration
+// order is not that, so this sorts by id, which encodes creation order:
+// both seedOpen and Add assign "action-N" with N increasing.
 func (d *retroActionRepoDouble) ForRetro(_ context.Context, householdID, retroID string) ([]usecase.RetroActionRecord, error) {
 	var out []usecase.RetroActionRecord
 	for _, row := range d.rows {
@@ -3659,8 +3509,7 @@ func (d *retroActionRepoDouble) Remove(_ context.Context, householdID, actionID 
 
 // OpenInMonth returns month's unticked actions -- the "Still open from
 // July" offer -- scoped to exactly that month, never a range: a household
-// that skipped months must not be handed an unbounded backlog (spec
-// decision 4).
+// that skipped months must not be handed an unbounded backlog.
 func (d *retroActionRepoDouble) OpenInMonth(_ context.Context, householdID string, month time.Time) ([]usecase.RetroActionRecord, error) {
 	var out []usecase.RetroActionRecord
 	for _, row := range d.rows {
@@ -3681,8 +3530,7 @@ var _ usecase.RetroActionRepository = (*retroActionRepoDouble)(nil)
 
 // visionRepoDouble is the in-memory VisionRepository every VisionService
 // test runs against, implementing every port method for the same Liskov
-// reason retroRepoDouble does -- Task 8's Save tests build on this same
-// double rather than a second one.
+// reason retroRepoDouble does.
 type visionRepoDouble struct {
 	rows map[string]domain.Vision // keyed by visionRowKey(householdID, year)
 }
@@ -3716,10 +3564,9 @@ func (d *visionRepoDouble) Get(_ context.Context, householdID string, year int) 
 // Save mirrors the real VisionRepo.Save's version guard, the port's own
 // two-case contract: Version 0 must be a create, refused with
 // domain.ErrVisionChanged if a row is already there; a positive Version
-// must match the stored one exactly or be refused the same way. No test in
-// this file exercises it yet -- Task 7 only reads -- but the double must
-// still satisfy the whole interface, and Task 8 builds its Save tests on
-// this same implementation rather than inventing a second one.
+// must match the stored one exactly or be refused the same way. The double
+// implements this fully regardless of what current tests exercise, the
+// same Liskov reason retroRepoDouble does.
 func (d *visionRepoDouble) Save(_ context.Context, v domain.Vision) (domain.Vision, error) {
 	key := visionRowKey(v.HouseholdID, v.Year)
 	existing, ok := d.rows[key]
@@ -3728,12 +3575,10 @@ func (d *visionRepoDouble) Save(_ context.Context, v domain.Vision) (domain.Visi
 			return domain.Vision{}, domain.ErrVisionChanged
 		}
 	} else if !ok {
-		// Deleted, not raced -- a row that no longer exists at all must
-		// read back as ErrNotFound, never as "the other partner saved
-		// first," which would send a household to reload and retry
-		// against a row that can never come back. The port's own doc
-		// comment (and RetroRepo.Update's, which this mirrors) is explicit
-		// that these two zero-rows causes are different answers.
+		// Deleted, not raced -- a row that no longer exists must read back
+		// as ErrNotFound, never as "the other partner saved first," which
+		// would send a household to reload and retry against a row that
+		// can never come back.
 		return domain.Vision{}, domain.ErrNotFound
 	} else if existing.Version != v.Version {
 		return domain.Vision{}, domain.ErrVisionChanged
@@ -3750,9 +3595,8 @@ var _ usecase.VisionRepository = (*visionRepoDouble)(nil)
 
 // goalProgressDouble is the in-memory GoalProgressReader every
 // VisionService test runs against. A goal id absent from progress is a
-// miss, not an error -- the port's own contract for a linked measure whose
-// goal was deleted, which is exactly what
-// TestVisionGetRendersNoFigureWhenTheLinkedGoalIsGone relies on.
+// miss, not an error -- the port's contract for a linked measure whose
+// goal was deleted.
 type goalProgressDouble struct {
 	progress map[string]usecase.GoalProgress
 }
@@ -3788,16 +3632,13 @@ type telegramLinkRow struct {
 	ChatUsername string
 }
 
-// telegramLinkRepoDouble plays the same role postgres's TelegramLinkRepo
-// plays over Postgres: Consume stamps a row consumed and records the
-// redeeming chat in one step, mirroring the one-statement guarantee the real
-// Consume gives (see TelegramLinkRepository.Consume's doc comment and
-// adapter/postgres/telegram_link_repo.go).
+// telegramLinkRepoDouble plays postgres's TelegramLinkRepo role: Consume
+// stamps a row consumed and records the redeeming chat in one step,
+// mirroring the real Consume's one-statement guarantee.
 //
 // It holds a reference to the same seqTokens the fixture wires into the
-// service, rather than hashing raw nonces some other way, so hasHashOf and
-// mintLive agree with exactly what the service itself will compute when it
-// calls Tokens.HashToken(payload).
+// service, so hasHashOf and mintLive agree with what the service itself
+// computes calling Tokens.HashToken(payload).
 type telegramLinkRepoDouble struct {
 	clock  *fixedClock
 	tokens *seqTokens
@@ -3813,7 +3654,7 @@ func newTelegramLinkRepoDouble(clock *fixedClock, tokens *seqTokens) *telegramLi
 // by (see ByID's own doc comment below) -- mirroring the real repository's
 // RETURNING id: TelegramLinkService.Start hands this straight back to the
 // browser to poll with, so a double that swallowed it could never stand in
-// for that service (see task-5-brief.md's ruling 1).
+// for that service.
 func (d *telegramLinkRepoDouble) Create(_ context.Context, userID string, nonceHash []byte, expiresAt time.Time) (string, error) {
 	id := string(nonceHash)
 	d.rows[id] = &telegramLinkRow{CreatedAt: d.clock.Now(), ExpiresAt: expiresAt, UserID: userID}
@@ -3823,8 +3664,8 @@ func (d *telegramLinkRepoDouble) Create(_ context.Context, userID string, nonceH
 // Consume mirrors ConsumeTelegramLinkRequest's guard -- nonce_hash = $1 AND
 // consumed_at IS NULL AND expires_at > now() -- against the fixture's clock
 // rather than wall time. An unknown, expired or already-consumed nonce all
-// report domain.ErrNotFound, indistinguishably, exactly as
-// TelegramLinkRepository.Consume's doc comment requires.
+// report domain.ErrNotFound, indistinguishably, as
+// TelegramLinkRepository.Consume requires.
 func (d *telegramLinkRepoDouble) Consume(_ context.Context, nonceHash []byte, chatID int64, chatUsername string) (usecase.TelegramLinkRedemption, error) {
 	row, ok := d.rows[string(nonceHash)]
 	if !ok || row.ConsumedAt != nil || !row.ExpiresAt.After(d.clock.Now()) {
@@ -3837,12 +3678,11 @@ func (d *telegramLinkRepoDouble) Consume(_ context.Context, nonceHash []byte, ch
 	return usecase.TelegramLinkRedemption{ID: string(nonceHash), UserID: row.UserID}, nil
 }
 
-// CountLinksSince mirrors CountTelegramLinksSince's SQL exactly: chat_id = $1
-// AND consumed_at >= $2 -- inclusive of the boundary, not exclusive. This
-// double is the only place that boundary is exercised (see
-// TestHandleStartRateLimitCountsARedemptionExactlyOnTheSinceBoundary in
-// telegram_auth_test.go and this task's brief note that Task 3's own
-// repository tests never covered it).
+// CountLinksSince mirrors CountTelegramLinksSince's SQL exactly: chat_id =
+// $1 AND consumed_at >= $2 -- inclusive of the boundary, not exclusive.
+// This double is the only place that boundary is exercised
+// (TestHandleStartRateLimitCountsARedemptionExactlyOnTheSinceBoundary in
+// telegram_auth_test.go); the repository tests never covered it.
 func (d *telegramLinkRepoDouble) CountLinksSince(_ context.Context, chatID int64, since time.Time) (int, error) {
 	n := 0
 	for _, row := range d.rows {
@@ -3857,10 +3697,10 @@ func (d *telegramLinkRepoDouble) CountLinksSince(_ context.Context, chatID int64
 }
 
 // hasRaw reports whether raw itself -- not its hash -- was ever stored as a
-// row key. TestStartLinkMintsADeepLinkAndStoresTheNonceHashed relies on this
-// being a real check, not a tautology: seqTokens.HashToken produces
-// "hash:"+raw, a different string from raw itself, so a service that stored
-// the raw nonce by mistake would be caught here.
+// row key. TestStartLinkMintsADeepLinkAndStoresTheNonceHashed relies on
+// this being a real check, not a tautology: seqTokens.HashToken produces
+// "hash:"+raw, different from raw itself, so a service that stored the raw
+// nonce by mistake would be caught here.
 func (d *telegramLinkRepoDouble) hasRaw(raw string) bool {
 	_, ok := d.rows[raw]
 	return ok
@@ -3874,9 +3714,9 @@ func (d *telegramLinkRepoDouble) hasHashOf(raw string) bool {
 }
 
 // mintLive writes a live (unconsumed, unexpired-per-expiresAt) row directly
-// into the double, standing in for a prior call to StartLink, and returns the
-// raw nonce a test can then hand to HandleStart. t is used only for
-// t.Helper(); it tolerates nil because two call sites in
+// into the double, standing in for a prior call to StartLink, and returns
+// the raw nonce a test can hand to HandleStart. t is used only for
+// t.Helper() and tolerates nil, since two call sites in
 // TestHandleStartAnswersIdenticallyForEveryDeadNonce mint from a bare
 // function value with no *testing.T in scope.
 func (d *telegramLinkRepoDouble) mintLive(t *testing.T, expiresAt time.Time) string {
@@ -3889,12 +3729,11 @@ func (d *telegramLinkRepoDouble) mintLive(t *testing.T, expiresAt time.Time) str
 	return raw
 }
 
-// mintLiveFor is mintLive's link-nonce counterpart: it mints a live row that
-// names userID, standing in for a prior call to the service method (Task 5)
-// a signed-in member's Settings panel calls to start a link. mintLive itself
-// keeps minting unbound rows -- StartLink's sign-in nonces still carry no
-// user -- so the two are kept separate rather than teaching mintLive an
-// optional argument.
+// mintLiveFor is mintLive's link-nonce counterpart: it mints a live row
+// that names userID, standing in for a prior call to
+// TelegramLinkService.Start, which a signed-in member's Settings panel
+// uses to start a link. mintLive keeps minting unbound rows -- StartLink's
+// sign-in nonces still carry no user.
 func (d *telegramLinkRepoDouble) mintLiveFor(t *testing.T, userID string, expiresAt time.Time) string {
 	t.Helper()
 	d.n++
@@ -3920,10 +3759,9 @@ func (d *telegramLinkRepoDouble) isConsumed(raw string) bool {
 }
 
 // recordRedemptions writes n already-consumed rows for chatID, each
-// consumed at exactly at, standing in for n prior /start redemptions --
-// TestHandleStartRateLimitsPerChatWithTheSameAnswer uses this to put a chat
-// at its hourly limit without minting and consuming n real nonces through the
-// service first.
+// consumed at exactly at, standing in for n prior /start redemptions.
+// TestHandleStartRateLimitsPerChatWithTheSameAnswer uses this to put a
+// chat at its hourly limit without n real nonces through the service.
 func (d *telegramLinkRepoDouble) recordRedemptions(chatID int64, n int, at time.Time) {
 	for i := 0; i < n; i++ {
 		d.n++
@@ -4012,15 +3850,14 @@ type telegramAccountRepoDouble struct {
 	byChatID map[int64]string                   // chatID -> userID
 	byUserID map[string]usecase.TelegramBinding // userID -> binding
 
-	// failNextCreate arms a one-shot race for the next Create call, the same
-	// one-shot pattern magicLinkDouble.failNextCreate uses. It carries the
-	// binding a concurrent request is imagined to have already committed:
-	// Create plants it into both maps (exactly what a real UNIQUE violation
-	// implies just happened underneath this call) and returns
-	// domain.ErrAlreadyExists, so a re-read afterwards -- which is what
-	// Confirm's conflict handling does -- sees precisely what a real
-	// Postgres transaction would see after losing the race, even though
-	// this call's own pre-checks, run before the race landed, saw nothing.
+	// failNextCreate arms a one-shot race for the next Create call. It
+	// carries the binding a concurrent request is imagined to have already
+	// committed: Create plants it into both maps (what a real UNIQUE
+	// violation implies) and returns domain.ErrAlreadyExists, so a re-read
+	// afterwards -- what Confirm's conflict handling does -- sees what a
+	// real Postgres transaction would see after losing the race, even
+	// though this call's own pre-checks, run before the race landed, saw
+	// nothing.
 	failNextCreate *usecase.TelegramBinding
 }
 
@@ -4095,9 +3932,8 @@ func (d *telegramAccountRepoDouble) Delete(_ context.Context, userID string) err
 
 // bind pre-populates a chat -> user binding, standing in for the binding
 // SignupRepository.Provision writes inside its own transaction. It writes
-// both maps directly, bypassing Create's uniqueness checks, because the
-// tests that call it are setting up a fixture, not exercising the binding
-// rules themselves.
+// both maps directly, bypassing Create's uniqueness checks, since the
+// tests calling it are setting up a fixture, not exercising binding rules.
 func (d *telegramAccountRepoDouble) bind(chatID int64, userID string) {
 	d.byChatID[chatID] = userID
 	d.byUserID[userID] = usecase.TelegramBinding{UserID: userID, ChatID: chatID, LinkedAt: time.Now()}
@@ -4114,10 +3950,9 @@ var _ usecase.TelegramAccountRepository = (*telegramAccountRepoDouble)(nil)
 
 // --- TelegramSender ------------------------------------------------------
 
-// telegramSenderDouble stands in for *telegram.Client. Unlike mailerDouble it
-// need not model an async send: TelegramAuthService.say calls it
-// synchronously on the request path (see telegram_auth.go's doc comment on
-// why HandleStart answers in-chat rather than firing a background send).
+// telegramSenderDouble stands in for *telegram.Client. Unlike mailerDouble
+// it need not model an async send: TelegramAuthService.say calls it
+// synchronously on the request path.
 type telegramSenderDouble struct {
 	sentTo map[int64]string // chatID -> most recently sent text
 }
@@ -4139,9 +3974,8 @@ func (d *telegramSenderDouble) lastTo(chatID int64) string {
 var _ usecase.TelegramSender = (*telegramSenderDouble)(nil)
 
 // defaultTestHouseholdID is the household every seedTelegramInvite variant
-// in this fixture writes its invite against. The tests that use it never
-// assert on the household itself, only on what HandleStart says back to
-// the chat that tapped, so one shared id is enough.
+// in this fixture writes its invite against. Tests never assert on the
+// household itself, only on what HandleStart says back to the chat.
 const defaultTestHouseholdID = "household-1"
 
 // --- PairingCodes ---------------------------------------------------------
@@ -4163,9 +3997,8 @@ var _ usecase.PairingCodes = (*pairingCodesDouble)(nil)
 
 // inviteChatsDouble stands in for TelegramAuthService on the two messages
 // InviteService.NewLink causes, recording each call so a test can assert
-// which chat was told what -- the same "record, don't behave" shape this
-// file's other -Double types use for a port with side effects rather than
-// a return value worth asserting on.
+// which chat was told what -- the "record, don't behave" shape this
+// file's other -Double types use for a side-effecting port.
 type inviteChatsDouble struct {
 	signInChats       []int64
 	signInUsers       []string
@@ -4177,11 +4010,10 @@ type inviteChatsDouble struct {
 func newInviteChatsDouble() *inviteChatsDouble { return &inviteChatsDouble{} }
 
 // failNextSignIn arms a one-shot failure for Admit's post-commit send: the
-// next SendSignIn call still records the chat and user it was asked to tell
-// (the real send genuinely reached the network and failed after the fact,
-// not before) but returns an error instead of nil, the same one-shot shape
-// failNextSendLinkCancelled below gives the other message this service
-// sends.
+// next SendSignIn call still records the chat and user it was asked to
+// tell (the real send genuinely reached the network and failed after the
+// fact, not before) but returns an error instead of nil, the same
+// one-shot shape failNextSendLinkCancelled gives the other message.
 func (d *inviteChatsDouble) failNextSignIn() {
 	d.failNextSignInErr = errors.New("telegram is down")
 }
@@ -4264,12 +4096,11 @@ type telegramDoubles struct {
 // MagicLinkRepository and a SignupRepository all at once.
 //
 // The clock is seeded to real wall-clock time, not an arbitrary fixed date
-// the way this file's other fixtures seed theirs: several tests in
-// telegram_auth_test.go compute nonce expiry with time.Now() directly (two of
-// them mint from a bare function value with no *testing.T, let alone this
-// fixture, in scope), so this fixture's own notion of "now" has to agree with
-// real time for "10 minutes from now" and "1 minute ago" to land on the
-// correct side of live/expired.
+// like this file's other fixtures: several tests in telegram_auth_test.go
+// compute nonce expiry with time.Now() directly (two mint from a bare
+// function value with no *testing.T in scope), so this fixture's "now"
+// must agree with real time for "10 minutes from now" and "1 minute ago"
+// to land on the correct side of live/expired.
 func newTelegramAuthService(t *testing.T) (*usecase.TelegramAuthService, *telegramDoubles) {
 	t.Helper()
 
@@ -4325,10 +4156,9 @@ func newTelegramAuthService(t *testing.T) (*usecase.TelegramAuthService, *telegr
 }
 
 // seedTelegramInvite writes a live Telegram invite directly through the
-// invite repository double -- bypassing InviteService.CreateTelegram, which
-// invite_test.go already exercises -- and returns the raw token HandleStart
-// is tapped with. household and name are recorded but never asserted on by
-// these tests, which only check what the chat that knocked was told.
+// invite repository double -- bypassing InviteService.CreateTelegram,
+// already exercised in invite_test.go -- and returns the raw token
+// HandleStart is tapped with.
 func (d *telegramDoubles) seedTelegramInvite(t *testing.T, householdID, name string) string {
 	t.Helper()
 	raw, hash, err := d.tokens.NewToken()
@@ -4394,7 +4224,7 @@ func (d *telegramDoubles) seedAcceptedTelegramInvite(t *testing.T) string {
 // seedBoundChat binds a fresh chat id to some Hearth user, standing in for
 // an account this chat already belongs to (a prior sign-up or link), and
 // returns the chat id -- the one case an invite knock answers with
-// something other than the bland dead-link reply (spec decision 15).
+// something other than the bland dead-link reply.
 func (d *telegramDoubles) seedBoundChat(t *testing.T) int64 {
 	t.Helper()
 	const boundChatID = int64(600001)
@@ -4423,17 +4253,15 @@ type telegramLinkDoubles struct {
 }
 
 // newTelegramLinkService builds a TelegramLinkService over its own set of
-// in-memory doubles, separate from newTelegramAuthService's: this service
-// needs a UserRepository (Unlink's lockout check) and neither a
-// MagicLinkRepository nor a SignupRepository, which TelegramAuthService
-// needs and this service does not.
+// in-memory doubles: this service needs a UserRepository (Unlink's lockout
+// check) and neither a MagicLinkRepository nor a SignupRepository, unlike
+// TelegramAuthService.
 //
-// It pre-creates one user with an email address. userDouble.Create's own
-// counter means that user lands on id "user-1" -- the id every test below
-// that calls Start/Confirm/Unlink as "user-1" relies on already existing
-// with somewhere else to sign in. A test exercising the locked-out case
-// (TestUnlinkRefusesAnAccountWithNoEmail) adds its own credential-less user
-// under a different id instead of touching this one.
+// It pre-creates one user with an email, landing on id "user-1"
+// (userDouble.Create's counter) -- the id every test below relies on
+// already existing, with an email to fall back on.
+// TestUnlinkRefusesAnAccountWithNoEmail adds its own credential-less user
+// under a different id.
 func newTelegramLinkService(t *testing.T) (*usecase.TelegramLinkService, *telegramLinkDoubles) {
 	t.Helper()
 
@@ -4508,10 +4336,9 @@ var _ usecase.PlatformAdminRepository = (*fakeAdminRepo)(nil)
 
 // fakeFlagRepo is FeatureFlagRepository. The two layers are separate maps,
 // matching the two-table shape (feature_flags for global,
-// household_feature_flags for per-household) the real repository sits over --
-// a single map keyed by household id with a magic "" for global would hide
-// bugs a two-layer resolver like domain.ResolveFlags is specifically meant to
-// catch.
+// household_feature_flags for per-household) the real repository sits
+// over -- a single map with a magic "" for global would hide bugs
+// domain.ResolveFlags is meant to catch.
 type fakeFlagRepo struct {
 	global    map[string]bool
 	household map[string]map[string]bool // householdID -> key -> enabled
@@ -4628,32 +4455,31 @@ var _ usecase.AdminReauthAttemptRepository = (*fakeReauthAttemptRepo)(nil)
 // --- AgreementRepository ---------------------------------------------
 
 // agreementRepoDouble is the in-memory AgreementRepository every
-// AgreementService test runs against. It implements EVERY port method,
-// including ones no test calls (Liskov, CLAUDE.md), and it honours the
+// AgreementService test runs against. It implements every port method,
+// including ones no test calls (Liskov, CLAUDE.md), and honours the
 // refusals the real one makes: a caller must never need to know which
-// implementation it is holding. writes counts only calls that actually
-// changed a row, so "refused" is distinguishable from "refused eventually" --
-// the counter is the whole point of the one-owner test.
+// implementation it holds. writes counts only calls that actually changed
+// a row, so "refused" is distinguishable from "refused eventually" -- the
+// counter the one-owner test depends on.
 //
-// Wire setMembers, or Sign can never complete a set: completion is every
-// CURRENT owner having signed, which the real transaction counts through
-// memberships in-transaction.
+// Wire setMembers, or Sign can never complete a set: completion requires
+// counting every CURRENT owner through memberships, the same way the real
+// transaction does.
 type agreementRepoDouble struct {
 	sections   []usecase.AgreementSectionRecord
 	agreements []usecase.AgreementRecord
-	// removed is the removed_at stamp (decision 9): the row stays and the
-	// read filters. It lives in a side map because AgreementRecord is the
-	// LIVE shape and carries no removed_at -- which is the port's contract,
-	// not an omission.
+	// removed is the removed_at stamp: removal never deletes the row, it
+	// keeps the stamp and reads filter it out. It lives in a side map
+	// because AgreementRecord is the LIVE shape and carries no removed_at
+	// -- the port's contract, not an omission.
 	removed   map[string]time.Time
 	proposals []*usecase.AgreementProposalRecord
 	members   *membershipDouble
 	writes    int
 	// lastWithdrawBy is the byMembershipID the service last handed over, set
-	// before any refusal. The service must never branch on that id (decision
-	// 15: the proposer check is the handler's), and this is the only way a
-	// test can see whether it did -- Task 4's third mutation check reddens
-	// here.
+	// before any refusal. The service must never branch on that id -- the
+	// proposer check belongs to the handler -- and this is the only way a
+	// test can see whether it did.
 	lastWithdrawBy string
 	n              int
 }
@@ -4772,11 +4598,11 @@ func (d *agreementRepoDouble) CreateSections(ctx context.Context, householdID st
 }
 
 // CreateProposal writes the proposal row AND the proposer's implicit
-// signature (decision 5) as one unit, so writes moves by one and not two. For
-// an edit or a remove it verifies the target BEFORE counting a write and
-// copies the target's section onto the proposal -- which is what the real
-// statement does, and what makes Validate's refusal of a caller-supplied
-// section safe rather than lossy.
+// signature as one unit, so writes moves by one and not two. For an edit
+// or a remove it verifies the target BEFORE counting a write and copies
+// the target's section onto the proposal -- what the real statement does,
+// and what makes Validate's refusal of a caller-supplied section safe
+// rather than lossy.
 func (d *agreementRepoDouble) CreateProposal(_ context.Context,
 	in usecase.AgreementProposalWrite) (usecase.AgreementProposalRecord, error) {
 	sectionID := in.SectionID
@@ -4820,11 +4646,11 @@ func (d *agreementRepoDouble) Sign(ctx context.Context,
 			return usecase.AgreementProposalRecord{}, domain.ErrAgreementChanged
 		}
 	}
-	// Step 3's INSERT selects the signer through memberships (this household,
-	// role = 'owner'); zero rows there is ErrForbidden, the backstop behind
-	// requireOwner. No test in Tasks 3 and 4 needs it, and it is here anyway,
-	// because a double that skips a refusal its port documents is a double a
-	// caller can pass and the real thing cannot.
+	// Step 3's INSERT selects the signer through memberships (this
+	// household, role = 'owner'); zero rows there is ErrForbidden, the
+	// backstop behind requireOwner. No current test needs it, and it is
+	// here anyway: a double that skips a refusal its port documents is a
+	// double a caller can pass and the real thing cannot.
 	signerIsOwner, err := d.isOwner(ctx, in.HouseholdID, in.MembershipID)
 	if err != nil {
 		return usecase.AgreementProposalRecord{}, err
@@ -4889,11 +4715,10 @@ func (d *agreementRepoDouble) Park(_ context.Context, _, proposalID, note string
 }
 
 // Withdraw runs the port's four legs in order: gone, resolved, then the
-// WHERE clause's backstop -- proposer-only until the proposer is no longer an
-// owner here (decision 15). The backstop is here rather than in the service
-// because a caller must never need to know which implementation it holds, and
-// because it is what lets a test prove the SERVICE was not the thing that
-// decided.
+// WHERE clause's backstop -- proposer-only until the proposer is no longer
+// an owner here. The backstop is here rather than in the service because a
+// caller must never need to know which implementation it holds, and
+// because it lets a test prove the SERVICE was not the thing that decided.
 func (d *agreementRepoDouble) Withdraw(ctx context.Context, householdID, proposalID,
 	byMembershipID string, at time.Time) (usecase.AgreementProposalRecord, error) {
 	d.lastWithdrawBy = byMembershipID

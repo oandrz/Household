@@ -144,10 +144,9 @@ type holdingEventRepoDouble struct {
 func newHoldingEventRepoDouble() *holdingEventRepoDouble { return &holdingEventRepoDouble{} }
 
 // ordered mirrors the repository's ORDER BY (occurred_on, created_at, id).
-// Insertion order stands in for created_at, and the sort is STABLE so that
-// same-day events keep it -- which is the whole contract the port's doc
-// comment spells out. A double that returned map order instead would let a
-// same-day ordering bug pass here and fail only against the real database.
+// Insertion order stands in for created_at, and the sort is STABLE so
+// same-day events keep it. A double returning map order instead would let
+// a same-day ordering bug pass here and fail only against real Postgres.
 func (d *holdingEventRepoDouble) ordered(match func(domain.HoldingEvent) bool) []domain.HoldingEvent {
 	out := []domain.HoldingEvent{}
 	for _, e := range d.rows {
@@ -180,11 +179,11 @@ func (d *holdingEventRepoDouble) Insert(_ context.Context, e domain.HoldingEvent
 	return e, nil
 }
 
-// InsertWithFold mirrors the real repository's contract: fold sees the events
-// that WOULD exist, and the insert happens only if it accepts. A single
-// goroutine cannot exercise the lock, so what this double pins is the
+// InsertWithFold mirrors the real repository's contract: fold sees the
+// events that WOULD exist, and the insert happens only if it accepts. A
+// single goroutine cannot exercise the lock, so this double only pins the
 // ordering -- fold before write, and fold's refusal preventing the write.
-// The lock itself is proved against a real Postgres in
+// The lock is proved against real Postgres in
 // postgres/holding_repo_test.go's racing-disposals test.
 func (d *holdingEventRepoDouble) InsertWithFold(
 	ctx context.Context,
