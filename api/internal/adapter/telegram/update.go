@@ -18,21 +18,19 @@ type Message struct {
 	Chat struct {
 		ID int64 `json:"id"`
 		// Type is "private", "group", "supergroup" or "channel". Only
-		// "private" is a single person, and every write keyed on a chat id
-		// -- the Telegram binding, the pending-spend map, a knock -- assumes
-		// one person. In a group the chat is everyone in it: any member
-		// could confirm another member's spend, and a sign-in link sent to
-		// the chat would be posted to the room (security review
-		// 2026-09-19, finding 2).
+		// "private" is one person -- every chat-id-keyed write (the
+		// Telegram binding, the pending-spend map, a knock) assumes that.
+		// In a group the chat is everyone in it: any member could confirm
+		// another's spend, and a sign-in link sent there would post to the
+		// room (security review 2026-09-19, finding 2).
 		Type string `json:"type"`
 	} `json:"chat"`
 	// From is absent on a channel post, so this is a pointer and every
-	// reader must handle nil. isPrivateChatWithItsOwner reads From.ID, the
-	// security gate behind every command this bot accepts. From.Username is
-	// the one field on this type that stays display-only -- the confirm
-	// screen names the chat that redeemed a link -- never used to decide
-	// anything, because a username is chosen by its owner and Telegram lets
-	// it change.
+	// reader must handle nil. isPrivateChatWithItsOwner reads From.ID: the
+	// security gate behind every command this bot accepts. From.Username
+	// stays display-only -- the confirm screen names the chat that redeemed
+	// a link -- and is never used to decide anything, since a username is
+	// owner-chosen and Telegram lets it change.
 	From *User `json:"from"`
 }
 
@@ -45,16 +43,14 @@ type User struct {
 	FirstName string `json:"first_name"`
 }
 
-// senderName is the @username, or "" when Telegram sent none. It never falls
-// back to FirstName: the confirm screen (decision 7,
-// docs/adr/0010-binding-a-chat-needs-a-confirm.md) renders this value as
-// "@<name>", and that is the *only* evidence a member gets that the chat
-// which redeemed their link is really theirs. A first name is attacker-
-// chosen and not unique -- a chat with no @username and a first name of
-// "andreas" would render as "@andreas", indistinguishable from the real
-// handle, which forges the one piece of evidence the confirm step exists to
-// give. "" is a legitimate value the confirm screen renders honestly as "a
-// Telegram chat with no username" -- not an error.
+// senderName is the @username, or "" when Telegram sent none. It never
+// falls back to FirstName: the confirm screen
+// (docs/adr/0010-binding-a-chat-needs-a-confirm.md) shows this as "@<name>",
+// the only evidence a member gets that the chat which redeemed their link
+// is really theirs. A first name is attacker-chosen and not unique -- a
+// chat with no @username and first name "andreas" would render as
+// "@andreas", indistinguishable from the real handle. "" is legitimate,
+// rendered honestly as "a Telegram chat with no username", not an error.
 func senderName(m *Message) string {
 	if m.From == nil {
 		return ""
@@ -66,12 +62,11 @@ func senderName(m *Message) string {
 // person's own one-to-one chat with the bot.
 //
 // Two gates, deliberately, because each fails differently. Chat.Type is
-// Telegram's own answer and is checked with a switch whose default refuses,
-// so a chat kind this build has never heard of is refused rather than
-// guessed at (CLAUDE.md: fail closed on values you did not construct).
-// From.ID == Chat.ID is the arithmetic that holds only in a private chat,
-// and it still holds if Telegram ever adds a private-like type we would
-// otherwise have to enumerate.
+// Telegram's own answer, checked with a switch whose default refuses: an
+// unrecognised chat kind is refused, not guessed at (CLAUDE.md: fail closed
+// on values you did not construct). From.ID == Chat.ID is the arithmetic
+// that holds only in a private chat, and keeps holding even if Telegram
+// adds a private-like type we would otherwise have to enumerate.
 func isPrivateChatWithItsOwner(m *Message) bool {
 	switch m.Chat.Type {
 	case "private":
@@ -88,13 +83,12 @@ type StartCommand struct {
 	Username string // Telegram's @name; "" when Telegram sent none. Never a first name -- see senderName.
 }
 
-// ParseStart returns false for everything that is not a /start, including
-// updates with no message at all, and for a /start whose chat is not
-// private or whose sender is not the chat itself (isPrivateChatWithItsOwner)
-// -- neither ever reaches the poller's dispatch. The switch has a default
-// that ignores rather than one that guesses: this value arrives from a
-// third party, so the rule is the same as for a database column -- refuse
-// what you did not construct.
+// ParseStart returns false for everything that is not a /start, including an
+// update with no message, and for a /start whose chat is not private or whose
+// sender is not the chat itself (isPrivateChatWithItsOwner) -- neither ever
+// reaches the poller's dispatch. This value arrives from a third party, so
+// the default case refuses rather than guesses: the same rule as for a
+// database column, refuse what you did not construct.
 func ParseStart(u Update) (StartCommand, bool) {
 	if u.Message == nil {
 		return StartCommand{}, false

@@ -7,9 +7,8 @@ import (
 )
 
 // TestTLSPolicyFromMode pins the mapping config.Config.SMTPTLSMode's three
-// accepted strings resolve to. This used to be hardcoded to NoTLS
-// unconditionally (a production blocker: no hosted relay accepts that), so
-// this test exists to catch a regression back to a single hardcoded policy.
+// accepted strings resolve to. Don't hardcode this to NoTLS: no hosted relay
+// accepts unencrypted SMTP.
 func TestTLSPolicyFromMode(t *testing.T) {
 	cases := []struct {
 		mode string
@@ -18,10 +17,9 @@ func TestTLSPolicyFromMode(t *testing.T) {
 		{"mandatory", gomail.TLSMandatory},
 		{"opportunistic", gomail.TLSOpportunistic},
 		{"none", gomail.NoTLS},
-		// Anything else falls back to TLSMandatory, never NoTLS: config.Load
-		// already rejects any other value before it reaches here, so this is
-		// a defensive default, and a default that guesses must guess the side
-		// that refuses to send a sign-in link in plain text.
+		// Anything else falls back to TLSMandatory, never NoTLS -- config.Load
+		// already rejects other values, so this is purely defensive, and a
+		// default that guesses must guess the side that refuses plain text.
 		{"unexpected", gomail.TLSMandatory},
 	}
 	for _, tc := range cases {
@@ -32,10 +30,9 @@ func TestTLSPolicyFromMode(t *testing.T) {
 }
 
 // TestNewSMTPMailerWiresEveryConfigValue pins that NewSMTPMailer's
-// parameters land on the fields send() actually reads -- host/port parsed
-// from addr, and username/password/tls carried through unchanged -- so a
-// future refactor of the constructor can't silently drop one of them the way
-// TLS policy and credentials were dropped (hardcoded) before this fix.
+// parameters land on the fields send() actually reads -- host/port from
+// addr, username/password/tls carried through unchanged. Don't let a
+// refactor silently drop one, as these were once hardcoded instead.
 func TestNewSMTPMailerWiresEveryConfigValue(t *testing.T) {
 	m := NewSMTPMailer("smtp.example.com:587", "Hearth <noreply@hearth.example>",
 		"http://localhost:5173", "relay-user", "relay-pass", "mandatory")

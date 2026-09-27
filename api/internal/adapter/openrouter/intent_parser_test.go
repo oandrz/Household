@@ -190,7 +190,7 @@ func TestACommaSeparatedModelListBecomesAFallbackList(t *testing.T) {
 }
 
 // OpenRouter refuses a fallback list longer than three with a 400 on every
-// request; the first live walk hit exactly that. Refuse at boot instead.
+// request, so refuse it at boot instead.
 func TestMoreThanThreeModelsIsRefusedAtConstruction(t *testing.T) {
 	if _, err := NewIntentParser("k", "a,b,c,d"); err == nil {
 		t.Fatal("four models must be refused when the parser is built, not on every message")

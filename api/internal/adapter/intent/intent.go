@@ -1,10 +1,9 @@
-// Package intent holds what a language-model adapter for
-// usecase.IntentParser needs that is not about the wire: the prompt, the
-// one tool the model is asked to call, and the fail-closed reader of that
-// tool's arguments. It is separate from adapter/openrouter because the
-// reader is the last line between a model's output and the ledger and
-// deserves its own tests, and because a second adapter (there was a Claude
-// one for a day) reuses all of it and none of the HTTP.
+// Package intent holds what a language-model adapter for usecase.IntentParser
+// needs that isn't about the wire: the prompt, the one tool the model may
+// call, and the fail-closed reader of its arguments. It is separate from
+// adapter/openrouter so the reader -- the last line before a model's output
+// reaches the ledger -- gets its own tests, and so another adapter can reuse
+// it without any of the HTTP.
 package intent
 
 import (
@@ -54,12 +53,11 @@ func SystemPrompt(in usecase.ParseIntentInput) string {
 }
 
 // ReadArguments turns the tool call's JSON arguments into an Intent. It
-// fails closed on the one value the model constructs that the code later
-// switches on: any kind other than expense or income becomes "none", so a
-// model that invents "transfer" or "refund" makes the bot say "I could not
-// read that" rather than write something. Malformed JSON is an error, not
-// "none", because that is the adapter's fault to surface, not the person's
-// sentence.
+// fails closed on Kind, the one value the model constructs that code later
+// switches on: any kind other than expense or income becomes "none", so an
+// invented kind like "transfer" reads as "I could not read that" rather than
+// writing something. Malformed JSON is an error, not "none" -- that's the
+// adapter's fault to surface, not the person's sentence.
 func ReadArguments(raw []byte) (usecase.Intent, error) {
 	var out struct {
 		Kind, Amount, Description, Account, Category string

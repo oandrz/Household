@@ -28,10 +28,9 @@ func newRecordingMailpit(t *testing.T, handler func(w http.ResponseWriter, r *ht
 	rec.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		rec.mu.Lock()
 		// EscapedPath, not Path: Go's server has already decoded Path by the
-		// time a handler sees it, so a request for ".../..%2Fmessages"
-		// arrives as ".../../messages" there and the escaping test below
-		// would fail against correct code. EscapedPath is what actually went
-		// over the wire.
+		// time a handler sees it, so a request for ".../..%2Fmessages" would
+		// arrive there as ".../../messages," breaking the escaping test
+		// below. EscapedPath is what actually went over the wire.
 		rec.paths = append(rec.paths, r.URL.EscapedPath())
 		rec.mu.Unlock()
 		handler(w, r)
@@ -130,11 +129,11 @@ func TestMailpitOutboxMessageMapsTheDetailResponse(t *testing.T) {
 	}
 }
 
-// Decision 2 of the spec, held by a test rather than by a comment. Mailpit's
-// link-check endpoint issues a real HTTP request to every URL in the body,
-// and every URL in a Hearth email is a live single-use token on a public
-// host. This is the kind of rule that survives review and dies in a later
-// refactor unless something fails when it is broken.
+// Mailpit's link-check endpoint issues a real HTTP request to every URL in
+// the body, and every URL in a Hearth email is a live single-use token on a
+// public host, so it must never be called. Held by a test rather than a
+// comment: this is the kind of rule that survives review and dies in a
+// later refactor unless something fails when it is broken.
 func TestMailpitOutboxNeverCallsLinkCheck(t *testing.T) {
 	server := newRecordingMailpit(t, func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -196,10 +195,9 @@ func TestMailpitOutboxMapsEveryOtherFailureToUnavailable(t *testing.T) {
 	})
 
 	// A list has nothing to not-find. Mailpit supports a configured webroot,
-	// so a MAILPIT_API_URL carrying a stray path segment makes
-	// /api/v1/messages answer 404 -- and mapping that to ErrNotFound would
-	// reach the screen as an empty list under a line that says messages do
-	// not last, which is both wrong and convincing.
+	// so a MAILPIT_API_URL with a stray path segment makes /api/v1/messages
+	// answer 404; as ErrNotFound that would show an empty list under a line
+	// saying messages do not last -- wrong and convincing.
 	t.Run("a 404 on the list is unavailable, not not-found", func(t *testing.T) {
 		server := newRecordingMailpit(t, func(w http.ResponseWriter, _ *http.Request) {
 			w.WriteHeader(http.StatusNotFound)

@@ -10,10 +10,9 @@ import (
 )
 
 // Client talks to Telegram's Bot API. It holds the bot token and must never
-// put it in an error, a log line, or anything else that leaves this file --
-// the token is a full credential for the bot, and Telegram's own API URLs
-// embed it in the path, which is exactly why errors here are built from the
-// method name rather than from the request URL.
+// leak it into an error, a log line, or anything else leaving this file: the
+// token is a full credential, and Telegram's own API URLs embed it in the
+// path -- so errors here are built from the method name, never the URL.
 type Client struct {
 	token string
 	base  string
@@ -49,10 +48,9 @@ func (c *Client) call(ctx context.Context, method string, body any, out any) err
 	url := fmt.Sprintf("%s/bot%s/%s", c.base, c.token, method)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(encoded))
 	if err != nil {
-		// Same reason as the transport error below: NewRequestWithContext
-		// parses the URL, and a url.Error carries that URL -- which contains
-		// the bot token -- so it must not be wrapped with %w into anything
-		// that leaves this package.
+		// NewRequestWithContext parses the URL, and its url.Error embeds
+		// that URL -- which contains the bot token -- so this must never
+		// be wrapped with %w into anything that leaves the package.
 		return fmt.Errorf("build %s request: invalid request", method)
 	}
 	req.Header.Set("Content-Type", "application/json")

@@ -24,7 +24,7 @@ type Command struct {
 	UpdateID int64
 	// Name is one of spend, income, balance, recent, help, yes, no, or
 	// text -- the last being a plain sentence, which only means something
-	// when an IntentParser is configured (stage 5b).
+	// when an IntentParser is configured.
 	Name string
 	// For spend and income:
 	Amount      string
@@ -40,16 +40,19 @@ type Command struct {
 //	/balance
 //	/recent
 //	/help
+//	/yes
+//	/no
+//	/nudges on|off
 //
 // Tokens beginning with # and @ may appear anywhere after the amount and
 // may contain spaces when written as #"dining out" or @"DBS Savings"; the
-// rest of the words are the description. Anything else -- /start, plain
-// text, an unknown slash -- returns false, and the caller decides whether
-// plain text means anything (it does not, in this stage). A message whose
-// chat is not private or whose sender is not the chat itself
-// (isPrivateChatWithItsOwner) also returns false, the same gate ParseStart
-// applies, refused before its grammar is even read. Refuse what you did not
-// construct: an unknown command is ignored, never guessed at.
+// rest of the words are the description. Plain text returns true with Name
+// "text" -- the Commander decides what it means, only with a parser
+// configured. /start and an unknown slash return false. So does a message
+// whose chat is not private or whose sender is not the chat itself
+// (isPrivateChatWithItsOwner) -- the same gate ParseStart applies, refused
+// before the grammar is even read. Refuse what you did not construct: an
+// unknown command is ignored, never guessed at.
 func ParseCommand(u Update) (Command, bool) {
 	if u.Message == nil {
 		return Command{}, false
@@ -70,7 +73,7 @@ func ParseCommand(u Update) (Command, bool) {
 	}
 	word, rest, _ := strings.Cut(text, " ")
 	// Telegram appends @botname to commands in groups: "/spend@HearthBot".
-	// Group traffic no longer reaches here (isPrivateChatWithItsOwner above),
+	// Group traffic never reaches here (isPrivateChatWithItsOwner above),
 	// but a person may still type the suffix by hand after copying a command
 	// out of a group, so the strip stays.
 	word, _, _ = strings.Cut(strings.ToLower(word), "@")
@@ -185,11 +188,10 @@ type pendingIntent struct {
 // twenty minutes later is more likely a reply to something else.
 const pendingTTL = 5 * time.Minute
 
-// parseTimeout caps one call to the parser. The poller handles updates one
-// at a time on its own goroutine, so a provider that stalls (a free-tier
-// queue, a slow model) would otherwise hold every chat's next message for
-// as long as the provider liked. Whichever adapter is wired, this is the
-// one ceiling; the adapters' own client timeouts are a second line.
+// parseTimeout caps one call to the parser: the poller handles updates
+// serially on one goroutine, so a stalling provider would otherwise hold
+// every chat's next message indefinitely. This is the one ceiling
+// regardless of adapter; each adapter's own client timeout is a second line.
 const parseTimeout = 30 * time.Second
 
 func NewCommander(r CallerResolver, s CommandService, sender Sender) *Commander {
@@ -230,9 +232,8 @@ func (c *Commander) HandleCommand(ctx context.Context, cmd Command) error {
 	member, err := c.resolver.Resolve(ctx, cmd.ChatID)
 	if err != nil {
 		// A plain sentence from an unlinked chat gets silence, not a reply:
-		// before free text existed such a message was ignored, and every
-		// reply is an outbound send against the same Telegram budget
-		// sign-in links use. A slash command still gets the sentence back.
+		// every reply is an outbound send against the same Telegram budget
+		// sign-in links use. A slash command still gets a reply.
 		if cmd.Name == "text" {
 			return nil
 		}
@@ -324,9 +325,9 @@ func (c *Commander) nudges(ctx context.Context, cmd Command) error {
 	return c.sender.SendMessage(ctx, cmd.ChatID, replyNudgesOff)
 }
 
-// freeText is stage 5b: a sentence, read by the parser into the same
-// fields /spend takes, shown back, and held until /yes. The guard above
-// has already run, so a stranger's message never reaches the API.
+// freeText reads a sentence into the same fields /spend takes, shows it
+// back, and holds it until /yes. The guard above has already run, so a
+// stranger's message never reaches the API.
 func (c *Commander) freeText(ctx context.Context, member domain.Membership, cmd Command) error {
 	if c.parser == nil {
 		return c.sender.SendMessage(ctx, cmd.ChatID, replyNoParser)
@@ -473,11 +474,10 @@ func explain(err error) string {
 			return fmt.Sprintf("No %s called %q. One of: %s", re.What, re.Typed, list)
 		}
 	}
-	// ErrInvalidAmount, not ErrInvalidMoney: /spend's amount text goes
-	// through domain.ParseAmount, and ErrInvalidMoney now means a currency
-	// problem only. Nothing a chat member types reaches a currency check --
-	// the account's own stored currency is used -- so an ErrInvalidMoney here
-	// is an internal fault and falls through to the logged generic reply.
+	// ErrInvalidAmount, not ErrInvalidMoney: /spend's amount goes through
+	// domain.ParseAmount, and ErrInvalidMoney means a currency problem only.
+	// Nothing typed in a chat reaches a currency check -- the account's own
+	// stored currency is used -- so ErrInvalidMoney here is an internal fault.
 	if errorsIs(err, domain.ErrInvalidAmount) {
 		return "That amount could not be read. Use the account's currency, e.g. 84.50 (no more decimals than the currency has)."
 	}
