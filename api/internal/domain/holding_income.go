@@ -77,14 +77,14 @@ func (i HoldingIncome) Validate(holdingCurrency, primaryCurrency string) error {
 	if i.Amount.Currency != holdingCurrency {
 		return fmt.Errorf("%w: income is %s, holding is %s", ErrCurrencyMismatch, i.Amount.Currency, holdingCurrency)
 	}
-	if i.Amount.Amount < 0 {
-		return fmt.Errorf("%w: an income amount cannot be negative, got %d", ErrNegativeAmount, i.Amount.Amount)
-	}
-	// Zero is refused for the reason a zero-quantity event is: nothing changed
-	// hands, so there is nothing to record, and a row of zero only dilutes the
-	// count of what the household actually earned.
-	if i.Amount.Amount == 0 {
-		return ErrHoldingIncomeAmountNotPositive
+	// One rule, one error, for zero and negative alike. Zero is refused for
+	// the reason a zero-quantity event is: nothing changed hands, so there is
+	// nothing to record. Negative is refused because a fee is entered as a
+	// positive amount and subtracted when the period is summed -- which is
+	// exactly what this error's message tells the person, so it serves a
+	// negative better than a generic "cannot be negative" would.
+	if i.Amount.Amount <= 0 {
+		return fmt.Errorf("%w: got %d", ErrHoldingIncomeAmountNotPositive, i.Amount.Amount)
 	}
 	return validatePrimaryAmount(i.PrimaryAmount, holdingCurrency, primaryCurrency)
 }

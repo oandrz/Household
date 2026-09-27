@@ -23,7 +23,7 @@ func NewMoney(amount int64, currency string) (Money, error) {
 
 func (m Money) Add(other Money) (Money, error) {
 	if m.Currency == "" || other.Currency == "" {
-		return Money{}, fmt.Errorf("%w: a Money zero value has no currency", ErrInvalidMoney)
+		return Money{}, fmt.Errorf("%w: a Money zero value has no currency", ErrMoneyWithoutCurrency)
 	}
 	if m.Currency != other.Currency {
 		return Money{}, fmt.Errorf("%w: %s and %s", ErrCurrencyMismatch, m.Currency, other.Currency)

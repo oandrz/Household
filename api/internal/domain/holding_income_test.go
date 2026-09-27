@@ -46,8 +46,8 @@ func TestParseIncomeKindRefusesAnythingElse(t *testing.T) {
 // this package, and one exception is how the rule stops being a rule.
 func TestIncomeRefusesANegativeAmount(t *testing.T) {
 	in := income(t, domain.IncomeFee, -100, "SGD")
-	if err := in.Validate("SGD", "SGD"); !errors.Is(err, domain.ErrNegativeAmount) {
-		t.Fatalf("error = %v, want ErrNegativeAmount", err)
+	if err := in.Validate("SGD", "SGD"); !errors.Is(err, domain.ErrHoldingIncomeAmountNotPositive) {
+		t.Fatalf("error = %v, want ErrHoldingIncomeAmountNotPositive", err)
 	}
 }
 

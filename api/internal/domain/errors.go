@@ -60,20 +60,29 @@ var (
 	// Rates come from a provider this code does not construct, so Rate.Apply
 	// checks rather than trusts.
 	ErrInvalidRate = errors.New("rate is invalid")
-	// ErrInvalidMoney is a currency problem: a code that is not an active ISO
-	// 4217 currency, one this product cannot select, or a Money zero value
-	// that has no currency at all. It is NOT the error for a bad amount --
+	// ErrInvalidMoney is a currency-code problem: a code that is not an
+	// active ISO 4217 currency, or one this product cannot select. It is NOT
+	// the error for a bad amount --
 	// adapter/http/errors.go answers it with "That currency code is not
 	// valid.", so an amount refused with it tells the person to fix the wrong
 	// field. Amounts have their own two sentinels, directly below.
 	ErrInvalidMoney = errors.New("money value is invalid")
+	// ErrMoneyWithoutCurrency: arithmetic was handed a Money zero value, one
+	// with no currency. Nothing a caller sends can produce one -- NewMoney
+	// refuses an empty code with ErrInvalidMoney first -- so it means a bug
+	// in this code, and the HTTP layer answers it as a logged 500, never as
+	// something the person can fix.
+	ErrMoneyWithoutCurrency = errors.New("money has no currency")
 	// ErrNegativeAmount: a money figure that can only be zero or more was
 	// negative -- a holding event's amount, a unit price, an income amount,
 	// a primary-currency figure, a cost pool being prorated.
 	ErrNegativeAmount = errors.New("an amount cannot be negative")
 	// ErrInvalidAmount is ParseAmount's refusal: text that is not a
 	// positive amount the currency can represent -- not a number, too many
-	// decimal places, too large, or zero.
+	// decimal places, too large, or zero. Only the Telegram channel parses
+	// amount text today (explain() in adapter/telegram/commands.go), so
+	// adapter/http/errors.go has no row for it. An HTTP route that starts
+	// parsing text must add one, with its own code, in the same change.
 	ErrInvalidAmount                = errors.New("that is not an amount")
 	ErrOwnerMustHoldAllCapabilities = errors.New("an owner must hold every capability")
 

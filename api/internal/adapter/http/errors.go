@@ -293,6 +293,12 @@ var domainErrorResponses = []domainErrorResponse{
 		internal:  true,
 	},
 	{
+		// A Money zero value reached arithmetic: a bug here, never input.
+		// Its own case only so the log line names the cause.
+		sentinels: []error{domain.ErrMoneyWithoutCurrency},
+		internal:  true,
+	},
+	{
 		// Unlike ErrAmountOverflow above, this is no longer only an internal-
 		// arithmetic signal: HouseholdService.Update (Task 15) wraps a
 		// caller-supplied currency code's domain.NewMoney failure in this
@@ -306,26 +312,16 @@ var domainErrorResponses = []domainErrorResponse{
 		message:   "That currency code is not valid.",
 	},
 	{
-		// Every money field that cannot go below zero -- a holding event's
-		// amount, a unit price, an income amount, a primary-currency figure.
+		// Every money field a caller sends that cannot go below zero -- a
+		// holding event's amount, a unit price, a primary-currency figure.
 		// Before this row existed they all wrapped ErrInvalidMoney and were
-		// told their currency code was wrong.
+		// told their currency code was wrong. Quantity.Value and
+		// Money.Prorate raise it too, but only on stored figures the
+		// database's own CHECKs already keep non-negative.
 		sentinels: []error{domain.ErrNegativeAmount},
 		status:    http.StatusUnprocessableEntity,
 		code:      "NEGATIVE_AMOUNT",
 		message:   "An amount cannot be negative.",
-	},
-	{
-		// ParseAmount's refusal. No HTTP route parses amount text today --
-		// the API takes minor units as integers -- so only the Telegram
-		// channel reaches it (explain() in adapter/telegram/commands.go).
-		// Mapped anyway so a future route that does parse text answers a
-		// 422 rather than a 500. Shares INVALID_AMOUNT with the transaction
-		// row below: the same field-level problem, a different sentence.
-		sentinels: []error{domain.ErrInvalidAmount},
-		status:    http.StatusUnprocessableEntity,
-		code:      "INVALID_AMOUNT",
-		message:   "That amount could not be read. Use digits, with no more decimal places than the currency has.",
 	},
 	{
 		sentinels: []error{domain.ErrInviteExpired},

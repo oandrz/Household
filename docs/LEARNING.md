@@ -4739,11 +4739,15 @@ route with a missing guard has no second line of defence.
   amount text** (`ParseAmount`, Telegram `/spend`). So a household entering
   a negative purchase price was told to fix a currency field it never
   touched. Confirmed over HTTP on all four holding money fields before the
-  fix. Each now has its own sentinel: `ErrNegativeAmount` → `422
-  NEGATIVE_AMOUNT`, `ErrInvalidAmount` → `422 INVALID_AMOUNT`, and Telegram's
-  `explain()` now keys its "could not be read" reply off `ErrInvalidAmount`.
-  `ErrInvalidMoney` means a currency problem only, and its doc comment says
-  so. Every test that asserted the old sentinel for a negative or a parse
+  fix. Now: `ErrNegativeAmount` → `422 NEGATIVE_AMOUNT`; a negative income
+  folds into income's existing "must be positive" rule, whose message already
+  explains that a fee is entered positive; `ErrInvalidAmount` is
+  `ParseAmount`'s own sentinel, and Telegram's `explain()` keys its "could not
+  be read" reply off it. The fix's code review found a **fourth** meaning
+  still on `ErrInvalidMoney` — "arithmetic was handed a Money zero value",
+  a bug, not input — which would also have told a household to fix its
+  currency. That is now `ErrMoneyWithoutCurrency`, answered as a logged 500.
+  `ErrInvalidMoney` means a currency code only, and its doc comment says so. Every test that asserted the old sentinel for a negative or a parse
   failure was also asserting the wrong thing, and passed because the
   sentinel was shared. **When you wrap an existing sentinel, read the
   message its HTTP row answers with; if that sentence is wrong for your
