@@ -10,10 +10,9 @@ import (
 	"github.com/andreasoentoro/hearth/api/internal/usecase"
 )
 
-// telegramCommandFixture wires a TelegramCommandService over the same
-// transaction fixture the ledger tests use, plus an account list and a
-// category list with matching ids, so a chat command resolves names to the
-// very ids TransactionService then validates.
+// telegramCommandFixture wires a TelegramCommandService over the ledger
+// tests' transaction fixture, with matching account/category ids, so a
+// chat command resolves names to the ids TransactionService then validates.
 func telegramCommandFixture(t *testing.T, accounts ...domain.Account) (*usecase.TelegramCommandService, *fakeTransactionRepo) {
 	t.Helper()
 	txnSvc, txnRepo := transactionFixtureWithAccount(t, "jpy", "JPY")

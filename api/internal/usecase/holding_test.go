@@ -325,10 +325,9 @@ func TestPortfolioFoldsEachHoldingFromItsOwnEventsOnly(t *testing.T) {
 	}
 }
 
-// The PRD's "no figure and a reason" rule, and it is the SERVICE's job to
-// produce the absence rather than the handler's. A holding nobody has priced
-// has no market value -- not a market value of zero, which reads as "this is
-// worthless" rather than "nobody has said".
+// The PRD requires "no figure and a reason" rather than a market value of
+// zero, which would misleadingly read as "worthless" -- and producing that
+// absence is the SERVICE's job, not the handler's.
 func TestAHoldingWithNoValuationHasNoMarketValueRatherThanZero(t *testing.T) {
 	f := newHoldingFixture(t, "SGD")
 	ctx := context.Background()
@@ -398,10 +397,9 @@ func TestRecordValuationRefusesAPriceInTheWrongCurrency(t *testing.T) {
 	}
 }
 
-// The PRD reports every figure in the household's primary currency with the
-// instrument's own beside it: a US stock up 5% in USD while SGD gained 6%
-// against USD made the household poorer, and the primary figure has to say so.
-// The valuation carries both prices, so the view carries both values.
+// The PRD reports every figure in the primary currency alongside the
+// instrument's own: a US stock up 5% in USD while SGD gains 6% against USD
+// still makes the household poorer, so the primary figure must say so.
 func TestAForeignHoldingCarriesItsValueInBothCurrencies(t *testing.T) {
 	f := newHoldingFixture(t, "SGD")
 	ctx := context.Background()
@@ -468,10 +466,9 @@ func TestAHoldingAlreadyInPrimaryCurrencyReportsOneFigure(t *testing.T) {
 	}
 }
 
-// An archived holding still folds to its real position. Archiving is how a
-// household retires a position it no longer wants on the page; it is not a
-// claim that the position was always empty, and reporting held 0 / cost 0
-// would be exactly that claim.
+// Archiving retires a position from the page; it is not a claim the
+// position was always empty. Reporting held 0 / cost 0 would be exactly
+// that false claim, so an archived holding still folds to its real numbers.
 func TestAnArchivedHoldingStillReportsWhatItHeld(t *testing.T) {
 	f := newHoldingFixture(t, "SGD")
 	ctx := context.Background()
@@ -510,11 +507,10 @@ func TestAnArchivedHoldingStillReportsWhatItHeld(t *testing.T) {
 	}
 }
 
-// Accounts already refuse a future opening balance (ErrOpeningBalanceInFuture),
-// and the reason applies here with more force: ListLatestValuations orders by
-// as_of, so a price mistyped as 2030 wins forever. The holding's market value
-// is then pinned to a number nobody can explain, and the "as of" label on the
-// page reads a date in the future without comment.
+// Accounts already refuse a future opening balance (ErrOpeningBalanceInFuture)
+// for the same reason: ListLatestValuations orders by as_of, so a price
+// mistyped as 2030 would win forever, pinning the market value to a number
+// nobody can explain.
 func TestRecordValuationRefusesADateInTheFuture(t *testing.T) {
 	f := newHoldingFixture(t, "SGD")
 	h := f.create(t, "D05", "SGD")

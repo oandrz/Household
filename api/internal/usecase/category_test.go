@@ -45,10 +45,9 @@ func TestListDoesNotReseedAHouseholdThatAlreadyHasCategories(t *testing.T) {
 	}
 }
 
-// TestCreateTrimsWhitespaceAndRefusesEmptyName pins the same whitespace
-// convention AccountService.validate uses for a nickname: leading and
-// trailing space is stripped before the empty check, so "  " and "" are both
-// refused rather than one slipping through as a category named "  ".
+// TestCreateTrimsWhitespaceAndRefusesEmptyName mirrors
+// AccountService.validate: trim before the empty check, so "  " and "" are
+// both refused rather than saving a blank-named category.
 func TestCreateTrimsWhitespaceAndRefusesEmptyName(t *testing.T) {
 	repo := &fakeCategoryRepo{}
 	svc := usecase.NewCategoryService(repo)
@@ -85,10 +84,9 @@ func TestCreateCategoryIsAlwaysExpenseKind(t *testing.T) {
 	}
 }
 
-// TestCreateCategoryCollisionPassesThroughUntranslated asserts the service
-// does not wrap or swallow the repository's collision sentinel -- Task 10's
-// handler maps domain.ErrCategoryNameTaken to a 409 by identity, so
-// errors.Is must still hold after the service call.
+// TestCreateCategoryCollisionPassesThroughUntranslated: the service must
+// not wrap or swallow the collision sentinel -- the handler maps
+// domain.ErrCategoryNameTaken to a 409 by identity, so errors.Is must hold.
 func TestCreateCategoryCollisionPassesThroughUntranslated(t *testing.T) {
 	repo := &fakeCategoryRepo{}
 	svc := usecase.NewCategoryService(repo)

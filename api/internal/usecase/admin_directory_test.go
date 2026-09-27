@@ -12,9 +12,8 @@ import (
 
 var directoryNow = time.Date(2026, 9, 2, 12, 0, 0, 0, time.UTC)
 
-// fakeDirectoryRepo records every argument it is given and answers what the
-// test configured, so a test can assert both what the service asked for and
-// what it did with the answer.
+// fakeDirectoryRepo records every argument it is given and returns what the
+// test configured, so a test can assert on both the request and the result.
 type fakeDirectoryRepo struct {
 	metrics        usecase.DirectoryMetrics
 	rows           []usecase.HouseholdListing
@@ -45,9 +44,9 @@ func (f *fakeDirectoryRepo) Household(_ context.Context, _ string, _ time.Time) 
 	return f.detail, f.detailErr
 }
 
-// directoryAttempts is a LoginAttemptRepository that answers FailuresSince
-// with a fixed list and counts how often it was asked. Every other method
-// fails loudly so a test cannot lean on one by accident.
+// directoryAttempts is a LoginAttemptRepository stub: FailuresSince answers
+// with a fixed list and counts calls; every other method fails loudly so a
+// test cannot lean on one by accident.
 type directoryAttempts struct {
 	failures []time.Time
 	calls    int

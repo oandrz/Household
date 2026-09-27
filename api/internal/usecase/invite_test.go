@@ -13,10 +13,9 @@ import (
 )
 
 // lastInviteToken extracts the raw token from the most recently sent invite
-// email's URL -- "<BaseURL>/invite/<token>" -- failing the test if no invite
-// was ever sent or the URL carried no token. SendInvite runs synchronously
-// on the caller's goroutine (unlike SendMagicLink), so there is no
-// background send to wait for the way mailerDouble.waitForSend exists for.
+// email's URL ("<BaseURL>/invite/<token>"), failing the test if none was
+// sent or no token was found. SendInvite runs synchronously, unlike
+// SendMagicLink, so there is no background send to wait for.
 func lastInviteToken(t *testing.T, f *fixture) string {
 	t.Helper()
 	url := f.mailer.lastInviteURL()
@@ -49,14 +48,11 @@ func TestCreateWithAnEmailSendsExactlyOneInviteEmail(t *testing.T) {
 }
 
 // TestCreateRejectsAnInviteToAnAddressThatAlreadyHasAUsersRow pins the fix
-// for the invite-to-an-existing-member 500: InviteRepo.Accept unconditionally
-// calls CreateUser and never reuses an existing row, so an invite to an
-// address that already belongs to a user (a mistype of a current member's
-// address, or a re-invite) would write successfully, mail successfully, and
-// then 500 forever at acceptance -- the invite's own transaction rolling
-// back on every retry. Create must refuse this before writing anything, so
-// the owner who typed the address sees the problem immediately instead of
-// the recipient hitting a dead end later.
+// for a 500 at acceptance: InviteRepo.Accept unconditionally calls CreateUser
+// and never reuses an existing row, so inviting an address that already has
+// a user (a mistype or a re-invite) would write and mail successfully, then
+// 500 forever at acceptance. Create refuses it upfront instead, so the owner
+// sees the problem immediately rather than the recipient hitting a dead end.
 func TestCreateRejectsAnInviteToAnAddressThatAlreadyHasAUsersRow(t *testing.T) {
 	f := newFixture(t)
 	ctx := context.Background()
@@ -99,9 +95,9 @@ func TestCreateForALimitedMemberWithNoEmailCreatesNoInviteButCreatesTheChild(t *
 	}
 
 	// The child has no email, so it can't be looked up by ByEmail — walk the
-	// double's rows directly (same package) to find it by display name, and
-	// confirm both halves of the "" <-> SQL NULL convention: an empty email
-	// and an empty password hash, not some other placeholder.
+	// double's rows directly to find it by display name, and confirm both
+	// halves of the "" <-> SQL NULL convention: empty email and empty
+	// password hash, not some other placeholder.
 	child, ok := findUserByDisplayName(f.users, "Baby")
 	if !ok {
 		t.Fatal("no user named Baby was created")
@@ -124,15 +120,13 @@ func TestCreateForALimitedMemberWithNoEmailCreatesNoInviteButCreatesTheChild(t *
 }
 
 // TestCreateInviteForAChildRollsBackTheUserIfMembershipCreationFails proves
-// the fix for the orphaned-user defect a coordinator review caught: the
-// child branch used to call Users.Create and Members.Create as two
-// independent statements, so a failure in the second left a user row
-// committed with a NULL email and no membership -- and because that email
-// is NULL, not unique-constrained, a retry would silently create another
-// orphan rather than failing loudly. UserRepository.CreateWithMembership
-// closes that gap by doing both in one transaction; this test forces the
-// membership half to fail (mirroring the real owners_hold_all_capabilities
-// constraint) and asserts no user survives.
+// the orphaned-user defect stays fixed: don't call Users.Create and
+// Members.Create as two independent statements again, since a NULL email
+// isn't unique-constrained and a failure partway would leave an orphan that
+// a retry silently duplicates rather than catching. CreateWithMembership
+// does both in one transaction; this test fails the membership half
+// (mirroring the real owners_hold_all_capabilities constraint) and asserts
+// no user survives.
 func TestCreateInviteForAChildRollsBackTheUserIfMembershipCreationFails(t *testing.T) {
 	f := newFixture(t)
 	ctx := context.Background()
@@ -154,10 +148,11 @@ func TestCreateInviteForAChildRollsBackTheUserIfMembershipCreationFails(t *testi
 	}
 }
 
-// findUserByDisplayName is the child-lookup path a real caller doesn't
-// need (a child's own display name is not unique in general) but this test
-// does, since Create returns nothing to identify the row it wrote and the
-// child has no email to look up by.
+// findUserByDisplayName exists only for
+// TestCreateForALimitedMemberWithNoEmailCreatesNoInviteButCreatesTheChild: a
+// real caller never needs it, since a child's display name isn't unique,
+// but Create returns nothing to identify the row it wrote and the child has
+// no email to look up by.
 func findUserByDisplayName(d *userDouble, name string) (usecase.StoredUser, bool) {
 	for _, u := range d.byID {
 		if u.DisplayName == name {
@@ -184,13 +179,11 @@ func TestCreateInviteRejectsALimitedRoleHoldingMarriage(t *testing.T) {
 	}
 }
 
-// TestCreateInviteRejectsAnOwnerWithNoEmail guards against the gap a
-// coordinator review caught: RoleLimited with an empty email is the design's
-// child case (created directly, no invite, no email needed), but any other
-// role with an empty email has nowhere for an invite to go. Left unguarded,
-// Create would happily write an invite row and "succeed" while the token it
-// generated was never mailed to anyone -- a row that just sits there,
-// unopenable, until it expires seven days later.
+// TestCreateInviteRejectsAnOwnerWithNoEmail guards a gap: RoleLimited with
+// an empty email is the child case (created directly, no invite needed),
+// but any other role with an empty email has nowhere for an invite to go.
+// Left unguarded, Create would "succeed" while writing a token nobody is
+// mailed -- a dead row, unopenable until it expires seven days later.
 func TestCreateInviteRejectsAnOwnerWithNoEmail(t *testing.T) {
 	f := newFixture(t)
 	ctx := context.Background()
@@ -400,10 +393,10 @@ func TestAcceptInviteRejectsAPasswordShorterThan12CharactersAndCreatesNothing(t 
 	}
 }
 
-// TestAcceptInviteRejectsAPasswordOverTheLengthCeilingAndCreatesNothing is
-// the mirror of the floor test above: argon2id's cost scales with the size
-// of the string it hashes, so Accept must reject an over-length password
-// before ever calling Hasher.Hash, the same way it rejects a too-short one.
+// TestAcceptInviteRejectsAPasswordOverTheLengthCeilingAndCreatesNothing
+// mirrors the floor test above: argon2id's cost scales with the size of the
+// string it hashes, so Accept must reject an over-length password before
+// ever calling Hasher.Hash.
 func TestAcceptInviteRejectsAPasswordOverTheLengthCeilingAndCreatesNothing(t *testing.T) {
 	f := newFixture(t)
 	ctx := context.Background()
@@ -574,12 +567,12 @@ func TestWithdrawCannotReachAnotherHouseholdsInvite(t *testing.T) {
 	}
 }
 
-// --- Task 5: CreateTelegram ---------------------------------------------
+// --- CreateTelegram -------------------------------------------------------
 
-// A Telegram invite has no address anywhere: not in the request, not in the
-// row, not in any mail. ErrInviteRequiresEmail guarded delivery, not
-// identity -- users.email is already nullable and Telegram sign-up already
-// creates owners with no address (spec decision 9).
+// A Telegram invite has no address anywhere -- not in the request, the row,
+// or any mail. ErrInviteRequiresEmail guards delivery, not identity:
+// users.email is already nullable, and Telegram sign-up already creates
+// owners with no address.
 //
 // The exact 47-character payload length ("inv_" plus NewToken's 43
 // base64url characters, under Telegram's 64-character start limit) is a
@@ -607,7 +600,7 @@ func TestCreateTelegramWritesARowWithNoEmailAndReturnsTheLinkOnce(t *testing.T) 
 		t.Fatal("link carried no token after the inv_ prefix")
 	}
 	if got, want := link.ExpiresAt, f.clock.now.Add(24*time.Hour); !got.Equal(want) {
-		t.Fatalf("expires at %v, want %v (spec decision 8: 24 hours)", got, want)
+		t.Fatalf("expires at %v, want %v (an invite lives 24 hours)", got, want)
 	}
 
 	row := f.inviteRepo.byID(link.ID)
@@ -647,10 +640,10 @@ func TestPendingListNeverCarriesAnInviteLink(t *testing.T) {
 	}
 }
 
-// CreateTelegram is refused outright when no bot is configured on this
-// install -- the other half of spec decision 11 (the flag is the HTTP
-// layer's job; see TestTelegramInviteIsRefusedWhileTheFlagIsOff in the http
-// package).
+// CreateTelegram refuses outright when no bot is configured on this
+// install. The other requirement -- the telegram_sign_in flag -- is checked
+// at the HTTP layer instead; see TestTelegramInviteIsRefusedWhileTheFlagIsOff
+// in the http package.
 func TestCreateTelegramRefusesWhenNoBotIsConfigured(t *testing.T) {
 	f := newFixture(t)
 	f.invites = usecase.NewInviteService(usecase.InviteDeps{
@@ -676,8 +669,8 @@ func TestCreateTelegramRefusesWhenNoBotIsConfigured(t *testing.T) {
 	}
 }
 
-// A Telegram invite is admitted by its household's owner, in their own
-// browser, and nowhere else (spec decisions 4 and 7). The public web form
+// A Telegram invite is admitted only by its household's owner, in their own
+// browser session, never from the chat or a raw token. The public web form
 // must therefore treat its token as though it had never existed -- not
 // refuse it with a reason, which would confirm the token is real.
 func TestTheWebFormCannotAcceptATelegramInvite(t *testing.T) {
@@ -690,9 +683,8 @@ func TestTheWebFormCannotAcceptATelegramInvite(t *testing.T) {
 		t.Fatalf("CreateTelegram: %v", err)
 	}
 	// The raw token is recoverable only by stripping the inv_ prefix off the
-	// returned link -- exactly how a real owner's browser would read it,
-	// since nothing else ever holds it (same approach as
-	// TestCreateTelegramWritesARowWithNoEmailAndReturnsTheLinkOnce above).
+	// link -- exactly how a real owner's browser would read it, the same
+	// approach TestCreateTelegramWritesARowWithNoEmailAndReturnsTheLinkOnce uses.
 	rawToken := strings.TrimPrefix(link.URL, "https://t.me/HearthBot?start=inv_")
 	if rawToken == "" {
 		t.Fatal("link carried no token after the inv_ prefix")
@@ -722,10 +714,10 @@ func TestTheWebFormCannotAcceptATelegramInvite(t *testing.T) {
 
 	// The guard sits before checkInviteLive precisely so this stays
 	// domain.ErrNotFound rather than domain.ErrInviteExpired once the
-	// invite's TTL has actually passed -- ErrInviteExpired would tell a
-	// caller the token was real, just late, which is exactly the leak spec
-	// decision 7 rules out. If the guard were ever moved after
-	// checkInviteLive, this is the assertion that would start failing.
+	// invite's TTL passes -- ErrInviteExpired would tell a caller the token
+	// was real, just late, which is exactly the leak this test guards
+	// against. Moving the guard after checkInviteLive would turn this
+	// assertion red.
 	f.clock.Advance(usecase.TelegramInviteTTL + time.Second)
 	if _, err := f.invites.Preview(ctx, rawToken); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("Preview of an expired Telegram invite: got %v, want domain.ErrNotFound", err)
@@ -735,12 +727,11 @@ func TestTheWebFormCannotAcceptATelegramInvite(t *testing.T) {
 	}
 }
 
-// --- Task 8: NewLink -- a new link, which is also "Not them" -------------
+// --- NewLink -- a new link, which is also "Not them" ----------------------
 
 // telegramRawToken recovers the raw token from a TelegramInviteLink's URL by
-// stripping the inv_ payload prefix -- exactly how a real owner's browser
-// would read it off the link, and the same approach every other Telegram
-// invite test in this file uses.
+// stripping the inv_ payload prefix -- the same approach every Telegram
+// invite test in this file uses to read a link the way a real browser would.
 func telegramRawToken(t *testing.T, url string) string {
 	t.Helper()
 	raw := strings.TrimPrefix(url, "https://t.me/HearthBot?start=inv_")
@@ -751,8 +742,8 @@ func telegramRawToken(t *testing.T, url string) string {
 }
 
 // One route does "get a new link" and "Not them". The old link stops
-// working the moment the new one exists -- that is what makes a leaked link
-// cost one new link rather than a takeover (spec decision 2).
+// working the moment the new one exists, so a leaked link costs one new
+// link, never a takeover.
 func TestANewLinkKillsTheOldOneAndClearsTheKnock(t *testing.T) {
 	f := newFixture(t)
 	ctx := context.Background()
@@ -793,8 +784,8 @@ func TestANewLinkKillsTheOldOneAndClearsTheKnock(t *testing.T) {
 }
 
 // An email invite has no link to replace. Refused with its own message
-// rather than silently converted: the channel is fixed when the invite is
-// created (spec decision 9).
+// rather than silently converted: an invite has exactly one channel, fixed
+// at creation.
 func TestANewLinkIsRefusedForAnEmailInvite(t *testing.T) {
 	f := newFixture(t)
 	ctx := context.Background()
@@ -830,11 +821,11 @@ func TestANewLinkForAnotherHouseholdsInviteIsNotFound(t *testing.T) {
 	}
 }
 
-// The courtesy message to the knocked chat is best-effort: NewLink's own
-// doc comment says the send happens after the write and its failure is
-// logged, never returned, because the owner must still get the new link
-// they asked for. Mutation check: inline the return of that error and this
-// test turns red.
+// The courtesy message to the knocked chat is best-effort: the comment
+// inside NewLink, above SendLinkCancelled, says the send happens after the
+// write and its failure is logged, never returned, so the owner still gets
+// the new link they asked for. Mutation check: inline the return of that
+// error and this test turns red.
 func TestANewLinkStillArrivesWhenTellingTheKnockedChatFails(t *testing.T) {
 	f := newFixture(t)
 	ctx := context.Background()
@@ -863,10 +854,10 @@ func TestANewLinkStillArrivesWhenTellingTheKnockedChatFails(t *testing.T) {
 	}
 }
 
-// --- Task 9: Admit -- Let in, the whole point of the milestone ----------
+// --- Admit -- Let in ------------------------------------------------------
 
-// Let in, the whole point of the milestone: one click turns a knock into a
-// member, and the bot sends them a sign-in link in their own chat.
+// Let in: one click turns a knock into a member, and the bot sends them a
+// sign-in link in their own chat.
 func TestAdmitCreatesTheMemberAndSendsTheirSignInLink(t *testing.T) {
 	f := newFixture(t)
 	ctx := context.Background()
@@ -888,7 +879,7 @@ func TestAdmitCreatesTheMemberAndSendsTheirSignInLink(t *testing.T) {
 		t.Fatal("signInSent is false although the send succeeded")
 	}
 	if member.Role != domain.RoleOwner {
-		t.Fatalf("role is %q; Let in grants exactly what the invite said (spec decision 14)", member.Role)
+		t.Fatalf("role is %q; Let in grants exactly what the invite said", member.Role)
 	}
 	if got := f.chats.lastSignInChat(); got != 4242 {
 		t.Fatalf("the sign-in link went to chat %d, want the chat that knocked (4242)", got)
@@ -946,8 +937,8 @@ func TestAdmitForAnotherHouseholdsInviteIsNotFound(t *testing.T) {
 }
 
 // The member exists; only the message failed. Saying so is the whole of the
-// recovery path -- the chat is bound now, so any /start already sends them
-// a fresh sign-in link (spec decision 6).
+// recovery path: the chat is bound now, so any /start already sends a
+// fresh sign-in link.
 func TestAdmitReportsAFailedSendWithoutLosingTheMember(t *testing.T) {
 	f := newFixture(t)
 	ctx := context.Background()
@@ -977,12 +968,12 @@ func TestAdmitReportsAFailedSendWithoutLosingTheMember(t *testing.T) {
 	}
 }
 
-// A nil Chats is what an install that has removed its bot and restarted
-// looks like (docs/INFRASTRUCTURE.md's leaked-token runbook): a knock
-// recorded while the bot was still configured can still be sitting in the
-// table. Admit must report the member with SignInSent: false, the same
-// answer a failed send gets, and must not panic -- see Admit's own doc
-// comment and SetChats' for why Admit, not NewLink, needs this guard.
+// A nil Chats is what an install that removed its bot and restarted looks
+// like (docs/INFRASTRUCTURE.md's leaked-token runbook): a knock recorded
+// while the bot was configured can still be sitting in the table. Admit
+// must report SignInSent: false, like a failed send, and must not panic --
+// see Admit's and SetChats' own doc comments for why Admit, not NewLink,
+// needs this guard.
 func TestAdmitWithNoChatSenderConfiguredReturnsTheMemberWithoutPanicking(t *testing.T) {
 	f := newFixture(t)
 	ctx := context.Background()
@@ -996,10 +987,9 @@ func TestAdmitWithNoChatSenderConfiguredReturnsTheMemberWithoutPanicking(t *test
 		t.Fatalf("Knock: %v", err)
 	}
 
-	// A second InviteService sharing f's own repositories, standing in for
-	// the same process after BOT_TOKEN and BOT_USERNAME are removed: the
-	// row Knock just wrote is still there, but nothing was ever told to
-	// SetChats.
+	// A second InviteService, sharing f's own repositories, stands in for the
+	// same process after BOT_TOKEN and BOT_USERNAME are removed: Knock's row
+	// is still there, but nothing was ever told to SetChats.
 	noChats := usecase.NewInviteService(usecase.InviteDeps{
 		Invites:           f.inviteRepo,
 		Users:             f.users,
@@ -1033,7 +1023,7 @@ func TestAdmitWithNoChatSenderConfiguredReturnsTheMemberWithoutPanicking(t *test
 }
 
 // The chat may have bound itself to a different account between the knock
-// and the click (spec decision 15) -- the same race
+// and the click -- the same race
 // TestAdmitLeavesNothingBehindWhenTheChatIsAlreadyBound proves against real
 // Postgres. Here it is forced through the double to prove
 // InviteService.Admit itself passes the sentinel through untranslated.

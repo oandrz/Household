@@ -10,9 +10,8 @@ import (
 	"github.com/andreasoentoro/hearth/api/internal/usecase"
 )
 
-// fakeOutbox is the in-memory double every test here runs against. It
-// records the limit it was asked for, which is how the clamping tests
-// observe what the service decided.
+// fakeOutbox is the in-memory double every test here runs against, recording
+// the limit it was asked for so the clamping tests can observe the decision.
 type fakeOutbox struct {
 	page       usecase.OutboxPage
 	message    usecase.OutboxMessage
@@ -96,13 +95,11 @@ func TestOutboxListIsNotTruncatedWhenEverythingFits(t *testing.T) {
 	}
 }
 
-// The view type is where the HTML body stops. This test does not prove that
-// on its own -- nothing here would fail if OutboxMessageView grew an HTML
-// field, and claiming otherwise would be exactly the false confidence
-// docs/LEARNING.md pattern 2 is about. What it does prove is that the links
-// are extracted from the body rather than taken from anything the outbox
-// handed over ready made. The field's absence is held one layer out, by Task
-// 5's exact-key assertion and Task 6's .strict() schema.
+// This alone doesn't prove OutboxMessageView drops HTML -- nothing here
+// would fail if it grew an HTML field (the false confidence docs/LEARNING.md
+// pattern 2 warns about). It proves links come from the body, not handed
+// over ready made; the field's absence is enforced elsewhere, by the HTTP
+// API test's exact-key assertion and the frontend's .strict() schema.
 func TestOutboxMessageReturnsExtractedLinksAndTheTextBody(t *testing.T) {
 	outbox := &fakeOutbox{message: usecase.OutboxMessage{
 		ID:      "0OQ1sV2mB7hN4kR8xT3wZq",

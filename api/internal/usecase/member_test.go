@@ -21,15 +21,13 @@ func seedLiveSession(t *testing.T, f *fixture, userID string) {
 	}
 }
 
-// fullPatch is a MembershipPatch that sets both fields, the shape every test
-// here used before Update took a patch.
+// fullPatch is a MembershipPatch that sets both fields.
 func fullPatch(role domain.Role, caps domain.Capabilities) usecase.MembershipPatch {
 	return usecase.MembershipPatch{Role: &role, Capabilities: &caps}
 }
 
-// A field the patch leaves out keeps the value the membership holds when the
-// write happens -- read by the service under the household lock, not
-// supplied by the caller.
+// A field the patch leaves out keeps the membership's current value, read
+// under the household lock, not supplied by the caller.
 func TestUpdateFillsOmittedFieldsFromTheMembershipAsItIsNow(t *testing.T) {
 	f := newFixture(t)
 	ctx := context.Background()
@@ -61,10 +59,9 @@ func TestUpdateDemotingTheOnlyOwnerReturnsErrLastOwnerAndWritesNothing(t *testin
 	ctx := context.Background()
 	seedLiveSession(t, f, f.andreasID)
 
-	// Andreas is the household's only owner. Demoting him to limited -- with
-	// a capability set that is otherwise perfectly valid for a limited role
-	// (no marriage) -- must be rejected for the last-owner reason, not any
-	// capability-shape reason.
+	// Andreas is the household's only owner, and his capability set is
+	// otherwise valid for a limited role, so the rejection must be for the
+	// last-owner reason, not a capability-shape one.
 	_, err := f.memberSvc.Update(ctx, f.householdID, "membership-andreas", fullPatch(domain.RoleLimited,
 		domain.Capabilities{domain.CapCalendar, domain.CapChores, domain.CapMoney}))
 	if !errors.Is(err, domain.ErrLastOwner) {
@@ -127,16 +124,12 @@ func TestUpdateOnAMembershipIDThatDoesNotExistInTheHouseholdReturnsErrNotFound(t
 }
 
 // TestUpdateChangingOnlyCapabilitiesOfALimitedMemberSucceedsWithNoOtherOwner
-// proves the last-owner rule is consulted only when ownership is actually at
-// stake, in a household that has no owner at all. That state is unreachable
-// through MemberService's own API -- Update and Remove both refuse to strip
-// a household of its last owner -- so the test reaches directly into
-// membershipDouble's unexported byID/byUser maps to delete Andreas' owner
-// membership, bypassing the service entirely. This is a test-only shortcut
-// to construct a state the domain rule must still handle correctly, not a
-// capability MemberService offers or a path a real caller can reach. A pure
-// capability edit on Ethan, who stays RoleLimited throughout, must still
-// succeed once that state exists.
+// proves the last-owner rule fires only when ownership is at stake. It
+// builds a household with no owner -- a state Update and Remove refuse to
+// reach through their own API -- by reaching into membershipDouble's
+// unexported maps to delete Andreas' membership directly. A pure capability
+// edit on Ethan, who stays RoleLimited, must still succeed once that state
+// exists.
 func TestUpdateChangingOnlyCapabilitiesOfALimitedMemberSucceedsWithNoOtherOwner(t *testing.T) {
 	f := newFixture(t)
 	ctx := context.Background()
@@ -177,17 +170,12 @@ func TestUpdateSucceedingRevokesThatMembersSessionsOnly(t *testing.T) {
 }
 
 // TestUpdateSucceedingButSessionRevocationFailingReturnsADistinctErrorAndKeepsTheMutation
-// covers the gap a coordinator review caught: Update commits the membership
-// mutation before revoking sessions, and does not roll the mutation back if
-// that revocation fails (see Update's doc comment in member.go for why not).
-// A caller must be able to tell that outcome -- "the change happened, but the
-// old session(s) may still be live" -- apart from an outright failure where
-// nothing happened at all. This forces RevokeAllForUser to fail and asserts
-// both halves: the membership mutation persisted despite the failure, and
-// the returned error is usecase.ErrSessionRevocationFailed specifically, not
-// merely "some error" that could be mistaken for the mutation itself having
-// failed (which would return before ever reaching Sessions.RevokeAllForUser,
-// and would never be this sentinel).
+// covers a gap: Update commits the membership mutation before revoking
+// sessions, and does not roll it back if that revocation fails (see
+// Update's doc comment in member.go for why). A caller must tell "the
+// change happened, but old sessions may still be live" apart from an
+// outright failure, so this asserts both: the mutation persisted, and the
+// error is specifically usecase.ErrSessionRevocationFailed.
 func TestUpdateSucceedingButSessionRevocationFailingReturnsADistinctErrorAndKeepsTheMutation(t *testing.T) {
 	f := newFixture(t)
 	ctx := context.Background()
@@ -243,11 +231,10 @@ func TestRemoveSucceedingDeletesTheMembershipAndRevokesThatUsersSessions(t *test
 }
 
 // TestRemoveSucceedingButSessionRevocationFailingReturnsADistinctErrorAndKeepsTheMutation
-// is Remove's mirror of the Update test above: the membership is deleted
-// before sessions are revoked, that deletion is not undone if the
-// revocation fails, and the caller must see usecase.ErrSessionRevocationFailed
-// -- not an error indistinguishable from Remove having failed outright and
-// left the membership in place.
+// mirrors the Update test above: the membership is deleted before sessions
+// are revoked, that deletion is not undone if revocation fails, and the
+// caller sees usecase.ErrSessionRevocationFailed rather than an error
+// indistinguishable from Remove having failed outright.
 func TestRemoveSucceedingButSessionRevocationFailingReturnsADistinctErrorAndKeepsTheMutation(t *testing.T) {
 	f := newFixture(t)
 	ctx := context.Background()

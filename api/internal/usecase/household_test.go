@@ -112,16 +112,13 @@ func TestCreateSpaceRejectsADuplicateNameWithinTheHousehold(t *testing.T) {
 }
 
 // TestCreateSpaceMapsAConcurrentDuplicateKeyOntoErrSpaceNameTaken simulates
-// the race CreateSpace's list-then-compare pre-check cannot close on its
-// own: two concurrent creates deriving the same key can both pass that
-// pre-check before either insert lands, and the database's
-// UNIQUE (household_id, key) constraint is the backstop. The postgres
-// adapter reports that constraint violation as domain.ErrAlreadyExists (see
-// translate's pgconn.PgError/23505 case); this test arms the space double to
-// return that same sentinel from Create, standing in for the loser of that
-// race, and asserts CreateSpace maps it onto the identical
-// usecase.ErrSpaceNameTaken a caller already gets from the ordinary
-// pre-check path -- one error, regardless of which gate caught it.
+// the race the list-then-compare pre-check cannot close on its own: two
+// concurrent creates can both pass that pre-check before either insert
+// lands, leaving the UNIQUE (household_id, key) constraint as the backstop.
+// The postgres adapter reports that violation as domain.ErrAlreadyExists
+// (see translate's pgconn.PgError/23505 case); this test arms the double to
+// return that sentinel and checks CreateSpace maps it onto the same
+// usecase.ErrSpaceNameTaken the ordinary pre-check path returns.
 func TestCreateSpaceMapsAConcurrentDuplicateKeyOntoErrSpaceNameTaken(t *testing.T) {
 	f := newFixture(t)
 	ctx := context.Background()
@@ -133,11 +130,10 @@ func TestCreateSpaceMapsAConcurrentDuplicateKeyOntoErrSpaceNameTaken(t *testing.
 	}
 }
 
-// TestCreateSpaceRejectsABlankName guards the case a duplicate-name check
-// alone reports confusingly: without this, an empty or whitespace-only name
-// derives the empty key "" and creates a nameless space, and a second blank
-// name then collides with it, reporting ErrSpaceNameTaken -- a poor way to
-// say "a name is required".
+// TestCreateSpaceRejectsABlankName guards against a confusing fallback:
+// without this check, a blank name derives the empty key "" and creates a
+// nameless space, and a second blank name then collides with it as
+// ErrSpaceNameTaken -- a poor way to say "a name is required".
 func TestCreateSpaceRejectsABlankName(t *testing.T) {
 	f := newFixture(t)
 	ctx := context.Background()
@@ -206,11 +202,10 @@ func TestUpdateNormalisesThePrimaryCurrencyToUppercaseAndRejectsANonThreeLetterC
 }
 
 // TestUpdateNormalisesTheSecondaryCurrencyToUppercaseAndRejectsANonThreeLetterCurrency
-// mirrors the primary-currency test above: SecondaryCurrency gets the
-// identical normalisation and validation, not a pass-through, because it is
-// persisted exactly like PrimaryCurrency and feeds the same
-// FXRateProvider.Rate(from, to) lookup on the conversion path -- a malformed
-// secondary code must fail here, at the edit, not later as a missing rate.
+// mirrors the primary-currency test: SecondaryCurrency gets identical
+// normalisation and validation because it feeds the same
+// FXRateProvider.Rate(from, to) lookup -- a malformed code must fail here,
+// at the edit, not later as a missing rate.
 func TestUpdateNormalisesTheSecondaryCurrencyToUppercaseAndRejectsANonThreeLetterCurrency(t *testing.T) {
 	f := newFixture(t)
 	ctx := context.Background()
@@ -332,15 +327,13 @@ func TestUpdateNotificationsRoundTripsAllFourFlags(t *testing.T) {
 	}
 }
 
-// Changing the household's primary currency after it holds investments would
-// strand every one of them: a holding event records its cost in the
-// household's currency AT THE TIME, and there is nothing in the data to
-// re-express an old figure under a new currency. The fold would then refuse
-// the holding, which is a portfolio page that throws on every load -- and the
-// only screen that could fix it.
-//
-// So the change is refused while anything is held, rather than accepted and
-// discovered later. Everything else on the settings screen still saves.
+// Changing the primary currency while the household holds investments would
+// strand them: a holding event records its cost in the currency AT THE
+// TIME, with no way to re-express it under a new one. The fold would then
+// refuse the holding, so the portfolio page -- the only screen that could
+// fix it -- would throw on every load. So the change is refused while
+// anything is held, rather than accepted and discovered later; the rest of
+// the settings screen still saves.
 func TestThePrimaryCurrencyCannotChangeWhileTheHouseholdHoldsInvestments(t *testing.T) {
 	f := newFixture(t)
 	ctx := context.Background()
@@ -365,8 +358,6 @@ func TestThePrimaryCurrencyCannotChangeWhileTheHouseholdHoldsInvestments(t *test
 		t.Fatalf("PrimaryCurrency = %q, want %q unchanged", fetched.PrimaryCurrency, current.PrimaryCurrency)
 	}
 
-	// The rest of the settings screen is unaffected: only the currency is
-	// pinned, and only while something is held.
 	sameCurrency := current
 	sameCurrency.SecondaryCurrency = "JPY"
 	if _, err := f.householdSvc.Update(ctx, sameCurrency); err != nil {

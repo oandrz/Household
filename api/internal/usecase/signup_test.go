@@ -80,10 +80,9 @@ func TestSignupRequestIsIndistinguishableAcrossBranches(t *testing.T) {
 			},
 		},
 		{
-			// Sibling of "the signup insert fails" above, for the write the
-			// fix round added: a registered address's branch now writes a row
-			// too (CreateConsumed, not Create), and that write can fail in
-			// exactly the same way.
+			// Mirrors "the signup insert fails" above, but for the
+			// registered-address branch's own write (CreateConsumed, not
+			// Create), which can fail the same way.
 			name:  "the signup insert fails for a registered address",
 			email: "dbdown2@example.test",
 			setUp: func(t *testing.T, f *signupFixture) {
@@ -121,14 +120,12 @@ func TestSignupRequestIsIndistinguishableAcrossBranches(t *testing.T) {
 	}
 }
 
-// TestSignupRequestRejectsImplausibleEmailBeforeAnyWork is change 5's own
-// test: without a server-side shape check, POST /auth/sign-up
-// {"email":""} writes a countable signups row and, worse, does it for free --
-// no counting read stands in the way, so it costs nothing to burn the global
-// daily ceiling this way. isPlausibleEmail must refuse it before any of that:
-// no row, no mail, and (the part row-count and mail alone cannot prove) no
-// counting read either -- len(f.log.seq()) == 0 is the assertion that matches
-// "before any counting read", not just "before any row write".
+// TestSignupRequestRejectsImplausibleEmailBeforeAnyWork: isPlausibleEmail
+// must refuse a malformed address before any work happens: without it,
+// POST /auth/sign-up with an empty email writes a free signups row and can
+// burn the global daily ceiling for nothing. The assertion checks
+// len(f.log.seq()) == 0, not just an absent row, because refusal must land
+// before any counting read too.
 func TestSignupRequestRejectsImplausibleEmailBeforeAnyWork(t *testing.T) {
 	for _, email := range []string{
 		"",
@@ -194,12 +191,10 @@ func TestSignupRequestMailsBothBranches(t *testing.T) {
 		if n := len(f.mailer.signupLinks); n != 0 {
 			t.Fatalf("sent %d signup links to a registered address, want 0", n)
 		}
-		// A signup row IS written here (fix round: this is what makes
-		// CountForEmailSince/CountSince advance for this branch, the same way
-		// they advance for a fresh one -- see Request's doc comment). But the
-		// row is written already-consumed, via CreateConsumed rather than
-		// Create, so it can never provision a second household for this
-		// address: Provision's guarded UPDATE (ConsumeSignup) requires
+		// A row is written here too, via CreateConsumed not Create, so the
+		// per-address and global counters advance the same as for a fresh
+		// signup (see Request's doc comment). Being pre-consumed it can never
+		// provision a second household: Provision's guarded UPDATE requires
 		// consumed_at IS NULL.
 		if got := f.signups.createCount(); got != 1 {
 			t.Fatalf("wrote %d signup rows for a registered address, want 1 (a pre-consumed counter row)", got)
@@ -244,15 +239,13 @@ func TestSignupRequestMailsBothBranches(t *testing.T) {
 	})
 }
 
-// TestSignupRequestRateLimitAppliesThroughRealCounters is the fix-round test:
-// it drives the per-address limit through the real CountForEmailSince path --
-// repeated calls to Request -- rather than through setEmailCount, which only
-// proves the shared `if` has the right shape, not that the counter it reads
-// is ever populated on both branches. Before the fix, CountForEmailSince
-// never saw a row for a registered address (nothing ever wrote one), so its
-// count stayed at zero forever and the registered subtest below would send an
-// existing-account notice on every one of the four calls instead of exactly
-// three.
+// TestSignupRequestRateLimitAppliesThroughRealCounters drives the limit
+// through the real CountForEmailSince path -- repeated Request calls --
+// rather than setEmailCount, which only proves the shared `if` has the right
+// shape, not that the counter it reads is ever populated. Without a real row
+// written for the registered branch, its count would stay at zero forever
+// and the registered-address subtest would send an existing-account notice
+// on all four calls instead of three.
 func TestSignupRequestRateLimitAppliesThroughRealCounters(t *testing.T) {
 	t.Run("a registered address gets no more than three existing-account notices", func(t *testing.T) {
 		f := newSignupFixture(t)
@@ -267,11 +260,10 @@ func TestSignupRequestRateLimitAppliesThroughRealCounters(t *testing.T) {
 			}
 		}
 		f.mailer.waitForSends(t, 3)
-		// waitForSends(t, 3) only proves 3 sends landed -- it drains exactly
-		// that many and returns, so a 4th async send in flight would not yet
-		// have arrived and this test would pass whether or not the 4th
-		// request was actually rate-limited. This is the negative half of the
-		// assertion: nothing more arrives in the time a 4th send would need.
+		// waitForSends(t, 3) only proves 3 sends landed, not that a 4th
+		// didn't -- it drains exactly 3 and returns before a 4th async send
+		// could arrive. assertNoSendsWithin is the negative half: nothing
+		// more arrives in the time a 4th send would need.
 		f.mailer.assertNoSendsWithin(t, 100*time.Millisecond)
 		if n := len(f.mailer.existingAccountNotices); n != 3 {
 			t.Fatalf("sent %d existing-account notices for 4 requests, want 3 -- "+
@@ -298,14 +290,11 @@ func TestSignupRequestRateLimitAppliesThroughRealCounters(t *testing.T) {
 	})
 }
 
-// TestSignupRequestGlobalCeilingResetsAtMidnight is change 3's own test. The
-// old window was now.Add(-24*time.Hour): rolling, recovering an hour at a
-// time, with no answer to "when does this clear" other than "wait and see".
-// The spec (design doc section 8) calls for the count to reset at midnight
-// instead, which this proves by exploiting the one place the two windows
-// actually disagree: a row written late the day before is outside a
-// calendar-day window measured from shortly after midnight, but still inside
-// a rolling 24-hour window measured from that same instant.
+// TestSignupRequestGlobalCeilingResetsAtMidnight pins that the ceiling
+// resets at a calendar-day boundary, not a rolling 24-hour window: it
+// exploits the one place the two disagree -- a row from late the day before
+// falls outside a calendar-day window measured shortly after midnight but
+// still inside a rolling 24-hour window from that same instant.
 func TestSignupRequestGlobalCeilingResetsAtMidnight(t *testing.T) {
 	f := newSignupFixture(t)
 
@@ -326,13 +315,11 @@ func TestSignupRequestGlobalCeilingResetsAtMidnight(t *testing.T) {
 	// Move 90 minutes forward, across midnight into today.
 	f.clock.Advance(90 * time.Minute)
 
-	// Under the old rolling-24-hour window, "since" here is yesterday 00:30 --
-	// comfortably before every filler row's 23:00 timestamp, so all
-	// SignupGlobalDailyLimit of them would still count and this request would
-	// be silently declined: no error, but no mail either. Under a
-	// calendar-day window, "since" is today's 00:00, strictly after every
-	// filler row's timestamp, so none of them count towards today and this
-	// request must succeed.
+	// Under the old rolling window, "since" here would be yesterday 00:30 --
+	// before every filler's 23:00 timestamp, so the ceiling would still be
+	// full and this request silently declined. Under the calendar-day
+	// window, "since" is today 00:00, after every filler's timestamp, so
+	// none count and this request must succeed.
 	if err := f.svc.Request(context.Background(), "today@example.test"); err != nil {
 		t.Fatalf("Request: %v", err)
 	}
@@ -381,10 +368,9 @@ func TestSignupPreview(t *testing.T) {
 		}
 	})
 
-	// signupChannel's fail-closed default branch. The
+	// Exercises signupChannel's fail-closed default: the
 	// signups_have_exactly_one_channel constraint should make this row
-	// unreachable in production; this is the second gate, for whatever
-	// bypasses the database -- Preview must refuse it, not guess a channel.
+	// unreachable, but Preview must still refuse it rather than guess.
 	t.Run("a row naming no channel is refused, not guessed at", func(t *testing.T) {
 		f := newSignupFixture(t)
 		f.signups.rows[string(f.tokens.HashToken("token"))] = &signupRow{
@@ -497,12 +483,11 @@ func TestSignupComplete(t *testing.T) {
 		f := newSignupFixture(t)
 		token := f.issueSignup(t, "founder@example.test", f.clock.Now().Add(usecase.SignupTTL))
 		// JPY is a well-formed, active ISO 4217 code -- domain.ParseCurrency
-		// alone would accept it -- but it has zero minor units, and
-		// domain.Money.String() hard-codes two decimal places. Sign-up must
-		// refuse it through the same domain.SelectableCurrencies gate GET
+		// alone would accept it -- but it has zero minor units while
+		// Money.String() hard-codes two decimal places. Sign-up must refuse
+		// it through the same domain.SelectableCurrencies gate GET
 		// /api/v1/currencies filters through, or a client posting directly
-		// (bypassing the form's own currency list) provisions a household
-		// every amount renders 100x wrong.
+		// provisions a household where every amount renders 100x wrong.
 		if _, err := f.svc.Complete(context.Background(), token, "Ade & Kris", "Ade", "JPY", "a-long-enough-password"); !errors.Is(err, domain.ErrInvalidMoney) {
 			t.Fatalf("error = %v, want domain.ErrInvalidMoney", err)
 		}
@@ -538,12 +523,11 @@ func TestSignupComplete(t *testing.T) {
 
 // --- signupFixture ------------------------------------------------------
 
-// signupFixture builds a SignupService over its own set of in-memory doubles,
-// separate from the big fixture auth_test.go and invite_test.go share.
-// SignupService.Complete needs a household/space/notification double chain
-// underneath signupDouble.Provision that no other service in this package
-// touches, so giving sign-up tests their own fixture keeps that wiring out of
-// every unrelated test file rather than growing newFixture for one caller.
+// signupFixture builds a SignupService on its own in-memory doubles,
+// separate from the fixture auth_test.go and invite_test.go share.
+// Complete's household/space/notification chain under signupDouble.Provision
+// is unique to sign-up, so keeping it in its own fixture avoids growing
+// newFixture for one caller.
 type signupFixture struct {
 	svc        *usecase.SignupService
 	users      *userDouble
@@ -600,13 +584,12 @@ func newSignupFixture(t *testing.T) *signupFixture {
 	}
 }
 
-// issueSignup calls Request for email, waits for its async send to land, and
-// returns the raw token the token double handed out -- so a test never has to
-// know how the token was generated. It then overwrites the stored row's
-// expiry directly (signups.rows is reachable from this file: both are in
-// package usecase_test), because Request always mints a token with
-// SignupTTL's fixed 24-hour expiry, and several Preview/Complete tests need an
-// already-expired or soon-to-expire token instead.
+// issueSignup calls Request for email, waits for the async send, and returns
+// the raw token -- so a test never has to know how the token was generated.
+// It then overwrites the row's expiry directly (signups.rows is reachable
+// here since both are in package usecase_test), because Request always mints
+// a token with SignupTTL's fixed 24-hour expiry, and several Preview/Complete
+// tests need one already expired or soon to expire.
 func (f *signupFixture) issueSignup(t *testing.T, email string, expiresAt time.Time) string {
 	t.Helper()
 	if err := f.svc.Request(context.Background(), email); err != nil {

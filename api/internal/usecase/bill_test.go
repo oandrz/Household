@@ -24,15 +24,11 @@ func day(s string) time.Time {
 
 // --- BillService fixtures -------------------------------------------------
 //
-// Task 7's MarkPaid/UndoPayment tests reuse every helper below: newBillService
-// itself, withAccount/withArchivedAccount, and the bill/billOn/oneOff family.
-// newBillServiceWith and newBillServiceWithFX are Task 6's own thin wrappers,
-// for a test that only ever needs a *usecase.BillService back.
+// newBillServiceWith and newBillServiceWithFX are thin wrappers for a test
+// that only needs a *usecase.BillService back with no other fixture setup.
 
-// billServiceFixture is what newBillService's opts mutate before the service
-// is built: the account double every Create/Update/MarkPaid guard consults,
-// the category double Create/Update's own category check consults, and the FX
-// double every summary conversion consults.
+// billServiceFixture is what newBillService's opts mutate before the
+// service is built.
 type billServiceFixture struct {
 	accounts   *fakeAccountLookup
 	categories *fakeCategoryLookup
@@ -60,10 +56,9 @@ func withArchivedAccount(id, currency string) billServiceOption {
 }
 
 // withMembership registers membershipID as belonging to householdID in the
-// AccountLookup double's memberships map -- for a test proving
+// AccountLookup double's memberships map, for a test proving
 // PaidByMembershipID is validated against the CALLER's household, not just
-// "some membership exists somewhere" (transaction_test.go's own
-// "someone-elses-m" pattern, reused here for bills).
+// "some membership exists somewhere".
 func withMembership(membershipID, householdID string) billServiceOption {
 	return func(f *billServiceFixture) {
 		f.accounts.memberships[membershipID] = householdID
@@ -78,11 +73,9 @@ func withFX(fx usecase.FXRateProvider) billServiceOption {
 }
 
 // newBillService wires a BillService against repo -- already constructed, so
-// a test can seed it directly and read its state back afterward, e.g. Task
-// 7's repo.lastWrite -- and a household "h1" (SGD primary currency), with
-// "acct-1" (SGD, live) pre-registered as the account every plain bill()
-// fixture pays from. opts... layer on anything else: another account, an
-// archived one, or a different FX double.
+// a test can seed it directly and read state back afterward. Household "h1"
+// (SGD primary currency) and "acct-1" (SGD, live) are pre-registered as the
+// account every plain bill() fixture pays from; opts layer on anything else.
 func newBillService(t *testing.T, repo *fakeBillRepo, opts ...billServiceOption) *usecase.BillService {
 	t.Helper()
 	households := newHouseholdDouble()
@@ -95,12 +88,11 @@ func newBillService(t *testing.T, repo *fakeBillRepo, opts ...billServiceOption)
 			},
 			memberships: map[string]string{},
 		},
-		// "cat-utilities" is the id every bill() fixture carries, so it has
-		// to be a category this household knows -- and an expense one, since
-		// that is the only kind a bill may hold (BillService.validateCategory).
-		// "cat-salary" is the income category the refusal test needs; it is
-		// seeded here rather than by an option so both halves of the rule
-		// (wrong household, wrong kind) can be reached without extra wiring.
+		// "cat-utilities" is what bill() fixtures use, so it must be a known
+		// expense category (BillService.validateCategory allows only that
+		// kind). "cat-salary" is the income category the refusal tests need;
+		// seeding it here instead of via an option covers both the
+		// wrong-kind and wrong-household cases with no extra wiring.
 		categories: &fakeCategoryLookup{kinds: map[string]domain.CategoryKind{
 			"cat-utilities": domain.CategoryExpense,
 			"cat-salary":    domain.CategoryIncome,
@@ -205,8 +197,8 @@ func oneOffSubscription(name string, amountMinor int64) usecase.BillRecord {
 }
 
 // oneOff is a plain one-off bill, NOT ticked as a subscription -- distinct
-// from oneOffSubscription, which is. Task 7's MarkPaid tests are what need
-// this one; the rollup tests are what need the ticked form.
+// from oneOffSubscription, which is. MarkPaid tests need this one; the
+// rollup tests need the ticked form.
 func oneOff(name, dueOn string, amountMinor int64) usecase.BillRecord {
 	rec := bill(name, dueOn, amountMinor)
 	rec.Bill.Cadence = domain.CadenceOneOff
@@ -215,10 +207,9 @@ func oneOff(name, dueOn string, amountMinor int64) usecase.BillRecord {
 
 // archivedBill stamps rec's bill archived at an arbitrary past date -- no
 // test reads the exact timestamp, only that ArchivedAt is non-nil. Named
-// archivedBill, not the brief's own "archived", because networth_test.go
-// already declares a package-level archived (an *AccountView mutator) in
-// this same usecase_test package -- see this task's own report for the
-// rename.
+// archivedBill, not "archived", because networth_test.go already declares a
+// package-level archived (an *AccountView mutator) in this same
+// usecase_test package.
 func archivedBill(rec usecase.BillRecord) usecase.BillRecord {
 	at := day("2026-01-01")
 	rec.Bill.ArchivedAt = &at
@@ -228,8 +219,8 @@ func archivedBill(rec usecase.BillRecord) usecase.BillRecord {
 // --- List ------------------------------------------------------------------
 
 // Every unpaid bill is on the page under one heading or the other. A 30-day
-// filter alone would leave a yearly insurance bill invisible for eleven months
-// while the header kept counting it (spec decision 5's rider).
+// filter alone would leave a yearly insurance bill invisible for eleven
+// months while the header kept counting it.
 func TestListSplitsDueSoonFromLaterAndKeepsBoth(t *testing.T) {
 	today := day("2026-08-09")
 	svc := newBillServiceWith(t,
@@ -253,10 +244,9 @@ func TestListSplitsDueSoonFromLaterAndKeepsBoth(t *testing.T) {
 	if byName["Car insurance"].DueSoon {
 		t.Error("a bill 84 days out belongs under Later")
 	}
-	// The negative case for Settled (see TestMarkPaidSettlesAOneOffAsNeitherDueSoonNorLater
-	// for the positive one): an ordinary bill with a real next_due is never
-	// Settled, which is what stops a hardcoded `Settled: true` from passing
-	// the whole suite unnoticed.
+	// The negative case for Settled (TestMarkPaidSettlesAOneOffAsNeitherDueSoonNorLater
+	// is the positive one): an ordinary bill with a real next_due is never
+	// Settled, so a hardcoded `Settled: true` cannot pass this suite unnoticed.
 	if byName["Car insurance"].Settled {
 		t.Error("a bill with a real next_due is never Settled")
 	}
@@ -313,11 +303,10 @@ func TestListDueSoonBoundaryIsThirtyDaysInclusive(t *testing.T) {
 }
 
 // TestListReadsDueSoonInUTCRegardlessOfTodaysLocation is the usecase-layer
-// counterpart of domain's own TestNextDueAndIsOverdueNormaliseNonUTCInputToUTC.
-// Overdue goes through domain.IsOverdue, which converts to UTC; DueSoon is
-// computed here, and before this fix went through the package-local
-// startOfDay in signup.go, which deliberately does NOT convert. Two fields on
-// one row, from the same two times, under two normalisations.
+// counterpart of domain's TestNextDueAndIsOverdueNormaliseNonUTCInputToUTC.
+// Overdue converts to UTC via domain.IsOverdue; DueSoon is computed here and
+// must do the same -- don't route it back through signup.go's startOfDay,
+// which deliberately does not convert.
 func TestListReadsDueSoonInUTCRegardlessOfTodaysLocation(t *testing.T) {
 	// 2026-08-08T20:00-07:00 is 2026-08-09T03:00Z: the UTC calendar day is
 	// 9 August, so a bill due 8 September is exactly 30 days out -- Due soon
@@ -339,10 +328,9 @@ func TestListReadsDueSoonInUTCRegardlessOfTodaysLocation(t *testing.T) {
 // TestListReadsTheDueThisMonthProbeInUTCRegardlessOfTodaysLocation is the
 // sibling of the test above for List's other date comparison: the
 // due-this-month probe that decides which bill an ExcludedNoRate count is
-// attributed to. Year/Month read a time's own Location too, so an
-// unconverted `today` answers "which month is it" in the caller's zone while
-// Bills.MonthTotals -- the figure the probe recovers per-bill identity for --
-// scoped its month in UTC.
+// attributed to. Year/Month read a time's own Location, so an unconverted
+// `today` would answer "which month is it" in the caller's zone while
+// Bills.MonthTotals scopes its month in UTC.
 func TestListReadsTheDueThisMonthProbeInUTCRegardlessOfTodaysLocation(t *testing.T) {
 	// 2026-07-31T20:00-07:00 is 2026-08-01T03:00Z: August in UTC, July in
 	// -07:00. The bill is due 9 August on an IDR account with no rate, so it
@@ -409,11 +397,10 @@ func TestSubscriptionsRollupNormalisesANonMonthlyCadence(t *testing.T) {
 
 // TestSubscriptionsRollupDividesTheCombinedAnnualTotalNotEachBill is the
 // mutation-catching test the other two rollup tests cannot be: their own
-// numbers happen to divide evenly whether the implementation divides once at
-// the end (correct) or divides each bill's own annual figure first (wrong).
-// Two yearly bills of 1206 do not: 1206+1206=2412, 2412/12=201, but
-// 1206/12=100 (floored) twice is only 200 -- a minor unit lost per bill that
-// only the combined total's own division avoids.
+// numbers divide evenly whether the total is divided once at the end
+// (correct) or each bill's annual figure is divided first (wrong). Two
+// yearly bills of 1206 do not: 2412/12 = 201, but 1206/12 (floored) twice is
+// only 200 -- a minor unit only the combined-total division avoids losing.
 func TestSubscriptionsRollupDividesTheCombinedAnnualTotalNotEachBill(t *testing.T) {
 	svc := newBillServiceWith(t,
 		subscription("Cloud backup A", domain.CadenceYearly, 1206),
@@ -451,18 +438,15 @@ func TestSummaryExcludesABillWithNoRateAndCountsIt(t *testing.T) {
 	}
 }
 
-// TestSummaryCountsEveryNoRateSubscriptionSeparately is the review finding's
-// own example: three bills sharing one no-rate currency are three
-// exclusions, not one deduped by currency. A prior version of this method
-// kept a "have we already counted this currency" set and reported 1 here --
-// the annual figure being correctly 0 is what would have made that bug
-// invisible without this test naming the count directly.
+// TestSummaryCountsEveryNoRateSubscriptionSeparately: three bills sharing
+// one no-rate currency are three exclusions, not one deduped by currency. A
+// prior version kept a "seen this currency" set and reported 1 -- invisible
+// otherwise, since the annual figure is correctly 0 either way.
 func TestSummaryCountsEveryNoRateSubscriptionSeparately(t *testing.T) {
 	// Due in November, well outside the August query month, so the ONLY
 	// path that can exclude these bills is the subscriptions one -- a due
-	// date inside the query month would independently set the exclusion
-	// flag through the due-this-month path too, masking a subscriptions-only
-	// regression.
+	// date this month would set the exclusion flag via the due-this-month
+	// path too, masking a subscriptions-only regression.
 	makeSub := func(name string) usecase.BillRecord {
 		rec := billOn(name, "IDR", "2026-11-20", 50_000)
 		rec.Bill.IsSubscription = true
@@ -507,9 +491,8 @@ func TestSummaryCountsABillOnceEvenWhenBothDueThisMonthAndASubscription(t *testi
 // other identity ExcludedNoRate must recover: a payment already made this
 // month, from a bill whose NextDue has since advanced past this month (so
 // the per-bill pass never sees it as "due this month"). The payment is
-// still a distinct no-rate fact and must still be counted -- seeded directly
-// into the fake's payments, since MarkPaid (Task 7) does not exist yet to
-// produce one.
+// still a distinct no-rate fact and must still be counted -- seeded
+// directly into the fake's payments rather than produced through MarkPaid.
 func TestSummaryCountsANoRatePaymentSeparatelyFromItsCurrentBill(t *testing.T) {
 	repo := &fakeBillRepo{}
 	added := repo.add(billOn("Arisan", "IDR", "2026-09-15", 500_000)) // now due next month
@@ -656,17 +639,13 @@ func TestBillCreateAcceptsAPayerInTheHousehold(t *testing.T) {
 	}
 }
 
-// TestBillCreateValidatesTheCategory is the ledger's own category rule,
-// applied to the other door into the ledger. TransactionService.Create has
-// refused a foreign or wrong-kind category since Transactions shipped;
-// BillService.MarkPaid writes an expense carrying the bill's stored
-// category_id, so a bill created with an income category produces spend that
-// Budget counts in Spent and shows in no category row at all
-// (buildCategoryViews walks expense categories only).
-//
-// The frontend already filters its dropdown to expense categories -- and
-// that is exactly why this test exists at this layer: an API caller is not
-// the dropdown.
+// TestBillCreateValidatesTheCategory applies TransactionService.Create's
+// category rule to bills, the ledger's other entry point: MarkPaid writes
+// an expense under the bill's own category_id, so an income category would
+// let Budget's Spent count money that shows in no category row
+// (buildCategoryViews walks expense categories only). The frontend already
+// filters its dropdown to expense categories, but an API caller isn't the
+// dropdown, so the usecase layer checks too.
 func TestBillCreateValidatesTheCategory(t *testing.T) {
 	svc := newBillService(t, &fakeBillRepo{})
 	ctx := context.Background()
@@ -732,12 +711,11 @@ func TestUpdateRefusesAPayerFromAnotherHousehold(t *testing.T) {
 }
 
 // TestUpdateAcceptsAPayerInTheHousehold is the membership guard's happy path
-// on the Update side. Without it, nothing at any layer set a VALID payer
-// through Update -- the refusal test above passes just as well with
-// MembershipBelongsToHousehold's two arguments swapped (the double answers
-// false either way), and ClearPayer routes around the check entirely. This
-// is the test that pins the argument ORDER, the same way
-// TestBillCreateAcceptsAPayerInTheHousehold pins it for Create.
+// on the Update side. Without it, nothing proves MembershipBelongsToHousehold
+// is called with its arguments in the right order: the refusal test above
+// passes just as well swapped (the double answers false either way), and
+// ClearPayer skips the check entirely. Pins the argument order, as
+// TestBillCreateAcceptsAPayerInTheHousehold does for Create.
 func TestUpdateAcceptsAPayerInTheHousehold(t *testing.T) {
 	repo := &fakeBillRepo{}
 	repo.add(bill("SP utilities", "2026-08-08", 14230))
@@ -777,11 +755,11 @@ func TestUpdateClearPayerBypassesTheMembershipCheck(t *testing.T) {
 
 // --- Update ------------------------------------------------------------
 
-// TestUpdateReDerivesTheAnchorWhenNextDueMoves is the case Task 5's own
-// anchor test (the mechanical rewind, which must NOT touch the anchor) is the
-// mirror image of: an explicit edit to NextDue IS the household picking a new
-// anchor, so the NEXT advance must land on the day they just chose, not the
-// day the bill used to carry.
+// TestUpdateReDerivesTheAnchorWhenNextDueMoves is the mirror image of
+// TestUndoDoesNotDestroyTheDueAnchorDay's mechanical rewind, which must NOT
+// touch the anchor: an explicit edit to NextDue IS the household picking a
+// new anchor, so the NEXT advance must land on the day they just chose, not
+// the day the bill used to carry.
 func TestUpdateReDerivesTheAnchorWhenNextDueMoves(t *testing.T) {
 	svc := newBillServiceWith(t, bill("SP utilities", "2026-08-08", 14230)) // anchor 8
 
@@ -878,10 +856,9 @@ func TestUpdateClearsCategoryAndPayer(t *testing.T) {
 }
 
 // TestUpdateValidatesTheCategory is Create's category rule on the Update
-// side: a patch can name a different category than the one Create validated,
-// so re-pointing a bill at an income category has to be refused too. Clearing
-// it is not the same act and must stay free of the check -- "" is
-// uncategorised, not an invalid category.
+// side: a patch naming a different category than Create validated must be
+// refused just the same. Clearing it is a separate act and stays free of
+// the check -- "" means uncategorised, not an invalid category.
 func TestUpdateValidatesTheCategory(t *testing.T) {
 	repo := &fakeBillRepo{}
 	repo.add(bill("SP utilities", "2026-08-08", 14230))
@@ -923,17 +900,15 @@ func TestUpdateRefusesRepointingToADifferentCurrencyAccount(t *testing.T) {
 	}
 }
 
-// TestUpdateRefusesRepointingToAnArchivedAccount closes the asymmetry Task
-// 9's own review named as out of scope: Create already refuses an archived
-// pay-from account with domain.ErrForbidden (that method's own check), but
-// Update checked only currency. The gap was harmless while nothing could
-// reach it -- Task 10's pay route is what makes a bill silently re-pointed
-// at a dead account actually unpayable, so the household must meet the
-// refusal here, at the edit, not at the pay button.
+// TestUpdateRefusesRepointingToAnArchivedAccount closes an asymmetry: Create
+// already refuses an archived pay-from account with domain.ErrForbidden, but
+// Update checked only currency. A bill silently re-pointed at a dead account
+// becomes unpayable at the pay route, so the refusal belongs here too, at
+// the edit.
 //
 // withArchivedAccount registers "acct-2" in SGD, the SAME currency as the
-// bill's own -- a mismatched currency would answer ErrBillCurrencyImmutable
-// first and prove nothing about this new check.
+// bill's own, so a mismatched currency can't answer ErrBillCurrencyImmutable
+// first and mask this check.
 func TestUpdateRefusesRepointingToAnArchivedAccount(t *testing.T) {
 	repo := &fakeBillRepo{}
 	repo.add(bill("SP utilities", "2026-08-08", 14230)) // SGD, acct-1
@@ -973,10 +948,10 @@ func TestUpdateValidatesNameAndAmountAndCadence(t *testing.T) {
 
 // --- MarkPaid / UndoPayment ----------------------------------------------
 
-// The expense a bill payment writes must carry the ACCOUNT's currency -- the
-// same rule TransactionService.Create applies at transaction.go:232. If these
-// two ever disagree, a household's ledger row and its bill say different
-// things about the same money.
+// The expense a bill payment writes must carry the ACCOUNT's currency, the
+// same rule TransactionService.validate applies: the currency comes from
+// the account, never the request. If these two ever disagree, a household's
+// ledger row and its bill say different things about the same money.
 func TestMarkPaidWritesTheExpenseInTheAccountsCurrency(t *testing.T) {
 	repo := &fakeBillRepo{}
 	svc := newBillService(t, repo, withAccount("acct-idr", "IDR"))
@@ -1020,15 +995,13 @@ func TestMarkPaidAdvancesNextDueByTheCadenceFromTheDueDate(t *testing.T) {
 }
 
 // TestMarkPaidAdvancesNextDueFromTheDueDateAcrossAMonthBoundary closes a gap
-// the test above cannot: its own due (8 Aug) and paid (11 Aug) dates share a
-// month, and domain.NextDue clamps the result to the bill's stored
-// DueAnchorDay regardless of which date it was told to advance from -- so a
-// service that (wrongly) advanced from PaidOn while still passing the
-// correct DueAnchorDay would land on the SAME 8 September and pass that test
-// undetected. Paying five days into the FOLLOWING month is what actually
-// tells the two apart: advancing from the due date (28 Aug) reaches 28
-// September; advancing from PaidOn (2 Sep) would reach 28 OCTOBER instead --
-// a whole month later.
+// the test above cannot: its due (8 Aug) and paid (11 Aug) dates share a
+// month, and domain.NextDue clamps to the bill's stored DueAnchorDay
+// regardless of which date it advances from -- so advancing from PaidOn by
+// mistake would still land on the same 8 September there. Paying five days
+// into the FOLLOWING month tells the two apart: advancing from the due date
+// (28 Aug) reaches 28 September, advancing from PaidOn (2 Sep) would reach
+// 28 October instead.
 func TestMarkPaidAdvancesNextDueFromTheDueDateAcrossAMonthBoundary(t *testing.T) {
 	repo := &fakeBillRepo{}
 	svc := newBillService(t, repo)
@@ -1059,15 +1032,13 @@ func TestMarkPaidSettlesAOneOffWithNoNextDate(t *testing.T) {
 	}
 }
 
-// TestMarkPaidSettlesAOneOffAsNeitherDueSoonNorLater settles the question
-// Task 6's review flagged: a live bill with NextDue == nil satisfies
-// neither list's own contract -- the design's own formula table defines
-// both "Due soon" and "Later" as requiring a non-NULL next_due -- yet
-// 00008_bills.sql's own comment on next_due says a settled one-off is
-// deliberately NOT auto-archived, "that would hide a record the household
-// may still want to see." So the row stays on the page (never dropped from
-// Bills) but is marked Settled, which is the signal the frontend needs to
-// place it in neither heading instead of guessing from a null due date.
+// TestMarkPaidSettlesAOneOffAsNeitherDueSoonNorLater settles a case neither
+// list's own contract covers: the design's formula table requires a
+// non-NULL next_due for both "Due soon" and "Later", but a settled one-off
+// has NextDue == nil. 00008_bills.sql deliberately does not auto-archive
+// it -- "that would hide a record the household may still want to see" --
+// so the row stays on the page, marked Settled, which tells the frontend to
+// place it in neither heading rather than guess from a null due date.
 func TestMarkPaidSettlesAOneOffAsNeitherDueSoonNorLater(t *testing.T) {
 	repo := &fakeBillRepo{}
 	svc := newBillService(t, repo)
@@ -1099,11 +1070,10 @@ func TestMarkPaidSettlesAOneOffAsNeitherDueSoonNorLater(t *testing.T) {
 }
 
 // markPaidReason is the shared assertion the three refusal tests below use:
-// each must still satisfy errors.Is(err, domain.ErrForbidden) (nothing that
-// already matches the bare sentinel elsewhere may stop working) AND must
-// carry the ONE Reason that check produced -- not just any
-// *domain.BillNotPayableError, since a bug that swapped two of the three
-// reasons would otherwise slip past a bare errors.As check.
+// each must satisfy errors.Is(err, domain.ErrForbidden) (so the bare
+// sentinel keeps working elsewhere) AND carry the ONE Reason that check
+// produced -- not just any *domain.BillNotPayableError, or a bug that
+// swapped two of the three reasons would slip past a bare errors.As check.
 func markPaidReason(t *testing.T, err error, want domain.BillNotPayableReason) {
 	t.Helper()
 	if !errors.Is(err, domain.ErrForbidden) {
@@ -1153,11 +1123,10 @@ func TestMarkPaidRefusesASettledOneOff(t *testing.T) {
 	markPaidReason(t, err, domain.BillSettled)
 }
 
-// TestMarkPaidRefusesANonPositiveAmount is the symmetry Create and Update
-// already have (bill.go's own domain.ErrBillAmountNotPositive checks) --
-// checked here, in the service, before the repository ever gets a chance to
-// let bill_payments' own CHECK (amount_minor > 0) surface a raw constraint
-// violation as a 500.
+// TestMarkPaidRefusesANonPositiveAmount gives MarkPaid the same
+// domain.ErrBillAmountNotPositive check Create and Update already have,
+// before the repository can let bill_payments' own CHECK (amount_minor > 0)
+// surface as a raw constraint violation, answered as a 500.
 func TestMarkPaidRefusesANonPositiveAmount(t *testing.T) {
 	repo := &fakeBillRepo{}
 	svc := newBillService(t, repo)
@@ -1309,10 +1278,10 @@ func TestBillsSummaryFailsWhenTheRateLookupItselfFails(t *testing.T) {
 	}
 }
 
-// The subscriptions total is the one conversion in List that a bill can reach
-// alone: a subscription due outside this month feeds no due or paid figure.
-// So it needs its own outage test; the one above is caught by the
-// due-this-month sites first and cannot see this one regress.
+// The subscriptions total is the one conversion in List a bill can reach
+// alone: a subscription due outside this month feeds no due-or-paid figure,
+// so it needs its own outage test -- the one above is caught by the
+// due-this-month sites first and can't see this one regress.
 func TestBillsSubscriptionTotalFailsWhenTheRateLookupItselfFails(t *testing.T) {
 	sub := billOn("Netflix ID", "IDR", "2026-11-20", 50_000) // due in November, not August
 	sub.Bill.IsSubscription = true

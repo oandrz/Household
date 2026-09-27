@@ -38,10 +38,9 @@ func newGoalFixture(t *testing.T) *goalFixture {
 	return &goalFixture{svc: svc, goals: goals, households: households, fx: fx}
 }
 
-// seedGoal writes a goal directly into the double, bypassing Create, the
-// same way budgetFixture.addExpense seeds fakeTransactionRepo directly: a
-// List test needs exact, hand-picked figures and dates, not also to depend
-// on Create's own validation and normalisation succeeding first.
+// seedGoal writes a goal directly into the double, bypassing Create -- the
+// same pattern budgetFixture.addExpense uses: a List test needs exact,
+// hand-picked figures without depending on Create's own validation.
 func (f *goalFixture) seedGoal(g domain.Goal) domain.Goal {
 	f.goals.n++
 	g.ID = fmt.Sprintf("seed-goal-%d", f.goals.n)
@@ -77,13 +76,12 @@ func findGoalView(t *testing.T, views []usecase.GoalView, goalID string) usecase
 	return usecase.GoalView{}
 }
 
-// TestGoalListComposesTheDesignsCards pins the spec's own worked example --
-// four goals with the design's own figures, mid-August 2026 -- and asserts
-// each card's Percent and Status is what domain.GoalProgressPercent and
-// domain.GoalStatusFor actually compute for them, not a re-derivation.
+// TestGoalListComposesTheDesignsCards pins the spec's own worked example:
+// four goals with the design's figures, mid-August 2026, asserting each
+// card's Percent and Status against what domain.GoalProgressPercent and
+// domain.GoalStatusFor actually compute -- not a re-derivation.
 //
-// Worked arithmetic, since none of these divide as cleanly as Budget's own
-// worked example:
+// Worked arithmetic (none of these divide as cleanly as Budget's example):
 //
 //	Bali:       65% (260000*100+200000)/400000 = 26200000/400000 = 65.
 //	            monthsLeft Aug->Dec 2026 inclusive = 5. remaining = 140000.
@@ -97,11 +95,10 @@ func findGoalView(t *testing.T, views []usecase.GoalView, goalID string) usecase
 //	            monthsLeft Aug 2026->Dec 2029 inclusive = 41. remaining = 2640000.
 //	            required = ceil(2640000/41) = 64391 > planned 40000 -> Behind.
 //
-// A fifth goal, Overdue, exercises the branch none of the four above reach:
-// a dated, unachieved goal whose target month has already passed `today`
-// (monthsLeft == 0). RequiredMonthlyMinor's own "no honest number" rule
-// means RequiredMonthlyOK must be false here, never a zero standing in for
-// one.
+// A fifth goal, Overdue, is dated and unachieved but its target month has
+// already passed `today` (monthsLeft == 0): RequiredMonthlyMinor's "no
+// honest number" rule means RequiredMonthlyOK must be false, never a zero
+// standing in for one.
 func TestGoalListComposesTheDesignsCards(t *testing.T) {
 	f := newGoalFixture(t)
 	today := time.Date(2026, 8, 15, 0, 0, 0, 0, time.UTC)
@@ -267,12 +264,11 @@ func TestGoalListCountsOnlyDatedUnachievedGoals(t *testing.T) {
 	}
 }
 
-// TestGoalListPlannedTotalConvertsThenAdds is LEARNING pattern 12, pinned for
-// goals: PlannedMonthlyTotal is each goal's own figure converted to primary
-// FIRST, then added -- never summed in minor units and converted once. A
-// goal whose currency has no rate to primary (EUR, which the FX double
-// does not know) is excluded from the total and counted in ExcludedNoRate,
-// while its own card keeps rendering in its own currency untouched.
+// TestGoalListPlannedTotalConvertsThenAdds is LEARNING pattern 12, pinned
+// for goals: PlannedMonthlyTotal converts each goal's figure to primary
+// FIRST, then adds -- never sums in minor units and converts once. A
+// no-rate goal (EUR, unknown to the FX double) is excluded from the total
+// and counted in ExcludedNoRate, but its own card still renders untouched.
 func TestGoalListPlannedTotalConvertsThenAdds(t *testing.T) {
 	f := newGoalFixture(t)
 	today := time.Date(2026, 8, 15, 0, 0, 0, 0, time.UTC)
@@ -282,13 +278,12 @@ func TestGoalListPlannedTotalConvertsThenAdds(t *testing.T) {
 		Name: "SGD goal", Target: domain.Money{Amount: 10000000, Currency: "SGD"},
 		PlannedMonthly: domain.Money{Amount: 40000, Currency: "SGD"}, // S$400.00/mo
 	})
-	// Rp124,100.00/mo converts to exactly S$10.00/mo: the FX double's IDR->SGD
-	// is {1, 12410}, so Apply(12,410,000) = (12,410,000 + 6,205) / 12,410 = 1,000
-	// with no remainder ambiguity. Dated and contributed-to, so its card also
-	// carries a RequiredMonthly figure -- both this and Contributed must stay
-	// in IDR, the goal's own currency, never the household's primary SGD:
-	// remaining = 500000000-100000000 = 400000000, monthsLeft Aug->Dec 2026
-	// inclusive = 5, required = 400000000/5 = 80000000 exactly.
+	// Rp124,100.00/mo converts to exactly S$10.00/mo: FX double IDR->SGD is
+	// {1, 12410}, so Apply(12,410,000) = (12,410,000+6,205)/12,410 = 1,000
+	// with no remainder ambiguity. Dated and contributed-to, so its card
+	// also carries a RequiredMonthly: remaining = 500000000-100000000 =
+	// 400000000, monthsLeft Aug->Dec 2026 inclusive = 5, required =
+	// 400000000/5 = 80000000 exactly.
 	idrGoal := f.seedGoal(domain.Goal{
 		Name: "IDR goal", Target: domain.Money{Amount: 500000000, Currency: "IDR"},
 		TargetMonth:    &dec2026,
@@ -315,10 +310,10 @@ func TestGoalListPlannedTotalConvertsThenAdds(t *testing.T) {
 		t.Errorf("ExcludedNoRate = %d, want 1 (the EUR goal)", got.Summary.ExcludedNoRate)
 	}
 
-	// The two fields the service actually constructs for a card --
-	// Contributed and RequiredMonthly -- must stay in the goal's own
-	// currency. Asserting Goal.PlannedMonthly here instead would just echo
-	// back the seed data unchanged by the service, proving nothing.
+	// Contributed and RequiredMonthly -- the two fields the service actually
+	// constructs -- must stay in the goal's own currency. Asserting
+	// Goal.PlannedMonthly instead would just echo the seed data back
+	// unchanged, proving nothing.
 	idrView := findGoalView(t, got.Goals, idrGoal.ID)
 	if idrView.Contributed.Currency != "IDR" {
 		t.Errorf("IDR goal Contributed.Currency = %q, want IDR (the goal's own currency, not the household's primary SGD)", idrView.Contributed.Currency)
@@ -341,9 +336,9 @@ func TestGoalListPlannedTotalConvertsThenAdds(t *testing.T) {
 
 // TestGoalListActualThisMonthExcludesStartingBalances pins that
 // GoalsSummary.ActualThisMonth is built ONLY from
-// GoalRepository.MonthContributionTotals -- which already excludes
-// source=starting_balance (Task 3) -- and that the service does not re-add
-// a starting balance from anywhere else, such as ContributedMinor.
+// GoalRepository.MonthContributionTotals, which already excludes
+// source=starting_balance -- and that the service doesn't re-add one from
+// anywhere else, such as ContributedMinor.
 func TestGoalListActualThisMonthExcludesStartingBalances(t *testing.T) {
 	f := newGoalFixture(t)
 	today := time.Date(2026, 8, 15, 0, 0, 0, 0, time.UTC)
@@ -546,15 +541,12 @@ func TestGoalCreateValidates(t *testing.T) {
 }
 
 // TestGoalUpdateRefusesACurrencyChangeAndClearsADate exercises the PATCH
-// convention. GoalUpdate carries no currency field at all -- see its own
-// doc comment -- so there is no way for a caller to even attempt a currency
-// change through Update's public signature; ErrGoalCurrencyImmutable
-// belongs to Task 8's PATCH decoder (the design spec's own Error handling
-// section requires refusing an unexpected "currency" key on the request
-// body), not to this method, and no black-box test here can reach it. What
-// this test pins instead is that the round trip actually holds -- an
-// unrelated patch never disturbs Target.Currency -- plus the ClearTargetMonth
-// convention.
+// convention. GoalUpdate has no currency field (see its own doc comment),
+// so Update's signature can't even attempt a currency change --
+// ErrGoalCurrencyImmutable belongs to the PATCH decoder's refusal of an
+// unexpected "currency" key, not to this method, so no black-box test here
+// can reach it. What this pins instead: an unrelated patch never disturbs
+// Target.Currency, plus the ClearTargetMonth convention.
 func TestGoalUpdateRefusesACurrencyChangeAndClearsADate(t *testing.T) {
 	f := newGoalFixture(t)
 	ctx := context.Background()
@@ -612,13 +604,10 @@ func TestGoalUpdateRefusesACurrencyChangeAndClearsADate(t *testing.T) {
 	}
 }
 
-// TestGoalUpdateCollisionAndNotFoundErrorsPassThrough pins the brief's Step
-// 3 requirement directly: "collision and not-found errors from the
-// repository pass through untranslated -- assert errors.Is still holds
-// through the service." Task 8 is about to map ErrGoalNameTaken to 409 and
-// ErrNotFound to 404; if a future edit wraps either on the way out of
-// Update, the HTTP layer would silently 500 instead of returning the right
-// status.
+// TestGoalUpdateCollisionAndNotFoundErrorsPassThrough pins that the
+// repository's collision and not-found errors pass through Update
+// untranslated -- errors.Is must still hold. The HTTP layer maps these by
+// identity (409/404); wrapping either here would silently 500 instead.
 func TestGoalUpdateCollisionAndNotFoundErrorsPassThrough(t *testing.T) {
 	f := newGoalFixture(t)
 	ctx := context.Background()
@@ -716,22 +705,17 @@ func TestGoalAddContributionRefusesZeroAndArchivedGoals(t *testing.T) {
 	})
 }
 
-// TestGoalAddContributionRefusesCrossHouseholdGoal pins the forward
-// dependency the task brief calls out: InsertGoalContribution's SQL has no
-// constraint tying goal_contributions.goal_id to its own household_id, so
-// nothing at the database layer refuses a caller naming another household's
-// goal id as its own. AddContribution's Goals.Get(householdID, goalID) call
-// is the only thing that can.
+// TestGoalAddContributionRefusesCrossHouseholdGoal: InsertGoalContribution's
+// SQL never ties goal_contributions.goal_id to its own household_id, so
+// only AddContribution's Goals.Get(householdID, goalID) call stops a
+// caller naming another household's goal as its own.
 //
-// The assertion deliberately does NOT use Contributions() to prove nothing
-// was written: ListContributions filters by the row's own household_id, so
-// a forged row (written with the attacker's household id, had the guard not
-// existed) would be invisible there even with the bug present -- exactly
-// the "invisible to the victim's ListContributions" half of the brief's own
-// warning. ContributedMinor is where a leak would actually show, because
-// GetGoalWithTotal and ListGoalsWithTotals both join goal_contributions to
-// goals by goal_id alone, with no household_id check on the contribution
-// side -- so this test reads the victim's card through List instead.
+// The assertion avoids Contributions() on purpose: ListContributions
+// filters by the row's own household_id, so a forged row would be
+// invisible there even if the guard failed. GetGoalWithTotal and
+// ListGoalsWithTotals join goal_contributions by goal_id alone with no
+// household_id check, so a leak would actually show in ContributedMinor --
+// this test reads the victim's card through List instead.
 func TestGoalAddContributionRefusesCrossHouseholdGoal(t *testing.T) {
 	f := newGoalFixture(t)
 	ctx := context.Background()

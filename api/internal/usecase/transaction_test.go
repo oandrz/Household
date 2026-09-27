@@ -12,9 +12,9 @@ import (
 )
 
 // transactionFixture wires a service whose accounts span two households --
-// "house-1", the one every test acts as, and "other-house", which exists
-// solely so a test can plant an account that is real, just not the caller's,
-// rather than leaning on an id nobody registered to mean the same thing.
+// "house-1", the one every test acts as, and "other-house", which lets a
+// test plant an account that is real, just not the caller's, rather than
+// leaning on an id nobody registered at all.
 func transactionFixture(t *testing.T) (*usecase.TransactionService, *fakeTransactionRepo) {
 	t.Helper()
 	return newTransactionFixture(t, nil)
@@ -86,15 +86,11 @@ func expenseInput() usecase.NewTransaction {
 }
 
 // The service derives the currency from the account. A request cannot name
-// one -- NewTransaction has no currency field at all, which is what stops a
-// handler accepting a value it never persists.
-//
-// The third case is the one that actually distinguishes "derives it from the
-// account" from "derives it from whichever account happens to be set as
-// FromAccountID": an income has no FromAccountID at all, so it is the only
-// shape that exercises the toCurrency branch of that derivation. Dropping
-// that branch entirely would leave every expense test here green while every
-// income silently recorded an empty currency.
+// one -- NewTransaction has no currency field at all, which stops a handler
+// accepting a value it never persists. The income case here is the one that
+// actually proves it: it has no FromAccountID, so it is the only shape
+// exercising the toCurrency branch. Drop that branch and every expense test
+// here would still pass while income silently recorded an empty currency.
 func TestCreateTakesTheAccountsCurrency(t *testing.T) {
 	svc, _ := transactionFixture(t)
 
@@ -154,10 +150,10 @@ func TestCreateRefusesTheWrongAccountsForItsKind(t *testing.T) {
 			return in
 		},
 		// This account genuinely exists -- fakeAccountLookup knows its
-		// currency -- just under "other-house", not "house-1". If the service
-		// (or the port) ever stopped scoping the lookup by household, this is
-		// the case that would start passing where it should not, while an
-		// id nobody registered at all could not tell the difference.
+		// currency -- just under "other-house", not "house-1". If the lookup
+		// ever stopped scoping by household, this is the case that would start
+		// passing where it should not; an unregistered id could not tell the
+		// difference.
 		"an account in another household": func(in usecase.NewTransaction) usecase.NewTransaction {
 			in.FromAccountID = "someone-elses"
 			return in
@@ -177,9 +173,9 @@ func TestCreateRefusesTheWrongAccountsForItsKind(t *testing.T) {
 	}
 }
 
-// Decision 3: required across currencies so what arrived is recorded rather
-// than guessed at a rate we do not have; permitted within one currency so a
-// transfer fee is recordable; refused on anything that is not a transfer,
+// Required across currencies, so what arrived is recorded rather than
+// guessed at a rate we don't have. Permitted within one currency, so a
+// transfer fee is recordable. Refused on anything that is not a transfer,
 // where it would have nothing to mean.
 func TestTheReceivedAmountFollowsTheCurrencies(t *testing.T) {
 	svc, _ := transactionFixture(t)
@@ -222,11 +218,10 @@ func TestTheReceivedAmountFollowsTheCurrencies(t *testing.T) {
 	}
 }
 
-// ClearReceivedAmount is the only path that removes a received amount -- a
-// nil ReceivedAmountMinor on its own leaves the stored figure untouched,
-// because nil already means "leave this alone". No other test in this file
-// reaches the clearing branch, so this is the one that would notice if it
-// silently stopped clearing.
+// ClearReceivedAmount is the only path that removes a received amount: a
+// nil ReceivedAmountMinor alone leaves the figure untouched, since nil
+// already means "leave this alone". No other test here reaches the
+// clearing branch, so this is the one that would notice if it stopped.
 func TestUpdateClearsTheReceivedAmount(t *testing.T) {
 	svc, _ := transactionFixture(t)
 	ctx := context.Background()
@@ -304,14 +299,12 @@ func TestCreateRefusesAnEmptyDescriptionAndANonPositiveAmount(t *testing.T) {
 	}
 }
 
-// Update validates the merged result, never the incoming fields -- switching
-// the kind to transfer and leaving a category alone are each legal on their
-// own and illegal together. The patch below touches only Kind and
-// ToAccountID: FromAccountID and CategoryID come from the stored expense
-// (dbs, cat-groceries), unchanged. Validating the patch alone would see a
-// transfer with only one leg named and no category at all, and fail for that
-// unrelated reason -- so this asserts the specific sentinel the merge is
-// supposed to produce, not merely that some error occurred.
+// Update validates the merged result, not the incoming fields alone --
+// switching kind to transfer and leaving category alone are each legal
+// alone, illegal together. The patch touches only Kind/ToAccountID;
+// FromAccountID/CategoryID come from the stored expense unchanged.
+// Validating the patch alone would fail for an unrelated reason (one leg,
+// no category), so this pins the specific sentinel the merge must produce.
 func TestUpdateValidatesTheMergedResult(t *testing.T) {
 	svc, _ := transactionFixture(t)
 	ctx := context.Background()
@@ -332,16 +325,14 @@ func TestUpdateValidatesTheMergedResult(t *testing.T) {
 	}
 }
 
-// Update reads the stored transaction, merges a patch onto its own copy, and
-// validates that copy -- a rejected patch must leave the stored row exactly
-// as it was. ReceivedAmount is a pointer, so this is the one field a naive
-// merge (copying the struct but not what it points to) could still write
-// through to the repository's own value even when validation fails
-// afterwards and nothing is meant to persist. This same-currency-to
-// cross-currency patch is rejected for an unrelated reason (the category),
-// but only after validateReceivedAmount has already re-stamped the received
-// amount's currency for the *new* destination account -- exactly the write
-// that must land on Update's copy, never on the row Get returned.
+// Update merges a patch onto its own copy of the stored transaction and
+// validates that copy -- a rejected patch must leave the stored row
+// untouched. ReceivedAmount is a pointer, so a naive merge could still
+// write through to the repository's value despite the failed validation.
+// This patch fails for an unrelated reason (the category), but only after
+// validateReceivedAmount re-stamps the currency for the new destination --
+// exactly the write that must land on the copy, not on the row Get
+// returned.
 func TestARejectedUpdateDoesNotMutateTheStoredReceivedAmount(t *testing.T) {
 	svc, _ := transactionFixture(t)
 	ctx := context.Background()

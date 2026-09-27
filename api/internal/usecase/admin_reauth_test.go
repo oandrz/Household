@@ -83,11 +83,9 @@ func TestAdminReauthFailuresStayOutOfTheHouseholdLedger(t *testing.T) {
 }
 
 // TestAdminReauthSuccessClearsEarlierFailures: a successful re-auth resets
-// the ledger, mirroring AuthService.SignIn's own success path (auth.go calls
-// ClearFailures immediately before recording the success). Without this, two
-// earlier mistypes followed by a success followed by one more mistype would
-// count as three cumulative failures rather than one fresh strike -- not the
-// policy domain.DefaultLockoutPolicy describes.
+// the ledger, mirroring AuthService.SignIn (auth.go calls ClearFailures
+// before recording success) -- two mistypes, a success, then one more
+// mistype must count as one fresh strike, not three cumulative failures.
 func TestAdminReauthSuccessClearsEarlierFailures(t *testing.T) {
 	users := newUserDouble()
 	user := users.mustCreate(t, "operator@example.test", "hashed:correct-horse", "Operator")
@@ -118,9 +116,8 @@ func TestAdminReauthSuccessClearsEarlierFailures(t *testing.T) {
 }
 
 // TestAdminReauthRefusesAUserWithNoPassword: a member created without
-// credentials (PasswordHash == "") must be refused without the empty stored
-// hash ever reaching the hasher -- an empty hash is a refusal, not a value to
-// compare against.
+// credentials has PasswordHash == "", which must never reach the hasher --
+// an empty hash is a refusal, not a value to compare against.
 func TestAdminReauthRefusesAUserWithNoPassword(t *testing.T) {
 	users := newUserDouble()
 	user := users.mustCreate(t, "childless@example.test", "", "No Password")

@@ -116,9 +116,9 @@ func TestVisionGetMarksATypedMeasureMetAtTarget(t *testing.T) {
 	}
 }
 
-// CurrentYear is a real deliverable of this task (the handler's default-year
-// source), not just plumbing -- an untested delegation to the clock is
-// exactly the kind of change a later refactor could silently break.
+// CurrentYear is a real deliverable, feeding the handler's default year --
+// not just plumbing. An untested delegation to the clock is exactly the
+// kind of change a later refactor could silently break.
 func TestVisionServiceCurrentYearUsesTheClock(t *testing.T) {
 	svc := usecase.NewVisionService(newVisionRepoDouble(), newGoalProgressDouble(),
 		&fixedClock{now: time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC)})
@@ -139,9 +139,8 @@ func TestVisionSaveValidatesBeforeTouchingTheRepository(t *testing.T) {
 	if !errors.Is(err, domain.ErrVisionThemeRequired) {
 		t.Fatalf("want ErrVisionThemeRequired, got %v", err)
 	}
-	// An invalid draft must never reach the repository: the double has no
-	// opinion on the theme at all, so if Save had called it, a row would
-	// have landed at h1/2026 (Version 0 against an empty repo is a create).
+	// The double has no opinion on the theme, so if Save had called it, a row
+	// would land at h1/2026 (Version 0 against an empty repo is a create).
 	// ErrNotFound here is proof no such call happened.
 	if _, err := repo.Get(context.Background(), "h1", 2026); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatal("an invalid draft must never reach the repository")
@@ -151,10 +150,9 @@ func TestVisionSaveValidatesBeforeTouchingTheRepository(t *testing.T) {
 func TestVisionSaveOverwritesHouseholdAndYearFromTheRoute(t *testing.T) {
 	repo := newVisionRepoDouble()
 	repo.seed(domain.Vision{HouseholdID: "h1", Year: 2026, Theme: "Old theme", Version: 2})
-	// The attacker's claimed household/year already has its own row too, so
-	// a mutation that lets the body's values through has somewhere real to
-	// wrongly land -- not just an ErrNotFound that would fail for the wrong
-	// reason.
+	// The attacker's claimed household/year already has its own row, so a
+	// mutation that lets the body's values through has somewhere real to
+	// wrongly land, not just an ErrNotFound that fails for the wrong reason.
 	repo.seed(domain.Vision{HouseholdID: "someone-else", Year: 1999, Theme: "Their theme", Version: 2})
 	svc := usecase.NewVisionService(repo, newGoalProgressDouble(),
 		&fixedClock{now: time.Date(2026, 8, 28, 0, 0, 0, 0, time.UTC)})
@@ -202,10 +200,9 @@ func TestVisionSaveReturnsTheComposedViewWithTheNewVersion(t *testing.T) {
 	if got.Theme != "Slow down together" {
 		t.Fatalf("want the saved theme back, got %q", got.Theme)
 	}
-	// A hand-rolled response that just echoes the draft's own fields would
-	// pass the two checks above without ever resolving the link -- this is
-	// what proves Save routes through compose exactly as Get does, rather
-	// than building its own response.
+	// A hand-rolled response echoing the draft's own fields would pass the
+	// two checks above without resolving the link -- this is what proves
+	// Save routes through compose exactly as Get does.
 	m := got.Pillars[0].Measures[0]
 	if !m.HasFigure || m.Percent != 62 {
 		t.Fatalf("want the linked measure's figure resolved, got %+v", m)
@@ -214,8 +211,8 @@ func TestVisionSaveReturnsTheComposedViewWithTheNewVersion(t *testing.T) {
 
 // TestVisionSaveCreatesTheFirstVisionForAYear is the flow a household hits
 // first: TestVisionGetReturnsAnEmptyVisionForAYearNeverSet hands back
-// Version 0 deliberately, so the following save must be treated as a
-// create, not an update against a row that does not exist.
+// Version 0 deliberately, so this save must be treated as a create, not an
+// update against a row that does not exist.
 func TestVisionSaveCreatesTheFirstVisionForAYear(t *testing.T) {
 	repo := newVisionRepoDouble()
 	svc := usecase.NewVisionService(repo, newGoalProgressDouble(),
@@ -244,11 +241,11 @@ func TestVisionSavePassesAConflictThrough(t *testing.T) {
 
 // --- visionRepoDouble.Save's own contract ------------------------------
 //
-// Task 7 wrote this logic from the port's doc comment and the real Postgres
-// adapter, but nothing exercised the double directly -- and every Save test
-// above leans on it being right. These pin its two-case contract so a future
-// edit to the double cannot silently drift from what VisionRepository.Save
-// promises.
+// The double's create/update logic follows the port's doc comment and the
+// real Postgres adapter. These tests exercise it directly, and every Save
+// test above leans on it being right. They pin the two-case contract so a
+// future edit to the double cannot silently drift from what
+// VisionRepository.Save promises.
 
 func TestVisionRepoDoubleSaveCreatesAtVersionZero(t *testing.T) {
 	repo := newVisionRepoDouble()

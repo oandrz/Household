@@ -65,9 +65,9 @@ func TestSummarySubtractsDebtsFromAssets(t *testing.T) {
 	}
 }
 
-// TestSummaryConvertsBeforeAdding is the test that fails if the loop is
-// written the other way round. domain.Money.Add refuses two currencies, so
-// summing first and converting after errors on the second account.
+// TestSummaryConvertsBeforeAdding fails if conversion happens after summing:
+// domain.Money.Add refuses two currencies, so the wrong order errors on the
+// second account.
 //
 // The expected figure comes from the design's own screen: Rp 85,400,000 is
 // 8_540_000_000 IDR minor units, which at {1, 12410} is 688_155 SGD minor
@@ -144,10 +144,10 @@ func TestSummaryHasNoAccountsIsComputable(t *testing.T) {
 	}
 }
 
-// TestSummaryKeepsAnUncountedAccountInTheBreakdown pins the consequence of the
-// toggle's own copy, "Include this balance in the family total": the total,
-// specifically. The bars will not always sum to net worth, and the screen says
-// so rather than the service quietly hiding the account.
+// TestSummaryKeepsAnUncountedAccountInTheBreakdown pins the toggle's own
+// copy, "Include this balance in the family total": only the total excludes
+// it. The bars won't always sum to net worth, and the screen shows that
+// rather than the service quietly hiding the account.
 func TestSummaryKeepsAnUncountedAccountInTheBreakdown(t *testing.T) {
 	svc, _ := newAccountService(t)
 
@@ -190,15 +190,14 @@ func TestSummaryBreakdownDrawsOnlyPopulatedTypes(t *testing.T) {
 	}
 }
 
-// TestSummaryBreakdownIsOrderedByType pins the rule that the bars do not
-// reshuffle between two identical requests. Go randomises map iteration, so
-// building the breakdown by ranging over the byType map would order it
-// differently run to run -- and a chart whose bars swap places on a refresh
-// reads as a bug in the numbers, not in the sort.
+// TestSummaryBreakdownIsOrderedByType pins that the bars do not reshuffle
+// between identical requests. Go randomises map iteration, so building the
+// breakdown by ranging over byType would reorder it run to run -- reading
+// as a bug in the numbers, not the sort.
 //
-// Five types are used deliberately: with map iteration the odds of landing on
-// the sorted order by chance are 1 in 120, so this test fails almost every run
-// against the wrong implementation rather than occasionally.
+// Five types are used deliberately: the odds of a random map order matching
+// the sorted one by chance are 1 in 120, so this fails almost every run
+// against a wrong implementation rather than occasionally.
 func TestSummaryBreakdownIsOrderedByType(t *testing.T) {
 	svc, _ := newAccountService(t)
 
@@ -245,11 +244,10 @@ func TestSummarySkipsArchivedAccounts(t *testing.T) {
 	}
 }
 
-// TestSummaryOfAnAllArchivedHouseholdIsAGenuineZero is why the Computable
-// guard counts the accounts this summary is *about* rather than len(views).
-// Every account here is archived, so the loop skips all of them and nothing
-// converts -- but the honest answer is zero, not "we cannot work this out".
-// Guarding on len(views) would report the latter.
+// TestSummaryOfAnAllArchivedHouseholdIsAGenuineZero pins that the Computable
+// guard counts the accounts this summary is *about*, not len(views): every
+// account here is archived, so nothing converts, yet the honest answer is
+// zero, not "we cannot work this out".
 func TestSummaryOfAnAllArchivedHouseholdIsAGenuineZero(t *testing.T) {
 	svc, _ := newAccountService(t)
 
@@ -267,20 +265,19 @@ func TestSummaryOfAnAllArchivedHouseholdIsAGenuineZero(t *testing.T) {
 	}
 }
 
-// TestSummaryLooksUpEachRateOnce is the guard on the trend's central promise,
-// written before the trend exists. The newest bar must equal the headline
-// figure, and it can only do that if both are converted with the same rate --
-// so Summary must consult the provider once per currency, not once per
-// account and again per month. fx.StaticProvider returns one number forever,
-// so nothing else in the suite would ever notice the difference.
+// TestSummaryLooksUpEachRateOnce guards the trend's central promise: the
+// newest bar equals the headline figure only if both convert at the same
+// rate, so Summary must call the provider once per currency, not once per
+// account or again per month. fx.StaticProvider returns one number forever,
+// so nothing else in the suite would catch a regression here.
 func TestSummaryLooksUpEachRateOnce(t *testing.T) {
 	counter := newFXDouble()
 	svc := newAccountServiceWithFX(t, counter)
 
-	// Distinct ids: `account()` derives one from the currency and the type, so
-	// three IDR cash accounts would otherwise share it -- harmless to Summary,
-	// but the trend keys its movements by account id and a later test adding
-	// one here would silently give all three the same history.
+	// Distinct ids: account() derives one from currency and type, so three
+	// IDR cash accounts would otherwise share it. Harmless to Summary, but
+	// the trend keys movements by account id, so a later test reusing this
+	// setup would silently give them all the same history.
 	views := []usecase.AccountView{
 		account(t, domain.AccountCash, 1_000_000_000, "IDR"),
 		account(t, domain.AccountCash, 2_000_000_000, "IDR"),

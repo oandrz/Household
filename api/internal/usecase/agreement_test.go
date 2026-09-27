@@ -13,11 +13,9 @@ import (
 	"github.com/andreasoentoro/hearth/api/internal/usecase"
 )
 
-// seedMembers builds the household every agreement test runs against: the
-// given number of owners named in that order, plus a limited member who can
-// never be asked to sign (domain.ValidateMembershipChange refuses CapMarriage
-// to one). Without that member the signing-set helpers get tested minus their
-// filter.
+// seedMembers builds N owners, named in order, plus a limited member who
+// can never sign (ValidateMembershipChange refuses CapMarriage to one), so
+// the signing-set filter gets exercised too.
 func seedMembers(t *testing.T, owners int) *membershipDouble {
 	t.Helper()
 	members := newMembershipDouble(newUserDouble())
@@ -56,8 +54,8 @@ func TestAgreementGetComposesTheWholeDocument(t *testing.T) {
 		t.Fatalf("Get: %v", err)
 	}
 
-	// count(ACCEPTED) + 1 (decision 10): the pending, parked and withdrawn
-	// rows count toward nothing.
+	// Version is count(accepted) + 1: pending, parked and withdrawn rows count
+	// toward nothing.
 	if view.Version != 4 {
 		t.Errorf("Version = %d, want 4 -- count(accepted) + 1, not count(*)", view.Version)
 	}
@@ -75,7 +73,7 @@ func TestAgreementGetComposesTheWholeDocument(t *testing.T) {
 		t.Errorf("Money = {Count %d, Visible %v}, want {2, true}", view.Sections[0].Count, view.Sections[0].Visible)
 	}
 	// An empty section travels with Visible false rather than being dropped:
-	// the page hides it, the propose picker still offers it (decision 8).
+	// the page hides it, the propose picker still offers it.
 	if view.Sections[2].Visible || view.Sections[2].Count != 0 {
 		t.Errorf("Us = {Count %d, Visible %v}, want {0, false} and still present",
 			view.Sections[2].Count, view.Sections[2].Visible)
@@ -85,7 +83,7 @@ func TestAgreementGetComposesTheWholeDocument(t *testing.T) {
 	if view.Proposals[0].SectionName != "Home & kids" {
 		t.Errorf("the pending proposal's SectionName = %q, want %q", view.Proposals[0].SectionName, "Home & kids")
 	}
-	// An add has no target, so it can never be stale (decision 14).
+	// An add has no target, so it can never be stale.
 	if view.Proposals[0].TargetChanged {
 		t.Error("TargetChanged = true on an add -- an add has no target to go stale")
 	}
@@ -103,7 +101,7 @@ func TestAgreementGetComposesTheWholeDocument(t *testing.T) {
 }
 
 // A household down to one owner keeps seeing everything it agreed to and its
-// frozen proposals (decision 3): Locked gates writes, it never hides rows.
+// frozen proposals: Locked gates writes, it never hides rows.
 func TestAgreementGetIsLockedForOneOwnerAndStillCarriesTheDocument(t *testing.T) {
 	members := seedMembers(t, 1)
 	repo := newAgreementRepoDouble()
@@ -149,10 +147,9 @@ func TestAgreementGetHasNoUpdatedAtUntilSomethingIsAccepted(t *testing.T) {
 	}
 }
 
-// Every write refuses a one-owner household, and refuses it BEFORE any
-// repository call: the write counter is what separates "refused" from
-// "refused eventually" (decision 1). Uniform on purpose -- a rule that let
-// some writes through a locked household is one a reader gets wrong.
+// Every write refuses a one-owner household before any repository call --
+// the write counter proves "refused", not "refused eventually". Uniform on
+// purpose: a rule with exceptions is one a reader gets wrong.
 func TestAgreementWritesAreRefusedOnAOneOwnerHouseholdBeforeAnyRepositoryCall(t *testing.T) {
 	members := seedMembers(t, 1)
 	repo := newAgreementRepoDouble()
@@ -186,11 +183,9 @@ func TestAgreementWritesAreRefusedOnAOneOwnerHouseholdBeforeAnyRepositoryCall(t 
 	}
 }
 
-// Proposing is agreeing (decision 5), and the signing set is every CURRENT
-// owner (decision 4): an owner who joins mid-proposal must sign, one who
-// leaves stops blocking it, and the proposal stays open through both. The
-// write returns the row AND the recomposed document, and both are asserted
-// here, because Task 7 maps the first and Task 8 answers with the second.
+// Proposing is agreeing; the signing set is every CURRENT owner, so a
+// joiner must sign and a leaver stops blocking it while the proposal stays
+// open. The write also returns the recomposed document, asserted here too.
 func TestAgreementProposeSignsTheProposerAndTheAwaitingListFollowsTheOwners(t *testing.T) {
 	members := seedMembers(t, 2)
 	repo := newAgreementRepoDouble()
@@ -267,12 +262,10 @@ func TestAgreementProposeSignsTheProposerAndTheAwaitingListFollowsTheOwners(t *t
 	}
 }
 
-// The last awaiting signature applies an EDIT and a REMOVE, not only an add.
-// An edit is a remove and an add together, so the agreement's id changes and
-// the new wording sorts last in its section, exactly where created_at, id
-// puts it -- which is why the assertions below find rows by body. The
-// proposal keeps the OLD wording in PreviousBody, because that is what the
-// history modal renders and what Restore pre-fills (decisions 13 and 18).
+// The last awaiting signature can apply an EDIT or REMOVE, not just an add:
+// an edit is a remove-and-add, so the id changes and the new wording sorts
+// last (created_at, id) -- hence the assertions below find rows by body.
+// PreviousBody keeps the OLD wording, for the history modal and Restore.
 func TestAgreementSignAppliesAnEditAndARemoveAndRenumbersWhatIsLeft(t *testing.T) {
 	members := seedMembers(t, 2)
 	repo := newAgreementRepoDouble()
@@ -354,10 +347,9 @@ func TestAgreementSignAppliesAnEditAndARemoveAndRenumbersWhatIsLeft(t *testing.T
 	}
 }
 
-// Withdrawing something already accepted is the last signer double-clicking
-// through a stale page. It means "reload, this was settled", and it must
-// write nothing: an accepted proposal that flipped to withdrawn would leave
-// its agreement live with no record of how it got there.
+// Withdrawing an already-accepted proposal is a stale double-click ("reload,
+// this was settled"); it must write nothing, or an accepted-then-withdrawn
+// proposal would leave its agreement live with no record of how it got there.
 func TestAgreementWithdrawOnAnAcceptedProposalWritesNothing(t *testing.T) {
 	members := seedMembers(t, 2)
 	repo := newAgreementRepoDouble()
@@ -387,11 +379,11 @@ func TestAgreementWithdrawOnAnAcceptedProposalWritesNothing(t *testing.T) {
 	}
 }
 
-// Withdraw hands byMembershipID to the store and never branches on it: the
-// proposer check is the HANDLER's, because only the HTTP layer knows who is
-// asking (decision 15, inside decision 22's 404 -> 403 -> 409 order). The
-// proof is not that a stranger is refused -- it is that the refusal came back
-// FROM the repository, which means the service reached it.
+// Withdraw hands byMembershipID to the store without branching on it -- the
+// proposer check (proposer-only, then any owner once they leave) belongs to
+// the HANDLER, which alone knows who is asking, and must answer in
+// 404 -> 403 -> 409 order. The proof is that the refusal came back FROM the
+// repository, meaning the service reached it.
 func TestAgreementWithdrawHandsTheProposerCheckToTheStore(t *testing.T) {
 	members := seedMembers(t, 2)
 	repo := newAgreementRepoDouble()
@@ -427,10 +419,9 @@ func TestAgreementWithdrawHandsTheProposerCheckToTheStore(t *testing.T) {
 	}
 }
 
-// "Use starter set" seeds four labels and nothing else (decision 17), so
-// "everything on this page is here because you both agreed" stays literally
-// true. A second click is a no-op, not a 409: ON CONFLICT DO NOTHING, and the
-// write counter is what proves it.
+// "Use starter set" seeds four labels and nothing else, keeping "everything
+// here is because you both agreed" literally true. A second click is a
+// no-op (ON CONFLICT DO NOTHING), which the write counter proves.
 func TestAgreementStarterSetIsIdempotentAndCreatesNoAgreements(t *testing.T) {
 	members := seedMembers(t, 2)
 	repo := newAgreementRepoDouble()
@@ -472,10 +463,10 @@ func TestAgreementStarterSetIsIdempotentAndCreatesNoAgreements(t *testing.T) {
 	}
 }
 
-// The park note is capped separately from the proposal note: two fields on
-// two screens, and one constant serving both would have to move for both.
-// Both constants are 500, so no length assertion can tell them apart -- only
-// the SENTINEL can, which is why this test asserts one and refuses the other.
+// The park note is capped separately -- two fields, two screens, so a
+// shared constant would move for both. Both caps are 500, so only the
+// SENTINEL error tells them apart; this test asserts one and refuses the
+// other.
 func TestAgreementParkCapsItsOwnNoteSeparatelyFromTheProposalNote(t *testing.T) {
 	members := seedMembers(t, 2)
 	repo := newAgreementRepoDouble()
@@ -499,7 +490,7 @@ func TestAgreementParkCapsItsOwnNoteSeparatelyFromTheProposalNote(t *testing.T) 
 			utf8.RuneCountInString(parked.ParkNote), domain.MaxAgreementParkNoteLen)
 	}
 	if parked.Status != "parked" {
-		t.Errorf("Status = %q, want parked -- Discuss leaves the proposal open (decision 7)", parked.Status)
+		t.Errorf("Status = %q, want parked -- Discuss leaves the proposal open", parked.Status)
 	}
 
 	writes := repo.writes

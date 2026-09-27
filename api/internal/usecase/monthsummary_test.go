@@ -39,20 +39,18 @@ func TestSpentCountsExpensesOnly(t *testing.T) {
 	if got.Count != 3 {
 		t.Fatalf("count = %d, want 3 (every kind)", got.Count)
 	}
-	// Spent is expenses only. Income is not spending, and a transfer is the
-	// same money arriving somewhere else -- counting either would tell a
-	// household it spent money it still has. The transfer's amount (50000) and
-	// the income's (120000) both differ from the expense's (5230), so this
-	// assertion would catch either leaking into Spent.
+	// Income is not spending, and a transfer is the same money arriving
+	// elsewhere -- counting either would tell a household it spent money it
+	// still has. The transfer (50000) and income (120000) amounts both differ
+	// from the expense (5230), so this assertion would catch either leaking in.
 	if got.Spent.Amount != 5230 {
 		t.Fatalf("spent = %d, want 5230 (the expense alone)", got.Spent.Amount)
 	}
 }
 
-// domain.Money.Add refuses to add two currencies, deliberately. Summing first
-// and converting after fails on the second transaction of a mixed-currency
-// household -- LEARNING.md pattern 12, the same order AccountService.Summary
-// uses.
+// domain.Money.Add rejects mixed currencies, so summing then converting
+// fails on a mixed-currency household's second transaction --
+// LEARNING.md pattern 12, the same order AccountService.Summary uses.
 func TestSpentConvertsEachTransactionBeforeSumming(t *testing.T) {
 	svc, _ := transactionFixture(t)
 	ctx := context.Background()
@@ -103,10 +101,9 @@ func TestATransactionWithNoRateIsExcludedAndNamed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("month summary: %v", err)
 	}
-	// Count counts every transaction the ledger shows, convertible or not --
-	// an implementation that only counted convertible rows would still read 0
-	// here, indistinguishable from "nothing happened this month" without this
-	// assertion.
+	// Count includes every transaction, convertible or not -- an
+	// implementation that counted only convertible rows would still read 0
+	// here, indistinguishable from "nothing happened this month".
 	if got.Count != 1 {
 		t.Fatalf("count = %d, want 1 -- the ledger shows this row even though spend excludes it", got.Count)
 	}
@@ -123,25 +120,22 @@ func TestATransactionWithNoRateIsExcludedAndNamed(t *testing.T) {
 	}
 }
 
-// Decision 6's split, asserted in one test because it is the thing that will
-// get "simplified" later: the balance ignores a transaction dated before the
-// account's opening date, and spend does not. The money was spent.
+// The balance excludes a transaction dated before the account's opening
+// date, since importing history must not corrupt it, but spend does not --
+// the money was still spent. Kept as one assertion because this split is
+// the one most likely to get "simplified" away later.
 //
-// The transaction's view is marked via repo.markBeforeFromAccountOpening --
-// the same BeforeFromAccountOpening flag the real postgres repository
-// computes from a join to the account's OpeningBalanceAsOf (see
-// transaction_repo.go) -- so the assertion below fails the moment
-// MonthSummary starts respecting that flag, rather than passing regardless of
-// whether it does.
+// repo.markBeforeFromAccountOpening sets the same BeforeFromAccountOpening
+// flag the real postgres repository computes from Account.OpeningBalanceAsOf,
+// so this assertion fails the moment MonthSummary starts respecting it.
 func TestSpendCountsATransactionDatedBeforeTheAccountsOpeningBalance(t *testing.T) {
 	svc, repo := transactionFixture(t)
 	ctx := context.Background()
 	july := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
 
-	// "log yesterday's lunch on an account I added today": the account's
-	// opening balance was asserted as of some later date, and this expense
-	// predates it -- the ledger's BeforeFromAccountOpening flag would be true
-	// for exactly this row.
+	// "Log yesterday's lunch on an account added today": the opening balance
+	// is asserted as of a later date, so this expense predates it, and the
+	// ledger's BeforeFromAccountOpening flag would be true for this row.
 	created := mustCreate(t, svc, usecase.NewTransaction{
 		HouseholdID: "house-1", Kind: "expense", OccurredOn: july.AddDate(0, 0, 1),
 		Description: "Kopitiam", CategoryID: "cat-groceries",
