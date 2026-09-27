@@ -11,12 +11,12 @@ import (
 	"github.com/andreasoentoro/hearth/api/internal/domain"
 )
 
-// The invite lobby's owner side: POST /household/invites/{id}/link, which
-// is both "get a new link" and "Not them" (task-8-brief.md). Knocking is
-// simulated by calling env.deps.Invites.Knock directly -- the same way a
-// real knock arrives, through the Telegram bot, is out of this package's
-// reach, and the postgres and usecase suites already prove Knock and
-// ReplaceToken themselves.
+// The invite lobby's owner side: POST /household/invites/{id}/link serves
+// both "get a new link" and "Not them" with one route. Knocking is
+// simulated by calling env.deps.Invites.Knock directly -- a real knock
+// arrives through the Telegram bot, out of this package's reach, and the
+// postgres and usecase suites already prove Knock and ReplaceToken
+// themselves.
 
 // TestANewInviteLinkReplacesTheOldOneAndTellsTheKnockedChat is the route's
 // happy path: a fresh link comes back, the old token stops knocking, and
@@ -70,8 +70,9 @@ func TestANewInviteLinkReplacesTheOldOneAndTellsTheKnockedChat(t *testing.T) {
 	}
 }
 
-// An email invite has no link to replace -- refused with its own message,
-// not silently converted (spec decision 9).
+// An email invite has no link to replace: an invite has exactly one
+// channel, so this refuses with its own message rather than silently
+// converting it.
 func TestNewLinkOnAnEmailInviteIs409(t *testing.T) {
 	env := newTestEnv(t)
 	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)

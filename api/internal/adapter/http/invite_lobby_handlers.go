@@ -20,8 +20,7 @@ type inviteLinkDTO struct {
 // handleNewInviteLink serves both "Get a new link" and "Not them": the
 // effects are identical (InviteService.NewLink's own doc comment), so
 // there is one route. Its guards live on the route (router.go): owner,
-// CSRF, and a browser session -- the same three that guard invite create
-// and withdraw.
+// CSRF, and a browser session, same as invite create and withdraw.
 func handleNewInviteLink(deps Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		scope, ok := requireScope(w, r)
@@ -39,8 +38,8 @@ func handleNewInviteLink(deps Deps) http.HandlerFunc {
 
 // admitResultDTO carries the new member and whether their sign-in link
 // actually went out. There is no code field anywhere on this route's
-// request: the four digits are compared by eye and accepted by no endpoint
-// (spec decision 3) -- TestTheAdmitRequestHasNoCodeField pins that.
+// request: the four digits are compared by eye and accepted by no
+// endpoint -- TestTheAdmitRequestHasNoCodeField pins that.
 type admitResultDTO struct {
 	Member     admittedMemberDTO `json:"member"`
 	SignInSent bool              `json:"signInSent"`
@@ -58,9 +57,8 @@ type admittedMemberDTO struct {
 
 // handleAdmitInvite reads no body at all -- there is nothing for a request
 // to carry. Its guards live on the route (router.go): owner, CSRF and a
-// browser session, the same three handleNewInviteLink's own comment
-// describes, because the deciding click must sit where a stolen link
-// cannot reach (spec decision 4).
+// browser session, same as handleNewInviteLink, because the deciding click
+// must sit where a stolen link cannot reach (ADR 11).
 func handleAdmitInvite(deps Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		scope, ok := requireScope(w, r)

@@ -21,20 +21,16 @@ type moneyDTO struct {
 }
 
 // accountDTO omits Balance, OpeningBalance and BalanceAsOf entirely for a
-// limited member -- hence the pointers and omitempty rather than zero values.
-// A zeroed amount still reads as a real balance, which is the failure this
-// shape exists to make impossible.
+// limited member, using pointers and omitempty rather than zeros -- a
+// zeroed amount would still read as a real balance.
 //
-// Balance and OpeningBalance are two different figures. Balance is what the
-// account holds now: the opening balance plus every transaction dated on or
-// after BalanceAsOf, summed in SQL (queries/account.sql). OpeningBalance is the
-// figure someone asserted was true on BalanceAsOf, and BalanceAsOf is the day
-// that assertion is about -- the two of them are one fact and are the pair a
-// client edits and PATCHes back as openingBalanceMinor/openingBalanceAsOf.
-// They were the same number until Transactions shipped, which is exactly why
-// OpeningBalance has to be on the wire: a client that has only Balance to
-// prefill an edit form from will write today's balance back as the opening
-// one and move the household's net worth by every transaction since.
+// Balance is what the account holds now: OpeningBalance plus every
+// transaction on or after BalanceAsOf, summed in SQL (queries/account.sql).
+// OpeningBalance is the figure asserted true on BalanceAsOf, and a client
+// edits and PATCHes the pair back as openingBalanceMinor/openingBalanceAsOf.
+// OpeningBalance must stay on the wire: an edit form prefilled from Balance
+// alone would write today's balance back as the opening one and move net
+// worth by every transaction since.
 type accountDTO struct {
 	ID                      string     `json:"id"`
 	Nickname                string     `json:"nickname"`
@@ -60,29 +56,26 @@ type excludedDTO struct {
 }
 
 // trendPointDTO is one bar. NetWorthMinor is a pointer WITHOUT omitempty, so
-// an unknown month arrives as an explicit null rather than a missing key: the
-// chart needs the slot to keep its axis aligned, and a zero would be a claim
-// about the household's money that nobody can make.
+// an unknown month arrives as an explicit null, not a missing key -- the
+// chart needs the slot for its axis, and a zero would be a false claim.
 type trendPointDTO struct {
 	Month         string `json:"month"`
 	NetWorthMinor *int64 `json:"netWorthMinor"`
 	Complete      bool   `json:"complete"`
 }
 
-// trendDTO carries the change as integer basis points -- 210 is 2.10%. A
-// percentage is not money, so the int64-minor-units rule does not literally
-// apply, but there is no reason to put a float on this wire either, and
-// omitempty is wrong for it too: the field is absent when suppressed, and 0
-// is a real reading meaning "unchanged".
+// trendDTO carries the change as integer basis points -- 210 is 2.10%. Not
+// money, so the minor-units rule doesn't strictly apply, but there's no
+// reason for a float here either. omitempty is wrong too: the field is
+// absent only when suppressed, and 0 is a real "unchanged" reading.
 type trendDTO struct {
 	Points            []trendPointDTO `json:"points"`
 	ChangeBasisPoints *int64          `json:"changeBasisPoints,omitempty"`
 }
 
-// summaryDTO's NetWorthMinor, AssetsMinor and LiabilitiesMinor are pointers so
-// that an incomputable summary carries no figures at all rather than zeros.
-// Zero is a claim about the household's money; the truth in that state is that
-// we cannot compute it.
+// summaryDTO's NetWorthMinor, AssetsMinor and LiabilitiesMinor are pointers,
+// so an incomputable summary carries no figures at all -- zero would be a
+// claim about the household's money that isn't true here.
 type summaryDTO struct {
 	Currency         string         `json:"currency"`
 	Computable       bool           `json:"computable"`
@@ -100,17 +93,15 @@ type accountsResponse struct {
 	Summary  *summaryDTO  `json:"summary,omitempty"`
 }
 
-// handleListAccounts is the one endpoint the Finances screen reads. It returns
-// the list and the summary together because they are one screen and must
-// describe the same set of rows -- two endpoints would mean writing the
-// redaction below twice, and a rule written twice is a rule fixed once.
+// handleListAccounts is the one endpoint the Finances screen reads. It
+// returns the list and summary together because they describe the same set
+// of rows -- splitting them would mean writing the redaction below twice.
 func handleListAccounts(deps Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Every account route sits behind requireCapability (router.go), which
-		// already calls RequestScope and answers 403 for a caller it comes back
-		// false for -- so by the time any of the five handlers in this file
-		// runs, ok is guaranteed true and the explicit check other handlers make
-		// (e.g. handleGetHousehold) would be dead code here.
+		// already calls RequestScope and answers 403 on false, so ok is guaranteed
+		// true in all five handlers in this file -- checking it again, as other
+		// handlers do (e.g. handleGetHousehold), would be dead code.
 		scope, _ := RequestScope(r)
 		includeArchived := r.URL.Query().Get("include_archived") == "true"
 
@@ -120,18 +111,14 @@ func handleListAccounts(deps Deps) http.HandlerFunc {
 			return
 		}
 
-		// The redaction is here, in the handler, not in AccountService: it is a
-		// rule about who is asking, and services in this codebase never take an
-		// actor.
+		// The redaction lives here, in the handler, not in AccountService: it's
+		// a rule about who is asking, and services here never take an actor.
 		//
-		// The condition names the role that may see everything, rather than the
-		// role that may not. Those are the same test while `owner` and `limited`
-		// are the only roles, and they stop being the same the day a third one
-		// arrives -- the "adult who is not an owner" this product will plausibly
-		// want. Written the other way round, that new role would silently
-		// receive every balance and the net worth, and no test in the suite
-		// would go red. Role comes from a database column, and this codebase
-		// fails closed on values it did not construct.
+		// The condition names the role that may see everything (owner), not the
+		// role that may not -- those agree only while owner and limited are the
+		// only roles. Written the other way, a future third role would silently
+		// get every balance with no test going red. Role comes from a database
+		// column, so this fails closed on a value it did not construct.
 		if scope.Membership.Role != domain.RoleOwner {
 			WriteJSON(w, http.StatusOK, accountsResponse{Accounts: redactedAccounts(views)})
 			return
@@ -286,10 +273,10 @@ func handleCreateAccount(deps Deps) http.HandlerFunc {
 			OpeningBalanceMinor:    req.OpeningBalanceMinor,
 			OpeningBalanceCurrency: req.OpeningBalanceCurrency,
 			OpeningBalanceAsOf:     asOf,
-			// The design draws these toggles on and off respectively, and an
-			// omitted field must land on the same default the form shows --
-			// otherwise a client that sends neither gets an account that
-			// counts toward nothing and is visible to children.
+			// The form defaults these toggles on and off respectively; an
+			// omitted field must land on the same default, or a client that
+			// sends neither gets an account that counts toward nothing and is
+			// visible to children.
 			CountTowardNetWorth:     true,
 			VisibleToLimitedMembers: false,
 		}
@@ -351,10 +338,8 @@ func handleUpdateAccount(deps Deps) http.HandlerFunc {
 func handleArchiveAccount(deps Deps) http.HandlerFunc { return setArchived(deps, true) }
 func handleRestoreAccount(deps Deps) http.HandlerFunc { return setArchived(deps, false) }
 
-// setArchived backs both the archive and the restore route. One function
-// rather than two near-identical ones: the pair differ by a single boolean,
-// and this project's repeated lesson is that a rule written twice is a rule
-// fixed once.
+// setArchived backs both the archive and the restore route: one function
+// rather than two near-identical ones that differ by a single boolean.
 func setArchived(deps Deps, archived bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		scope, _ := RequestScope(r)
@@ -368,17 +353,14 @@ func setArchived(deps Deps, archived bool) http.HandlerFunc {
 }
 
 // writeAccount re-reads the account through Get so every mutating response
-// carries the owner's display name, which the write queries do not return. It
-// always answers with a body, never 204: apiFetch throws INVALID_RESPONSE on
-// an ok response it cannot parse.
+// carries the owner's display name, which the write queries do not return.
+// It always answers with a body, never 204, because apiFetch throws
+// INVALID_RESPONSE on an ok response it cannot parse.
 //
-// status is a parameter, not a constant, because the four callers do not
-// agree on it: create answers 201, matching this API's own convention for
-// POST /spaces and POST /household/members/invite, while update, archive and
-// restore all answer 200 -- they are edits to a row that already existed, not
-// the creation of one. The four used to share one status only because they
-// shared this function; once a caller needed to differ, giving the shared
-// code a parameter was cheaper than duplicating it just to vary that.
+// status is a parameter, not a constant, because the four callers disagree:
+// create answers 201, matching POST /spaces and POST
+// /household/members/invite, while update, archive and restore answer 200
+// since they edit a row that already existed rather than create one.
 func writeAccount(w http.ResponseWriter, r *http.Request, deps Deps, householdID, accountID string, status int) {
 	view, err := deps.Accounts.Get(r.Context(), householdID, accountID)
 	if err != nil {

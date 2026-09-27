@@ -9,10 +9,8 @@ import (
 )
 
 // --- Shared response DTOs --------------------------------------------------
-//
-// These are shared by auth_handlers.go, invite_handlers.go, member_handlers.go
-// and household_handlers.go -- all in package httpadapter -- rather than
-// duplicated per file.
+// Used by auth_handlers.go, invite_handlers.go, member_handlers.go and
+// household_handlers.go instead of duplicating per file.
 
 type userDTO struct {
 	ID            string `json:"id"`
@@ -98,10 +96,9 @@ func toSpaceDTOs(spaces []domain.Space) []spaceDTO {
 	return out
 }
 
-// meResponseBody is GET /auth/me's body, and also what every completeSignIn
-// caller answers with -- see completeSignIn below. The design deliberately
-// returns everything the application shell needs in one response so the
-// sidebar never waits on a request waterfall.
+// meResponseBody is GET /auth/me's body, and what completeSignIn (below)
+// answers with too. It carries everything the app shell needs in one
+// response so the sidebar avoids a request waterfall.
 type meResponseBody struct {
 	User         userDTO       `json:"user"`
 	Household    householdDTO  `json:"household"`
@@ -119,20 +116,12 @@ type meResponseBody struct {
 }
 
 // buildMeResponse assembles the GET /auth/me bundle for one caller. It is
-// read-only, which is why every caller of it except handleMe (below) can run
-// before ever writing a cookie: completeSignIn's callers are themselves the
-// calls that create the session, so an assembly failure here must never
-// leave a live session cookie sitting next to a 500 response.
+// read-only: every caller but handleMe runs it before writing any session
+// cookie, so a failure here must never leave a live cookie next to a 500.
 //
-// It resolves the caller's flags and admin status itself rather than reading
-// them off a Scope, even though requireSession puts the flags there: every
-// caller of this function except handleMe runs before any session -- and
-// therefore any Scope -- exists. Reading from Scope would leave all of those
-// responses without the fields entirely. The cost is one extra pair of
-// indexed lookups on the one caller that does have a Scope, GET /auth/me
-// itself. This is stated as a property, not a count of callers: a new
-// pre-session caller added later stays correct without this comment needing
-// an edit.
+// It resolves flags and admin status itself rather than reading Scope,
+// because those other callers run before a Scope exists; only handleMe pays
+// the extra lookups for a Scope it already has.
 func buildMeResponse(ctx context.Context, deps Deps, userID, householdID string) (meResponseBody, error) {
 	user, err := deps.Users.ByID(ctx, userID)
 	if err != nil {
@@ -160,18 +149,14 @@ func buildMeResponse(ctx context.Context, deps Deps, userID, householdID string)
 	}
 	features := flags.Strings()
 	// telegram_sign_in's stored value says whether the household wants the
-	// channel; it says nothing about whether this install has a bot to
-	// offer it through. Masking it here -- not in the flag's own default or
-	// resolution, which must stay a pure function of the stored rows -- is
-	// what keeps those two questions separate (spec decision 11): a
-	// bot-less install (deps.Telegram is nil, which is how the router
-	// itself tells the two apart -- see Deps' own doc comment) must report
-	// the channel as off no matter what the flag says, so
-	// InviteMemberModal's "Inviting is unavailable on this install" copy
-	// renders instead of a Send invite button that always answers 409
-	// TELEGRAM_INVITES_UNAVAILABLE. This is display-only: requireFeature
-	// still reads the real, unmasked value from scope.Flags, so the routes
-	// themselves are untouched.
+	// channel, not whether this install has a bot to offer it through.
+	// Masking it here (not in the flag's default/resolution, which stays a
+	// pure function of the stored rows) keeps those two questions separate:
+	// a bot-less install (deps.Telegram nil, per Deps' doc comment) must
+	// report the channel off regardless of the flag, so InviteMemberModal
+	// shows its "unavailable" copy instead of a Send-invite button that
+	// always answers 409 TELEGRAM_INVITES_UNAVAILABLE. Display-only:
+	// requireFeature still reads the real, unmasked value from scope.Flags.
 	if deps.Telegram == nil {
 		features[string(domain.FlagTelegramSignIn)] = false
 	}
@@ -186,11 +171,10 @@ func buildMeResponse(ctx context.Context, deps Deps, userID, householdID string)
 	}, nil
 }
 
-// completeSignIn is the common tail for every call site that produces a
-// usecase.SignInResult: they must all answer identically -- the me bundle, a
-// session cookie and a CSRF cookie. The me bundle is assembled, and the CSRF
-// token generated, before either cookie is written, so a failure at either
-// step never leaves a live session cookie paired with an error response.
+// completeSignIn is the common tail for every call site producing a
+// usecase.SignInResult: each answers with the me bundle, a session cookie
+// and a CSRF cookie, built and generated before either cookie is written so
+// a failure never leaves a live cookie paired with an error response.
 func completeSignIn(w http.ResponseWriter, r *http.Request, deps Deps, result usecase.SignInResult) {
 	body, err := buildMeResponse(r.Context(), deps, result.UserID, result.HouseholdID)
 	if err != nil {
@@ -237,10 +221,9 @@ func handleRequestMagicLink(deps Deps) http.HandlerFunc {
 		if !decodeJSONBody(w, r, &req) {
 			return
 		}
-		// RequestMagicLink's own contract is "always nil" (see its doc
-		// comment in usecase/auth.go) -- this still checks err so a future
-		// change to that contract fails loudly here rather than being
-		// silently ignored.
+		// RequestMagicLink's contract is "always nil" (see usecase/auth.go),
+		// but this still checks err so a future change to that contract
+		// fails loudly here instead of being silently ignored.
 		if err := deps.Auth.RequestMagicLink(r.Context(), req.Email); err != nil {
 			MapDomainError(w, r, err)
 			return
@@ -268,11 +251,10 @@ func handleConsumeMagicLink(deps Deps) http.HandlerFunc {
 	}
 }
 
-// handleSignOut sits behind requireSession, so the hearth_session cookie is
-// already known to be present and to have resolved to a live session by the
-// time this runs -- it is read again here (rather than threaded through
-// Scope) because SignOut needs the raw token to hash, and Scope carries only
-// the identity the middleware already resolved from it.
+// handleSignOut sits behind requireSession, so hearth_session is already
+// known to be present and live. It re-reads the cookie here rather than
+// threading it through Scope because SignOut needs the raw token to hash,
+// and Scope carries only the identity middleware already resolved from it.
 func handleSignOut(deps Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// A token has no session to end; `hearthctl token revoke` is its

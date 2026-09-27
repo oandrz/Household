@@ -19,16 +19,14 @@ type memberViewDTO struct {
 	Capabilities []string `json:"capabilities"`
 }
 
-// toMemberViewDTO builds one row of the member list. revealEmail gates the
-// User.Email field: when false (a limited caller), it is emptied rather than
-// populated -- the field key still appears in the JSON (userDTO's Email has
-// no `omitempty`), so the response shape is identical either way and the
-// frontend never needs two types.
+// toMemberViewDTO builds one row of the member list. revealEmail gates
+// User.Email: false empties it rather than omitting it (userDTO.Email has
+// no `omitempty`), so the response shape stays identical either way and the
+// frontend needs only one type.
 //
-// An empty email here is deliberately ambiguous between "withheld because
-// the caller isn't an owner" and "this member genuinely has no email" (a
-// credential-less child's own record) -- see the doc comment on
-// handleListMembers for why that ambiguity is the point, not a gap.
+// An empty email here is deliberately ambiguous between "withheld" and
+// "this member genuinely has none" (a credential-less child's own record)
+// -- see the per-field redaction in handleListMembers.
 func toMemberViewDTO(v usecase.MemberView, revealEmail bool) memberViewDTO {
 	user := toUserDTO(v.User)
 	if !revealEmail {
@@ -42,18 +40,15 @@ func toMemberViewDTO(v usecase.MemberView, revealEmail bool) memberViewDTO {
 	}
 }
 
-// handleListMembers is reachable by any authenticated member -- names,
-// roles and capabilities are needed household-wide (a future slice's
-// calendar per-person filters, in particular) -- but email addresses are
-// personal data belonging to the other members and the identifier the whole
-// authentication surface is keyed on. Nothing in the design shows a child a
-// parent's email address, so the list always contains every member (the
-// household's full roster, not a filtered subset), and only an owner caller
-// gets the User.Email field populated; a limited caller sees it emptied on
-// every row via toMemberViewDTO's revealEmail parameter. This is a
-// per-field redaction, deliberately not a per-row filter, so a limited
-// caller still learns who is in the household and what they can do -- just
-// not how to reach them by email.
+// handleListMembers is reachable by any authenticated member: names, roles
+// and capabilities are needed household-wide (payer and assignee pickers
+// across money, marriage and overview read them). Emails are personal
+// data and the auth surface's own identifier, so nothing in the design
+// shows a child a parent's email -- the roster always lists every member,
+// but only an owner gets User.Email populated; a limited caller sees it
+// emptied per row (toMemberViewDTO's revealEmail). This redacts per
+// field, not per row, so a limited caller still learns who is in the
+// household and what they can do, just not how to reach them by email.
 func handleListMembers(deps Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		scope, ok := RequestScope(r)
@@ -83,16 +78,14 @@ type inviteMemberRequest struct {
 	Channel      string   `json:"channel"`
 }
 
-// inviteCreatedDTO answers every channel. All three fields are omitted when
-// absent rather than sent as a zero value: an email invite has no id to
-// report (Create predates this shape and returns none), and a profile or
-// email invite has no expiry or link at all -- serialising ExpiresAt as
-// Go's zero time would print "0001-01-01T00:00:00Z", a real-looking date
-// that is actually a lie. ID and ExpiresAt are pointers because
-// `omitempty` does not suppress a zero time.Time (a non-empty struct); Link
-// is already a string, so its own zero value ("") is enough. Every 2xx
-// except 204 still carries a JSON body (CLAUDE.md): the profile and email
-// arms answer `{}`, which is a body, just an empty one.
+// inviteCreatedDTO answers every channel, with fields omitted when absent
+// rather than sent as a zero value: an email invite has no id to report
+// (Create predates this shape), and a profile or email invite has no
+// expiry or link -- serialising ExpiresAt as Go's zero time would print a
+// real-looking but false "0001-01-01T00:00:00Z". ID and ExpiresAt are
+// pointers because `omitempty` cannot suppress a zero time.Time; Link is
+// already a string, so its own "" is enough. Every 2xx except 204 still
+// carries a body (CLAUDE.md): the profile and email arms answer `{}`.
 type inviteCreatedDTO struct {
 	ID        *string    `json:"id,omitempty"`
 	ExpiresAt *time.Time `json:"expiresAt,omitempty"`
@@ -163,21 +156,18 @@ func handleInviteMember(deps Deps) http.HandlerFunc {
 			return
 		}
 		// The flag is enforced here as well as in the modal, because this
-		// route is reachable from hearthctl and from anything else holding
-		// a session: an invite that can never be delivered must not be
-		// creatable at all (spec decision 10). adminctl is deliberately
-		// outside this gate -- it calls InviteService directly and prints
-		// the URL it captured, which is how an operator hands an invite
-		// over today.
+		// route is reachable from hearthctl and anything else holding a
+		// session: an invite that can never be delivered must not be
+		// creatable at all. adminctl is deliberately outside this gate --
+		// it calls InviteService directly and prints the URL it captures,
+		// which is how an operator hands an invite over today.
 		//
-		// Every arm below answers and returns. None falls through to a
-		// shared call after the switch: that shape is what let a
+		// Every arm below answers and returns; don't let one fall through
+		// to a shared call after the switch. That shape once let a
 		// {"channel":"email","email":""} request slip past the flag check
-		// and land in Create's own empty-email branch, silently creating a
+		// into Create's own empty-email branch, silently creating a
 		// profile-only member with no invite row, no token and no mail for
-		// a caller who explicitly asked for the email channel. The profile
-		// arm's own return already avoided a double-create for the same
-		// reason; every arm now does the same.
+		// a caller who asked for email.
 		switch choice {
 		case channelChoiceProfile:
 			// Today's kid path, untouched: Create's own empty-email branch
@@ -195,12 +185,11 @@ func handleInviteMember(deps Deps) http.HandlerFunc {
 				MapDomainError(w, r, domain.ErrEmailInvitesDisabled)
 				return
 			}
-			// A caller who explicitly asked for the email channel but sent
-			// no address must be refused here, not handed to Create: its
-			// own empty-email branch exists for the profile arm's kid
-			// case, and would otherwise silently create a profile-only
-			// member with no invite row, no token and no mail for a
-			// request that asked for one.
+			// A caller who asked for the email channel but sent no address
+			// is refused here, not handed to Create: its empty-email
+			// branch exists for the profile arm's kid case, and would
+			// otherwise silently create a profile-only member with no
+			// invite, token or mail for a request that asked for one.
 			if req.Email == "" {
 				MapDomainError(w, r, domain.ErrInviteRequiresEmail)
 				return
@@ -239,36 +228,31 @@ func handleInviteMember(deps Deps) http.HandlerFunc {
 
 // updateMemberRequest's fields are pointers for the same reason
 // updateHouseholdRequest's and notificationPreferencesRequest's are (see
-// household_handlers.go): a plain string/slice field cannot distinguish "the
-// caller omitted this" from "the caller sent its zero value," so a request
-// that only means to change capabilities would otherwise blank Role to ""
-// and fail as an unknown role, and vice versa. Unlike those two, this one
-// briefly shipped with value fields anyway -- Task 20's frontend had to work
-// around it client-side by always sending both fields together. Fixed here
-// the same way: absent means unchanged.
+// household_handlers.go): a plain string/slice field can't tell "omitted"
+// from "sent its zero value," so a capabilities-only request would blank
+// Role to "" and fail as an unknown role, and vice versa. Don't go back to
+// value fields here: it once shipped that way and forced the frontend to
+// work around it by always sending both together.
 type updateMemberRequest struct {
 	Role         *string   `json:"role"`
 	Capabilities *[]string `json:"capabilities"`
 }
 
-// handleUpdateMember sits behind requireOwner. A successful update's normal
-// body just echoes what was set; if the update itself succeeded but
-// usecase.ErrSessionRevocationFailed comes back, that same body gets a
-// warning field appended and the response stays 200 -- the mutation did
-// happen, and reporting it as a failure would invite a pointless retry. This
-// is checked here, before MapDomainError, because MapDomainError only ever
-// sees the error, not this route's success body to append the warning to.
+// handleUpdateMember sits behind requireOwner. On success the body echoes
+// what was set; if usecase.ErrSessionRevocationFailed comes back after a
+// successful update, the same body gets a warning field appended and stays
+// 200, since the mutation did happen and reporting it as a failure would
+// invite a pointless retry. This is checked before MapDomainError, which
+// only ever sees the error, not the success body to append a warning to.
 //
-// This is a real PATCH: only the fields present in the request change. The
-// handler parses what was sent and hands it to usecase.MemberService.Update
-// as a MembershipPatch; it deliberately does NOT read the membership first
-// to fill in the omitted fields. The service fills them in from the
-// memberships it reads under the household's lock. A read here, before that
-// lock, could carry a stale role into the write and silently undo a role
-// change another owner made in between. Role and capabilities are still
-// validated together against the resolved result -- a role-only patch
-// against the existing capabilities, a capabilities-only patch against the
-// existing role -- by the service, on that locked state.
+// This is a real PATCH: only fields present in the request change. The
+// handler deliberately does NOT read the membership first to fill in
+// omitted fields -- a read here, before the household lock, could carry a
+// stale role into the write and silently undo a role change another owner
+// made in between. Instead it hands a MembershipPatch to
+// usecase.MemberService.Update, which fills omitted fields in itself from
+// memberships read under the lock, and validates role and capabilities
+// together against that locked, resolved state.
 func handleUpdateMember(deps Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		scope, ok := RequestScope(r)
@@ -314,11 +298,10 @@ func handleUpdateMember(deps Deps) http.HandlerFunc {
 	}
 }
 
-// handleRemoveMember sits behind requireOwner. Its ordinary success response
-// is 204 with no body, per the API spec; the one exception is the same
-// ErrSessionRevocationFailed case handleUpdateMember has, which must carry a
-// warning and therefore cannot be a bodyless 204 -- so that case alone
-// answers 200 with a small JSON body instead.
+// handleRemoveMember sits behind requireOwner. Its ordinary success is 204
+// with no body; the one exception is the same ErrSessionRevocationFailed
+// case handleUpdateMember has, which must carry a warning and so cannot be
+// a bodyless 204 -- that case alone answers 200 with a small JSON body.
 func handleRemoveMember(deps Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		scope, ok := RequestScope(r)

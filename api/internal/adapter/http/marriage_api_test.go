@@ -13,20 +13,20 @@ import (
 	"github.com/andreasoentoro/hearth/api/internal/usecase"
 )
 
-// --- Task 7: marriage read routes and the guard -----------------------------
+// --- Marriage read routes and the guard --------------------------------
 
 // TestMarriageRoutesRequireMarriageAndOwner walks every marriage route
-// against every member state, the same shape TestGoalRoutesRequireMoneyAndOwner
+// against every member state, the shape TestGoalRoutesRequireMoneyAndOwner
 // and TestBudgetRoutesRequireMoneyAndOwner already use for money.
 //
 // There is no third caller shape here the way moneyLimitedEmail lets the
 // money matrices separate requireCapability from requireOwner: a limited
-// member cannot legitimately hold marriage at all
-// (domain.ErrLimitedCannotHoldMarriage), so no real sign-in can ever reach
+// member can never legitimately hold marriage
+// (domain.ErrLimitedCannotHoldMarriage), so no real sign-in reaches
 // requireOwner with requireCapability already satisfied.
-// TestMarriageRouteRejectsALimitedMemberHoldingMarriage below is what proves
-// requireOwner on its own merits instead, using a fixture no real write path
-// can build.
+// TestMarriageRouteRejectsALimitedMemberHoldingMarriage below proves
+// requireOwner on its own merits instead, using a fixture no real write
+// path can build.
 func TestMarriageRoutesRequireMarriageAndOwner(t *testing.T) {
 	env := newTestEnv(t)
 
@@ -35,15 +35,12 @@ func TestMarriageRoutesRequireMarriageAndOwner(t *testing.T) {
 		wantOwner    int
 	}{
 		{http.MethodGet, "/api/v1/retros", http.StatusOK},
-		// 2001-01, not any month near "today": TestRetroWireShapeWithRealDataMatchesTheBrief
-		// seeds a real retro for the household's startable month (today's
-		// previous month on a fresh household), and this route-walk's own
-		// household is a separate newTestEnv/container each run -- but a
-		// fixed near-today literal here would silently start meaning
-		// something else the day any fixture shares a household, the same
-		// "looks exhaustive, isn't" failure shape this task's mutation check
-		// exists to catch elsewhere. 2001-01 (TestGetRetroForAnEmptyMonthIs404's
-		// own literal) can never collide with a startable month.
+		// 2001-01, not a month near "today": TestRetroWireShapeWithRealDataMatchesTheBrief
+		// seeds a real retro for the household's startable month, and this
+		// route-walk's own household is a fresh one each run -- a near-today
+		// literal could silently start colliding with a real fixture's
+		// household. 2001-01 (TestGetRetroForAnEmptyMonthIs404's own
+		// literal) can never collide with a startable month.
 		{http.MethodGet, "/api/v1/retros/2001-01", http.StatusNotFound},
 	}
 
@@ -81,9 +78,9 @@ func TestGetRetroRejectsAMalformedMonth(t *testing.T) {
 	assertErrorResponse(t, rec, http.StatusBadRequest, "INVALID_MONTH")
 }
 
-// TestGetRetroForAnEmptyMonthIs404 pins the brief's "not started, not an
-// error" contract: a well-formed month with no retro row answers 404, which
-// the page reads as an empty state.
+// TestGetRetroForAnEmptyMonthIs404 pins the "not started, not an error"
+// contract: a well-formed month with no retro row answers 404, which the
+// page reads as an empty state.
 func TestGetRetroForAnEmptyMonthIs404(t *testing.T) {
 	env := newTestEnv(t)
 	session, _ := env.signIn(t, env.ownerEmail, env.ownerPassword)
@@ -92,11 +89,11 @@ func TestGetRetroForAnEmptyMonthIs404(t *testing.T) {
 	assertErrorResponse(t, rec, http.StatusNotFound, "NOT_FOUND")
 }
 
-// membershipDouble is a usecase.MembershipRepository stub answering every
-// ByUser lookup with a fixed membership, regardless of which user asks.
-// Every other method delegates to the embedded real repository, unused by
-// either test below -- only ByUser is what requireSession
-// (middleware_session.go) ever calls to populate Scope.Membership.
+// membershipDouble is a usecase.MembershipRepository stub that answers
+// every ByUser lookup with a fixed membership, regardless of which user
+// asks -- the only method requireSession (middleware_session.go) calls to
+// populate Scope.Membership. Every other method delegates to the embedded
+// real repository, unused by either test below.
 type membershipDouble struct {
 	usecase.MembershipRepository
 	membership domain.Membership
@@ -106,48 +103,36 @@ func (m membershipDouble) ByUser(context.Context, string) (domain.Membership, er
 	return m.membership, nil
 }
 
-// TestMarriageRouteRejectsALimitedMemberHoldingMarriage is the mutation
-// check the task brief calls for by name: prove requireOwner refuses on its
-// own, not merely because no state reaching it today happens to also fail
+// TestMarriageRouteRejectsALimitedMemberHoldingMarriage is a mutation
+// check: it proves requireOwner refuses on its own merits, not merely
+// because no state reaching it today also happens to fail
 // requireCapability.
 //
-// The brief's own wording assumes one gate beneath the HTTP layer
-// (domain.ValidateMembershipChange, called only from usecase/member.go) and
-// says to build the state "directly at the repository level" to get past
-// it. Trying exactly that -- calling MembershipRepository.Create with
-// {Role: RoleLimited, Capabilities: {CapMarriage}} -- surfaces a second gate
-// this task did not expect: migrations/00002_identity.sql's
-// limited_members_have_no_marriage CHECK constraint refuses the INSERT
-// outright (postgres.MembershipRepo.Create's own doc comment names this as
-// deliberate, "the second gate for exactly this reason"). A real household
-// cannot reach this state through any write path this codebase has, service
-// or repository -- domain.NewMembership, MemberService, and Postgres itself
-// all refuse it independently.
+// No real household can reach {RoleLimited, CapMarriage} -- domain.NewMembership,
+// MemberService and Postgres all refuse it independently. Even writing it
+// directly via MembershipRepository.Create hits a second gate,
+// migrations/00002_identity.sql's limited_members_have_no_marriage CHECK
+// constraint (postgres.MembershipRepo.Create's own doc comment calls this
+// deliberate).
 //
-// So this test builds the state one seam further out: a
+// So the test builds the state one seam further out: a
 // usecase.MembershipRepository double, substituted only for this one
-// request via env.routerWithMemberships, standing in for "the day one of
-// those three gates is relaxed and the caller reaches this router with
-// scope.Membership already holding {RoleLimited, CapMarriage}." That is the
-// literal scenario the money group's comment in router.go warns about, and
-// proving it here is what makes m.Use(requireOwner) in the marriage group
-// a tested line instead of a defensive one nobody would notice going quiet.
+// request via env.routerWithMemberships, standing in for the day one of
+// those gates is relaxed and scope.Membership already holds
+// {RoleLimited, CapMarriage} -- the exact scenario router.go's money-group
+// comment warns about. Proving it here is what makes m.Use(requireOwner)
+// a tested line, not a defensive one nobody would notice going quiet.
 //
-// The session itself is a real one -- env.limitedEmail, signed in through
-// env.router exactly as a browser would -- so only Scope.Membership is
-// doctored; Scope.UserID and Scope.HouseholdID still come from a real,
-// live session row shared by both routers (same deps.Sessions).
-// HouseholdID on the doctored membership must still match
-// env.householdID: requireSession cross-checks
-// membership.HouseholdID != record.HouseholdID and answers 401 on a
-// mismatch, which would look like the guard was never reached rather than
-// like it refused.
+// The session is real -- signed in through env.router like a browser --
+// so only Scope.Membership is doctored; UserID and HouseholdID still come
+// from the real, live session row shared by both routers. HouseholdID on
+// the doctored membership must still match env.householdID, or
+// requireSession's own mismatch check answers 401, which would look like
+// the guard was never reached rather than that it refused.
 //
-// requireCapability and requireOwner both answer the same FORBIDDEN code,
-// so the response alone cannot say which one refused -- what isolates
-// requireOwner here is the fixture itself: it HOLDS marriage, so
-// requireCapability has nothing left to refuse, and only requireOwner can
-// be the one answering 403.
+// requireCapability and requireOwner both answer FORBIDDEN, so only the
+// fixture can say which fired: it HOLDS marriage, leaving requireCapability
+// nothing to refuse, so only requireOwner can be the one answering 403.
 func TestMarriageRouteRejectsALimitedMemberHoldingMarriage(t *testing.T) {
 	env := newTestEnv(t)
 	session, _ := env.signIn(t, env.limitedEmail, env.limitedPassword)
@@ -176,13 +161,13 @@ func TestMarriageRouteRejectsALimitedMemberHoldingMarriage(t *testing.T) {
 	}
 }
 
-// TestMarriageRouteRejectsAnOwnerFixtureMissingMarriage is
-// TestMarriageRouteRejectsALimitedMemberHoldingMarriage's mirror image,
-// pinning requireCapability the same way that test pins requireOwner. No
-// real owner can lack any capability -- migrations/00002_identity.sql's
+// TestMarriageRouteRejectsAnOwnerFixtureMissingMarriage mirrors
+// TestMarriageRouteRejectsALimitedMemberHoldingMarriage, pinning
+// requireCapability the way that test pins requireOwner. No real owner can
+// lack a capability -- migrations/00002_identity.sql's
 // owners_hold_all_capabilities CHECK constraint is the same kind of second
-// gate limited_members_have_no_marriage is for the other test -- so this
-// uses the identical membershipDouble seam to build the state.
+// gate -- so this uses the identical membershipDouble seam to build the
+// state.
 func TestMarriageRouteRejectsAnOwnerFixtureMissingMarriage(t *testing.T) {
 	env := newTestEnv(t)
 	session, _ := env.signIn(t, env.ownerEmail, env.ownerPassword)
@@ -206,10 +191,9 @@ func TestMarriageRouteRejectsAnOwnerFixtureMissingMarriage(t *testing.T) {
 }
 
 // TestRetrosListEmptyStateHasTheDocumentedShape is a light wire-level pin
-// that the owner's 200 actually decodes to the JSON shape this task's brief
-// promises Task 9's zod schemas will mirror field for field -- not a
-// behavioural test of RetroService.List's arithmetic, which belongs to
-// usecase/retro_test.go.
+// that the owner's 200 decodes to the documented JSON shape the frontend's
+// zod schemas mirror field for field -- not a behavioural test of
+// RetroService.List's arithmetic, which belongs to usecase/retro_test.go.
 func TestRetrosListEmptyStateHasTheDocumentedShape(t *testing.T) {
 	env := newTestEnv(t)
 	session, _ := env.signIn(t, env.ownerEmail, env.ownerPassword)
@@ -296,20 +280,20 @@ type retrosListWithDataBody struct {
 	StartMonth *string `json:"startMonth"`
 }
 
-// TestRetroWireShapeWithRealDataMatchesTheBrief seeds a real, finished retro
-// with one unassigned action through usecase.RetroService directly (env.deps
-// exposes it, the same "real service, no HTTP" setup shape budget_api_test.go
-// and goals_api_test.go's own setup helpers use), then reads it back through
-// both marriage routes and pins every non-null-only field this task's brief
-// promises Task 9's zod schemas will mirror.
+// TestRetroWireShapeWithRealDataMatchesTheBrief seeds a real, finished
+// retro with one unassigned action through usecase.RetroService directly
+// (env.deps exposes it, the same "real service, no HTTP" setup shape
+// budget_api_test.go and goals_api_test.go's own setup helpers use), then
+// reads it back through both marriage routes and pins every non-null field
+// the frontend's zod schemas mirror.
 //
 // The empty-state test above only exercises toRetrosResponse's all-null
-// branch; every toXxxDTO converter this task wrote otherwise never ran
-// against real data before this test existed. AssigneeMembershipIDs is the
-// case that matters most: Task 6's retro_action_repo_test.go documents that
-// the repository returns nil, never []string{}, for an unassigned action,
-// and toRetroActionDTO's own nil-to-[]string{} normalisation had never
-// executed until this test called it.
+// branch; every other toXxxDTO converter never ran against real data
+// before this test existed. AssigneeMembershipIDs matters most:
+// retro_action_repo_test.go documents that the repository returns nil,
+// never []string{}, for an unassigned action, and toRetroActionDTO's
+// nil-to-[]string{} normalisation had never executed until this test
+// called it.
 func TestRetroWireShapeWithRealDataMatchesTheBrief(t *testing.T) {
 	env := newTestEnv(t)
 	ctx := context.Background()
@@ -343,8 +327,8 @@ func TestRetroWireShapeWithRealDataMatchesTheBrief(t *testing.T) {
 		HouseholdID: env.householdID,
 		RetroID:     saved.ID,
 		Body:        "Set up a shared grocery list",
-		// Deliberately nil, not []string{}: the state Task 6 documented the
-		// repository actually returns for an unassigned action.
+		// Deliberately nil, not []string{}: the state the repository
+		// actually returns for an unassigned action.
 		AssigneeMembershipIDs: nil,
 	})
 	if err != nil {
@@ -425,11 +409,11 @@ func TestRetroWireShapeWithRealDataMatchesTheBrief(t *testing.T) {
 	if summary.ActionCount != 1 {
 		t.Fatalf("actionCount = %d, want 1", summary.ActionCount)
 	}
-	// The one action on this retro was never ticked (asserted above:
+	// The one action here was never ticked (asserted above:
 	// detail.Retro.Actions[0].DoneAt == nil), so the open count equals the
-	// total here -- this is what proves the wire actually carries the key
-	// "openActionCount" (Task 9's zod schema mirrors this name exactly), not
-	// just that the Go struct compiles.
+	// total -- this proves the wire actually carries the key
+	// "openActionCount" (which the frontend's zod schema mirrors exactly),
+	// not just that the Go struct compiles.
 	if summary.OpenActionCount != 1 {
 		t.Fatalf("openActionCount = %d, want 1", summary.OpenActionCount)
 	}
@@ -455,19 +439,17 @@ func TestRetroWireShapeWithRealDataMatchesTheBrief(t *testing.T) {
 }
 
 // TestRetroListActionCountAndOpenActionCountDisagreeOverHTTP is a dedicated
-// test rather than a third action added to
+// test rather than a third action bolted onto
 // TestRetroWireShapeWithRealDataMatchesTheBrief above: that test's
-// GET /retros/{month} assertions (detail.Retro.Actions[0], its id, its
-// carriedFrom, its assignees) all assume exactly one action, and this test's
-// whole point needs at least two. Kept separate rather than bent to fit.
+// GET /retros/{month} assertions all assume exactly one action, and this
+// one needs at least two.
 //
-// That other test's own single, never-ticked action leaves ActionCount and
-// OpenActionCount both 1 -- equal by construction, so a regression at
-// retro_handlers.go's toRetroSummaryDTO that reads the wrong source field
-// (`OpenActionCount: s.ActionCount`, one struct-field's worth of mistake)
-// would still decode as 1 there and pass unnoticed. This test seeds two
-// actions and ticks one before the request, so the two counts on the wire
-// MUST disagree for the assertions below to hold either way.
+// That other test's single, never-ticked action leaves ActionCount and
+// OpenActionCount both 1 -- equal by construction, so a regression that
+// reads the wrong source field (toRetroSummaryDTO returning
+// `OpenActionCount: s.ActionCount`) would still decode as 1 and pass
+// unnoticed. This test seeds two actions and ticks one before the request,
+// so the two counts on the wire MUST disagree for the assertions to hold.
 func TestRetroListActionCountAndOpenActionCountDisagreeOverHTTP(t *testing.T) {
 	env := newTestEnv(t)
 	ctx := context.Background()
@@ -520,7 +502,7 @@ func TestRetroListActionCountAndOpenActionCountDisagreeOverHTTP(t *testing.T) {
 	}
 }
 
-// --- Task 8: marriage write routes and the 409 the screen can explain ------
+// --- Marriage write routes and the 409 the screen can explain ----------
 
 // retroWriteBody mirrors retroWriteResponse (retro_handlers.go) field for
 // field, the same "local body struct in the _test package" shape
@@ -534,12 +516,11 @@ type retroWriteBody struct {
 	} `json:"retro"`
 }
 
-// mustStartRetro is test setup, not an assertion in itself: it POSTs /retros
-// as whichever caller is passed in and fails the test immediately if that
-// didn't succeed, so a broken start surfaces at the setup line rather than
-// as a confusing failure in whichever test goes on to use the month, id or
-// version it returns -- mustCreateAccount's own shape (api_test.go), applied
-// to retros.
+// mustStartRetro is test setup, not an assertion in itself: it POSTs
+// /retros as whichever caller is passed in and fails the test immediately
+// on failure, so a broken start surfaces at the setup line rather than as a
+// confusing failure wherever the month, id or version it returns gets used
+// -- mustCreateAccount's own shape (api_test.go), applied to retros.
 func mustStartRetro(t *testing.T, env *testEnv, session, csrf *http.Cookie) retroWriteBody {
 	t.Helper()
 	rec := env.authed(t, http.MethodPost, "/api/v1/retros", nil, session, csrf)
@@ -553,26 +534,23 @@ func mustStartRetro(t *testing.T, env *testEnv, session, csrf *http.Cookie) retr
 	return body
 }
 
-// TestMarriageWriteRoutesRequireCSRF walks every mutating retro route with no
-// CSRF token at all, and with one that does not match the cookie --
+// TestMarriageWriteRoutesRequireCSRF walks every mutating retro route with
+// no CSRF token at all, and with one that does not match the cookie --
 // TestTransactionWriteRoutesRequireCSRF's own shape (transactions_api_test.go),
-// applied here for the identical two reasons its own comment gives:
-// requireOwner sits ahead of requireCSRF in this group and answers the same
-// 403, so a bare status check would stay green even with `m.Use(requireCSRF)`
-// deleted from the marriage write sub-group in router.go; the CODE, not just
-// the status, is what actually proves which guard refused. All seven writes
-// are walked, not the five the task brief's own sketch named -- the tick and
-// delete routes under /actions/{id} are exactly as mutating as the other
-// five and deserve the identical proof.
+// for the same two reasons: requireOwner sits ahead of requireCSRF here and
+// answers the same 403, so a bare status check would stay green even with
+// `m.Use(requireCSRF)` deleted; checking the CODE is what actually proves
+// which guard refused. All seven writes are walked, including the tick and
+// delete routes under /actions/{id}, which are exactly as mutating as the
+// other five.
 //
-// Every {id} below is a well-formed but non-existent UUID, and every {month}
-// a plausible literal that names no real retro -- CSRF is checked before any
-// lookup runs, so neither has to resolve to a real row for this test to be
-// valid, the same reasoning TestTransactionWriteRoutesRequireCSRF's own
-// zeroUUID relies on. That is also why hardcoding a month is safe only here:
-// contrast TestPatchRetroWithAStaleVersionIs409RetroChanged below, which
-// reads its month off a real created retro because its own handler runs
-// past the CSRF gate and needs a row that actually exists.
+// Every {id} below is a well-formed but non-existent UUID, and every
+// {month} a plausible literal naming no real retro -- CSRF is checked
+// before any lookup runs, so neither has to resolve to a real row (the same
+// reasoning TestTransactionWriteRoutesRequireCSRF's zeroUUID relies on).
+// That is why hardcoding a month is safe only here: contrast
+// TestPatchRetroWithAStaleVersionIs409RetroChanged below, whose handler
+// runs past the CSRF gate and needs a row that actually exists.
 func TestMarriageWriteRoutesRequireCSRF(t *testing.T) {
 	env := newTestEnv(t)
 	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
@@ -632,20 +610,17 @@ func TestPatchRetroWithAStaleVersionIs409RetroChanged(t *testing.T) {
 	assertErrorResponse(t, rec, http.StatusConflict, "RETRO_CHANGED")
 }
 
-// TestPatchRetroReturnsTheIncrementedVersion pins the round-trip the brief's
-// own "PATCH returns the retro including its new version" requirement
-// exists for. Nothing else in this file reads `version` back out of a PATCH
-// response at all: swapping handleSaveRetro's `updated` (Save's own return
-// value) for the pre-write `view.Retro` at retro_handlers.go:307 would leave
-// the status, TestPatchRetroWithAStaleVersionIs409RetroChanged and every
-// JSON-parseability check in this file green, while a client trusting this
-// field would send the stale version right back and get a spurious 409
-// RETRO_CHANGED on every second save -- the single most confusing failure
-// this feature could ship, since nothing about the save itself would have
-// been wrong. The second PATCH below is what actually proves the round-trip
-// rather than merely computing the expected number: it sends exactly the
-// version the first response returned and requires that to succeed, which
-// is precisely what a stale echo would break.
+// TestPatchRetroReturnsTheIncrementedVersion pins the "PATCH returns the
+// retro including its new version" contract. Nothing else in this file
+// reads `version` back out of a PATCH response: swapping handleSaveRetro's
+// `updated` (Save's own return value) for the pre-write `view.Retro` would
+// leave the status and every other check in this file green, while a
+// client trusting the field would send the stale version right back and
+// get a spurious 409 RETRO_CHANGED on every second save -- the most
+// confusing failure this feature could ship, since nothing about the save
+// itself would be wrong. The second PATCH below sends exactly the version
+// the first response returned, which is precisely what a stale echo would
+// break.
 func TestPatchRetroReturnsTheIncrementedVersion(t *testing.T) {
 	env := newTestEnv(t)
 	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
@@ -667,11 +642,8 @@ func TestPatchRetroReturnsTheIncrementedVersion(t *testing.T) {
 			first.Retro.Version, created.Retro.Version+1)
 	}
 
-	// Send exactly the version the response above just returned. If the
-	// handler had echoed a stale (pre-write) version instead, this would
-	// fail with 409 RETRO_CHANGED even though nothing actually conflicted --
-	// which is the concrete, frontend-visible symptom this test exists to
-	// catch.
+	// Sends exactly the version the last response returned -- a stale echo
+	// would fail this with a spurious 409 RETRO_CHANGED.
 	rec = env.authed(t, http.MethodPatch, path,
 		map[string]any{"mood": 3, "wentWell": "second", "wasHard": "", "notes": "", "version": first.Retro.Version},
 		session, csrf)
@@ -683,12 +655,12 @@ func TestPatchRetroReturnsTheIncrementedVersion(t *testing.T) {
 
 // TestPostRetroThirdTimeIsNothingToStart pins domain.ErrRetroNothingToStart's
 // mapping. domain.StartableMonth never offers a month that already has a
-// retro (spec decision 5), so a fresh household's first two POSTs each claim
-// one of its two free candidate months and both succeed -- the double-click
-// race TestStartRetroRaceIs409RetroExists below pins is NOT reachable by two
-// sequential POSTs, only by two Create calls racing the SAME free month,
-// which no sequential HTTP test can construct. It takes a third POST, once
-// both candidates are taken, to reach domain.ErrRetroNothingToStart at all.
+// retro, so a fresh household's first two POSTs each claim one of its two
+// free candidate months and both succeed. The double-click race
+// TestStartRetroRaceIs409RetroExists pins below is NOT reachable this way
+// -- only two Create calls racing the SAME free month can build it, which
+// no sequential HTTP test can construct. It takes a third POST, once both
+// candidates are taken, to reach domain.ErrRetroNothingToStart at all.
 func TestPostRetroThirdTimeIsNothingToStart(t *testing.T) {
 	env := newTestEnv(t)
 	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
@@ -700,17 +672,16 @@ func TestPostRetroThirdTimeIsNothingToStart(t *testing.T) {
 	assertErrorResponse(t, rec, http.StatusConflict, "RETRO_NOTHING_TO_START")
 }
 
-// alwaysExistsRetroRepo simulates the one race Start is actually exposed to:
-// two partners tapping "Start retro" at the same instant, both passing the
-// pre-check (ByMonth finds nothing yet for either candidate month) before
-// only one of the two concurrent Create calls can win the underlying UNIQUE
-// (household_id, month) constraint. No sequential HTTP call can build this
-// state -- domain.StartableMonth always hands a fresh household its two free
-// months in turn, one per POST (TestPostRetroThirdTimeIsNothingToStart above
-// pins the two-already-taken case instead) -- so this is a
-// usecase.RetroRepository double standing in for the concurrent write
-// itself, the same seam membershipDouble above uses for a state no real
-// write path can produce.
+// alwaysExistsRetroRepo simulates the one race Start is actually exposed
+// to: two partners tapping "Start retro" at the same instant, both passing
+// the pre-check (ByMonth finds nothing yet for either candidate month)
+// before only one of the two concurrent Create calls can win the
+// underlying UNIQUE (household_id, month) constraint. No sequential HTTP
+// call can build this state -- domain.StartableMonth always hands a fresh
+// household its two free months one per POST
+// (TestPostRetroThirdTimeIsNothingToStart pins the two-already-taken case
+// instead) -- so this is a usecase.RetroRepository double standing in for
+// the concurrent write itself, the same seam membershipDouble above uses.
 type alwaysExistsRetroRepo struct{}
 
 func (alwaysExistsRetroRepo) Create(context.Context, string, time.Time) (usecase.RetroRecord, error) {
@@ -741,10 +712,9 @@ func (alwaysExistsRetroRepo) DeleteDraft(context.Context, string, string) error 
 	return domain.ErrNotFound
 }
 
-// TestStartRetroRaceIs409RetroExists pins the race the task brief calls out
-// by name: a prior task's review flagged that RetroService.Start returning
-// domain.ErrAlreadyExists was undocumented and could plausibly fall through
-// to a 500. It must answer 409 RETRO_EXISTS instead -- see
+// TestStartRetroRaceIs409RetroExists pins the race alwaysExistsRetroRepo
+// exists for: RetroService.Start returning domain.ErrAlreadyExists must
+// answer 409 RETRO_EXISTS, not fall through to a 500 -- see
 // alwaysExistsRetroRepo's own comment for why a repository double, rather
 // than two real requests, is what it takes to build the state at all.
 func TestStartRetroRaceIs409RetroExists(t *testing.T) {
@@ -786,11 +756,11 @@ func TestDeleteAFinishedRetroIs404(t *testing.T) {
 	assertErrorResponse(t, rec, http.StatusNotFound, "NOT_FOUND")
 }
 
-// TestPatchRetroWithAnOutOfRangeMoodIs400InvalidMood pins domain.ErrInvalidMood's
-// mapping over HTTP -- a row the task brief's own error table names, and
-// nothing in this file before this test ever sent a mood outside 1..5
-// through the route: a wrong status or a typo'd code string here would ship
-// silently, and the frontend branches on this exact code.
+// TestPatchRetroWithAnOutOfRangeMoodIs400InvalidMood pins
+// domain.ErrInvalidMood's HTTP mapping. Nothing in this file before this
+// test ever sent a mood outside 1..5 through the route: a wrong status or a
+// typo'd code string here would ship silently, and the frontend branches on
+// this exact code.
 func TestPatchRetroWithAnOutOfRangeMoodIs400InvalidMood(t *testing.T) {
 	env := newTestEnv(t)
 	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
@@ -803,12 +773,12 @@ func TestPatchRetroWithAnOutOfRangeMoodIs400InvalidMood(t *testing.T) {
 	assertErrorResponse(t, rec, http.StatusBadRequest, "INVALID_MOOD")
 }
 
-// TestAddRetroActionWithABlankBodyIs400 pins domain.ErrRetroActionBodyRequired's
-// mapping over HTTP -- the brief's error table's other 400 row, likewise
-// never exercised through the route before this test. A whitespace-only
-// body, not a literal empty string, so this also proves AddAction's own
-// trim-before-check ordering (RetroService.AddAction's doc comment) reaches
-// the same refusal, not just the empty-string case.
+// TestAddRetroActionWithABlankBodyIs400 pins
+// domain.ErrRetroActionBodyRequired's HTTP mapping, never exercised through
+// the route before this test. A whitespace-only body, not a literal empty
+// string, so this also proves AddAction's trim-before-check ordering
+// (RetroService.AddAction's doc comment) reaches the same refusal, not just
+// the empty-string case.
 func TestAddRetroActionWithABlankBodyIs400(t *testing.T) {
 	env := newTestEnv(t)
 	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
@@ -819,16 +789,13 @@ func TestAddRetroActionWithABlankBodyIs400(t *testing.T) {
 	assertErrorResponse(t, rec, http.StatusBadRequest, "RETRO_ACTION_BODY_REQUIRED")
 }
 
-// assertParseableJSONBody is TestEveryRetroWriteAnswersJSONExceptDelete's own
-// check: the status is exactly wantStatus, AND the body parses as JSON --
-// matching what apiFetch (web/src/lib/apiFetch.ts) actually does on an ok
-// response. Both halves are load-bearing, checked here rather than left to
-// each call site: a handler that resolved the wrong {id} (a broken
-// chi.URLParam key, say) still answers a *parseable* JSON body -- it is just
-// MapDomainError's own 4xx error envelope instead of the success shape the
-// route is supposed to return. Checking parseability alone would call that
-// a pass; checking the status here is what actually proves the write
-// succeeded, not merely that whatever came back could be decoded.
+// assertParseableJSONBody checks two things: the status is exactly
+// wantStatus, AND the body parses as JSON -- matching what apiFetch
+// (web/src/lib/apiFetch.ts) does on an ok response. Both are load-bearing:
+// a handler that resolved the wrong {id} still answers a *parseable* JSON
+// body, just MapDomainError's 4xx envelope instead of the success shape.
+// Checking parseability alone would call that a pass; the status check is
+// what actually proves the write succeeded.
 func assertParseableJSONBody(t *testing.T, rec *httptest.ResponseRecorder, wantStatus int) {
 	t.Helper()
 	if rec.Code != wantStatus {
@@ -841,16 +808,11 @@ func assertParseableJSONBody(t *testing.T, rec *httptest.ResponseRecorder, wantS
 }
 
 // TestEveryRetroWriteAnswersJSONExceptDelete is 204's own boundary: every
-// write in this group answers its OWN expected 2xx with a parseable JSON
-// body except DELETE, which answers 204 with none -- apiFetch throws on an
-// ok response it cannot parse, so this is not a stylistic nicety, it is what
-// keeps the frontend from breaking on its own success path. The status is
-// checked at every step, not just the shape of what came back: a route that
-// resolved the wrong id would still answer a parseable JSON body (
-// MapDomainError's own 4xx envelope), so parseability alone cannot tell a
-// real success from a failure that merely decodes -- assertParseableJSONBody
-// checks both, and the tick step additionally decodes doneAt to prove the
-// write actually happened, not just that *a* 200 came back.
+// write in this group answers its own expected 2xx with a parseable JSON
+// body except DELETE, which answers 204 with none. apiFetch throws on an ok
+// response it cannot parse, so this guards the frontend's success path, not
+// just style. The tick step additionally decodes doneAt, to prove the write
+// actually happened rather than that some 200 came back.
 func TestEveryRetroWriteAnswersJSONExceptDelete(t *testing.T) {
 	env := newTestEnv(t)
 	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
@@ -875,10 +837,9 @@ func TestEveryRetroWriteAnswersJSONExceptDelete(t *testing.T) {
 		t.Fatalf("decode add-action response: %v (body = %s)", err, actionRec.Body.String())
 	}
 
-	// PATCH /retros/{month}/actions/{id} -- the JSON-and-status check alone
-	// cannot tell "the tick actually landed" from "the id lookup silently
-	// resolved to nothing and MapDomainError's own error envelope happened
-	// to parse", so decode the body and require doneAt to actually be set.
+	// PATCH /retros/{month}/actions/{id} -- decode the body and require
+	// doneAt to actually be set; a JSON-and-status check alone can't tell a
+	// landed tick from an id lookup that silently resolved to nothing.
 	tickRec := env.authed(t, http.MethodPatch, path+"/actions/"+action.Action.ID,
 		map[string]any{"done": true}, session, csrf)
 	assertParseableJSONBody(t, tickRec, http.StatusOK)

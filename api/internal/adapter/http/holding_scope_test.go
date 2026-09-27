@@ -6,20 +6,18 @@ import (
 	"testing"
 )
 
-// Every holding handler is reached only through requireSession, so the scope it
-// reads is always there -- today. This calls them with no scope at all, which
-// is what a routing mistake would do, and pins that they refuse rather than
-// carrying on with an empty household id.
+// Every holding handler runs only after requireSession, so scope is always
+// populated in production. This test calls handlers directly with no scope --
+// what a routing mistake would produce -- and pins that they refuse rather
+// than continue with an empty household id.
 //
-// It matters most for the report. The other routes would look something up
-// under "" and answer 404: wrong, but loud. The report would answer 200 with an
-// empty body -- a screen telling someone who is not signed in that they own
-// nothing. CLAUDE.md's rule is to fail closed on values you did not construct,
-// and an absent scope is the clearest such value there is.
+// The report matters most: other routes look up "" and 404 (wrong but loud);
+// the report would 200 with an empty body, telling someone not signed in that
+// they own nothing. CLAUDE.md requires failing closed on values you didn't
+// construct -- an absent scope is exactly that.
 //
-// An internal test rather than one in httpadapter_test, following
-// transaction_cursor_test.go: the handlers are unexported and adding an export
-// shim to production code so a test can reach them would be the tail wagging.
+// Internal test, not httpadapter_test: the handlers are unexported, following
+// transaction_cursor_test.go rather than adding an export shim just for this.
 func TestAHoldingHandlerWithNoScopeRefuses(t *testing.T) {
 	deps := Deps{}
 	cases := []struct {

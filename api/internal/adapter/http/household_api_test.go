@@ -14,12 +14,11 @@ import (
 	"github.com/andreasoentoro/hearth/api/internal/domain"
 )
 
-// TestLimitedMemberCannotUpdateMembers covers behaviour 10. It has the
-// limited member try to promote their own membership to owner -- the
-// realistic case the requireOwner guard exists to stop -- rather than
-// editing someone else's, but either target must be rejected identically:
-// requireOwner checks the caller's own role, not whose membership is named
-// in the URL.
+// TestLimitedMemberCannotUpdateMembers has the limited member try to
+// promote their own membership to owner -- the realistic case requireOwner
+// exists to stop -- rather than editing someone else's, but either target
+// must be rejected identically: requireOwner checks the caller's own role,
+// not whose membership is named in the URL.
 func TestLimitedMemberCannotUpdateMembers(t *testing.T) {
 	env := newTestEnv(t)
 	session, csrf := env.signIn(t, env.limitedEmail, env.limitedPassword)
@@ -29,7 +28,7 @@ func TestLimitedMemberCannotUpdateMembers(t *testing.T) {
 	assertErrorResponse(t, rec, http.StatusForbidden, "FORBIDDEN")
 }
 
-// TestLimitedMemberCannotCreateSpace covers behaviour 11.
+// TestLimitedMemberCannotCreateSpace pins requireOwner on POST /spaces.
 func TestLimitedMemberCannotCreateSpace(t *testing.T) {
 	env := newTestEnv(t)
 	session, csrf := env.signIn(t, env.limitedEmail, env.limitedPassword)
@@ -42,35 +41,26 @@ func TestLimitedMemberCannotCreateSpace(t *testing.T) {
 // TestOwnerOnlyRoutesRejectALimitedMember is the sibling of
 // TestEveryProtectedRouteRejectsAnUnauthenticatedCaller: it walks the live
 // router and, for every mutating route (method not GET/HEAD/OPTIONS), signs
-// in as a *limited* member and attaches a genuinely valid session and CSRF
-// token -- so the only thing that could still reject the request is
-// requireOwner -- then asserts 403 FORBIDDEN unless the route is on the
-// short, commented allowlist below.
+// in as a *limited* member and attaches a valid session and CSRF token, so
+// the only thing that could still reject the request is requireOwner, then
+// asserts 403 FORBIDDEN unless the route is on the allowlist below.
 //
-// An earlier version of this test was a hand-maintained table of "routes I
-// believe are owner-gated," justified by a claim that chi.Walk can't be used
-// here because Go function values aren't comparable, so there was no
-// reliable way to check whether a route's middleware chain included
-// requireOwner specifically. That claim was correct but beside the point:
-// this test was never supposed to introspect the middleware chain. It
-// observes behaviour, exactly as the unauthenticated matrix does for
-// requireSession -- a route wired without requireOwner now simply succeeds
-// when it should have been forbidden, and fails this test on that basis, no
-// reflection required. A route added to the owner-gated set without
-// actually being wired behind requireOwner in router.go fails this test
-// rather than shipping unnoticed.
+// It walks live behaviour rather than keeping a hand-maintained table of
+// "routes I believe are owner-gated": Go function values aren't comparable,
+// so this can't introspect the middleware chain, but it doesn't need to --
+// a route wired without requireOwner simply succeeds and fails this test,
+// instead of drifting out of sync with router.go unnoticed.
 //
 // TestLimitedMemberCannotUpdateMembers and TestLimitedMemberCannotCreateSpace
-// above still individually pin the task's original eleven enumerated
-// behaviours verbatim; this walk is the exhaustive superset the
-// coordinator's route audit asked for.
+// above still individually pin their own known behaviours; this walk is the
+// exhaustive superset.
 //
-// Signed in as env.moneyLimitedEmail, not env.limitedEmail: the plain limited
-// fixture holds only calendar and chores, so every accounts write route below
-// would refuse it at requireCapability before the request ever reached
-// requireOwner, and this walk would pass without ever exercising the guard
-// it is named after. env.moneyLimitedEmail also holds money and is still
-// limited, so every assertion this walk already made keeps holding.
+// Signed in as env.moneyLimitedEmail, not env.limitedEmail: the plain
+// limited fixture holds only calendar and chores, so every accounts write
+// route below would be refused at requireCapability before ever reaching
+// requireOwner, and this walk would pass without exercising the guard it is
+// named after. moneyLimitedEmail also holds money and is still limited, so
+// every assertion this walk already makes still holds.
 func TestOwnerOnlyRoutesRejectALimitedMember(t *testing.T) {
 	env := newTestEnv(t)
 	session, csrf := env.signIn(t, env.moneyLimitedEmail, env.moneyLimitedPassword)
@@ -92,22 +82,20 @@ func TestOwnerOnlyRoutesRejectALimitedMember(t *testing.T) {
 		// Any signed-in member, owner or not, may end their own session --
 		// ownership has nothing to do with signing yourself out.
 		"POST /api/v1/auth/sign-out": true,
-		// A personal API token is the member's own credential, minted and
-		// revoked by its owner whatever their role -- a limited member's
-		// token does exactly what that limited member can do, and nothing
-		// about ownership is decided here (ADR 7). Both are user-scoped:
-		// the DELETE of another member's id is 404, never 403.
+		// A personal API token is the member's own credential: it does
+		// exactly what that limited member can do, and nothing about
+		// ownership is decided here (ADR 7). Both routes are user-scoped --
+		// DELETE of another member's id is 404, never 403.
 		"POST /api/v1/auth/tokens":        true,
 		"DELETE /api/v1/auth/tokens/{id}": true,
 		// Connecting or disconnecting a Telegram chat is any member's own
-		// call, not owners only (linking design decision 10) -- a limited
-		// member's chat is already refused by the Commander's own guard and
-		// the digest's recipients query, so gating this panel on ownership
-		// would duplicate a guard that already exists one layer down. Env's
-		// router has no bot configured, so all three answer 404, not 403,
-		// regardless of who is signed in -- this walk cannot observe
-		// requireOwner one way or the other for these three, the same
-		// reasoning the Telegram sign-in entry above already gives.
+		// call, not owners only: a limited member's chat is already refused
+		// by the Commander's own guard and the digest's recipients query, so
+		// gating this panel on ownership would duplicate a guard that
+		// already exists one layer down. Env's router has no bot configured,
+		// so all three answer 404, not 403, regardless of who is signed in --
+		// this walk cannot observe requireOwner for these three, the same
+		// reasoning the Telegram sign-in entry above gives.
 		"DELETE /api/v1/auth/telegram":                 true,
 		"POST /api/v1/auth/telegram/link":              true,
 		"POST /api/v1/auth/telegram/link/{id}/confirm": true,
@@ -127,19 +115,15 @@ func TestOwnerOnlyRoutesRejectALimitedMember(t *testing.T) {
 		case http.MethodGet, http.MethodHead, http.MethodOptions:
 			return nil
 		}
-		// The admin subtree is gated on an axis orthogonal to household
+		// The admin subtree is gated on a different axis than household
 		// ownership -- a platform_admins row, not domain.RoleOwner -- and its
-		// refusal is deliberately a 404, so requiring 403 FORBIDDEN of it
-		// would be asserting the opposite of what the design wants (see
-		// requirePlatformAdmin's doc comment for why a 403 there would
-		// confirm both that the surface exists and that the caller found the
-		// right path).
+		// refusal is deliberately 404, not 403 (see requirePlatformAdmin's
+		// doc comment for why 403 would leak that the surface exists).
 		//
-		// It is asserted rather than allowlisted past. A skip would waste the
-		// one walk that already has a non-owner signed in and every admin
-		// route enumerated; this branch turns the same walk into a structural
-		// second check of the 404, covering every mutating admin route added
-		// later for free, without a named entry anyone could forget.
+		// It is asserted here rather than allowlisted past, so this walk
+		// also becomes a structural check that every mutating admin route
+		// answers 404 -- including ones added later, with no entry to
+		// remember.
 		if strings.HasPrefix(route, "/api/v1/admin") {
 			path := replacer.Replace(route)
 			req := httptest.NewRequest(method, path, bytes.NewReader([]byte("{}")))
@@ -161,10 +145,9 @@ func TestOwnerOnlyRoutesRejectALimitedMember(t *testing.T) {
 		}
 		if invitePreAuthRoutes[method+" "+route] {
 			// Public, pre-auth, and mutating (POST .../accept) -- exempt for
-			// the identical reason the /auth/* entries above are. See
-			// invitePreAuthRoutes' doc comment for why this is a named
-			// two-route allowlist rather than a "/api/v1/invites/" prefix
-			// skip.
+			// the same reason the /auth/* entries above are. See
+			// invitePreAuthRoutes' doc comment for why this is a two-route
+			// allowlist, not a "/api/v1/invites/" prefix skip.
 			return nil
 		}
 		if allowlist[method+" "+route] {
@@ -199,22 +182,20 @@ func TestOwnerOnlyRoutesRejectALimitedMember(t *testing.T) {
 	// below guards the walk: if the subtree stopped being enumerated, the
 	// branch would assert nothing and pass.
 	//
-	// 4, not the pre-Task-8 1: POST /admin/session plus the three mutating
-	// flag routes Task 8 adds (PUT .../flags/{key}, PUT and DELETE
-	// .../flags/{key}/households/{householdID}). Left at 1 it would still
-	// pass with all three of those silently dropped from the walk -- the
-	// exact vacuous pass this floor exists to catch. Raise it again as more
-	// admin routes are added, exactly as the owner floor below has been
-	// raised.
+	// 4: POST /admin/session plus the three mutating flag routes (PUT
+	// .../flags/{key}, PUT and DELETE .../flags/{key}/households/{householdID}). A
+	// floor left too low would still pass with routes silently dropped from
+	// the walk -- exactly the vacuous pass this floor exists to catch. Raise
+	// it as more admin routes are added, the same way the owner floor below
+	// has been.
 	if adminChecked < 4 {
 		t.Fatalf("checked %d admin routes, want at least 4 -- "+
 			"the walk is no longer reaching the admin subtree", adminChecked)
 	}
-	// 45, not the pre-accounts 6 or the pre-agreements 10: this walk's own
-	// re-measured output, whenever a mutating route joins the surface --
-	// the six Agreements writes are the latest, and a floor left at the old
-	// count would still pass if all six vanished from the walk -- exactly
-	// the vacuous pass this guard exists to catch.
+	// 45 is this walk's own re-measured count of mutating routes, not a
+	// guess. A floor left too low would still pass if routes vanished from
+	// the walk -- the vacuous pass this guard exists to catch. Raise it
+	// whenever a new mutating route joins the surface.
 	if checked < 45 {
 		t.Fatalf("checked %d routes, want at least 45 -- "+
 			"the walk may not be enumerating routes correctly", checked)
@@ -248,9 +229,9 @@ func (env *testEnv) getMembers(t *testing.T, session *http.Cookie) []memberListE
 	return members
 }
 
-// TestMemberListRevealsEmailsToAnOwner covers the coordinator's ruling on
-// GET /household/members: an owner caller sees the full roster with every
-// member's real email address populated.
+// TestMemberListRevealsEmailsToAnOwner: an owner caller sees the full
+// roster on GET /household/members, with every member's real email address
+// populated.
 func TestMemberListRevealsEmailsToAnOwner(t *testing.T) {
 	env := newTestEnv(t)
 	session, _ := env.signIn(t, env.ownerEmail, env.ownerPassword)
@@ -269,12 +250,10 @@ func TestMemberListRevealsEmailsToAnOwner(t *testing.T) {
 
 // TestMemberListWithholdsEmailsFromALimitedMember is
 // TestMemberListRevealsEmailsToAnOwner's sibling: a limited caller sees the
-// identical roster -- same member count, names, roles and capabilities --
-// with every email emptied rather than the list filtered down to fewer
-// rows. The member-count assertion is what would catch a future change that
-// filtered rows instead of redacting the one field that needs it: a row
-// filter would still make this test's email assertions pass while quietly
-// hiding other members entirely.
+// identical roster -- same count, names, roles and capabilities -- with
+// every email emptied, not the list filtered down. The count assertion
+// catches a row-filter regression that would still pass the email checks
+// while quietly hiding other members.
 func TestMemberListWithholdsEmailsFromALimitedMember(t *testing.T) {
 	env := newTestEnv(t)
 
@@ -349,14 +328,13 @@ func (env *testEnv) getHousehold(t *testing.T, session *http.Cookie) householdRe
 	return h
 }
 
-// TestUpdateHouseholdIsARealPatch pins the fix for Finding 1: PATCH
-// /household previously assigned every field unconditionally from plain
-// value fields, so an omitted field and an explicit zero value were
-// indistinguishable -- sending the API spec's own documented body (which
-// omits secondaryCurrency) blanked it to "", and HouseholdService.Update's
-// currency validation then failed with a 500. Pointer fields fix this: an
-// absent field must leave the current value untouched, and a bad currency
-// must report 422, never 500.
+// TestUpdateHouseholdIsARealPatch pins the PATCH /household bug that
+// pointer fields fix: assigning every field unconditionally from plain
+// values made an omitted field indistinguishable from an explicit zero
+// value, so the spec's own documented body (which omits secondaryCurrency)
+// blanked it and failed currency validation with a 500. An absent field
+// must leave the current value untouched, and a bad currency must report
+// 422, never 500.
 func TestUpdateHouseholdIsARealPatch(t *testing.T) {
 	env := newTestEnv(t)
 	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
@@ -386,7 +364,7 @@ func TestUpdateHouseholdIsARealPatch(t *testing.T) {
 			// The spec's own documented PATCH body: only familyName,
 			// primaryCurrency, showSecondaryCurrency and fxRateMode --
 			// secondaryCurrency (and name) are deliberately omitted here,
-			// which is exactly the shape that used to 500.
+			// the shape that 500s if an omitted field is treated as blank.
 			map[string]any{"familyName": "Oentoro-Wattimena"}, session, csrf)
 		if rec.Code != http.StatusOK {
 			t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
@@ -413,10 +391,9 @@ func TestUpdateHouseholdIsARealPatch(t *testing.T) {
 		assertErrorResponse(t, rec, http.StatusUnprocessableEntity, "INVALID_CURRENCY")
 	})
 
-	// The surviving sibling of the ErrInvalidMoney fix above: fxRateMode
-	// reaches the database's CHECK (fx_rate_mode IN ('auto', 'manual'))
-	// constraint completely unvalidated on this path, so a caller-supplied
-	// value outside that pair used to reach the constraint first and 500.
+	// fxRateMode reaches the database's CHECK (fx_rate_mode IN ('auto',
+	// 'manual')) completely unvalidated on this path, so a caller-supplied
+	// value outside that pair would otherwise reach the constraint first and 500.
 	t.Run("an invalid fxRateMode reports 422, not 500", func(t *testing.T) {
 		rec := env.authed(t, http.MethodPatch, "/api/v1/household",
 			map[string]any{"fxRateMode": "weekly"}, session, csrf)
@@ -433,10 +410,9 @@ type notificationPreferencesResponse struct {
 
 // TestUpdateNotificationPreferencesIsARealPatch is
 // TestUpdateHouseholdIsARealPatch's sibling for
-// PATCH /notification-preferences, which had the identical bug: a plain
-// bool field cannot distinguish "the caller didn't mention this toggle"
-// from "the caller wants it off," so an omitted field was silently set to
-// false.
+// PATCH /notification-preferences: a plain bool field can't distinguish
+// "not mentioned" from "explicitly off," so with plain bools an omitted
+// toggle would be silently set to false.
 func TestUpdateNotificationPreferencesIsARealPatch(t *testing.T) {
 	env := newTestEnv(t)
 	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
@@ -484,10 +460,9 @@ func TestUpdateNotificationPreferencesIsARealPatch(t *testing.T) {
 	})
 }
 
-// TestCreateSpaceWithABlankNameReturns422 pins the fix for Finding 4's other
-// sentinel: usecase.ErrSpaceNameRequired had no MapDomainError case at all
-// and fell through to a bare 500 for what is an entirely ordinary bad
-// request -- a blank space name.
+// TestCreateSpaceWithABlankNameReturns422 pins usecase.ErrSpaceNameRequired's
+// MapDomainError row: without it a blank space name, an ordinary bad
+// request, falls through to a bare 500.
 func TestCreateSpaceWithABlankNameReturns422(t *testing.T) {
 	env := newTestEnv(t)
 	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
@@ -497,18 +472,17 @@ func TestCreateSpaceWithABlankNameReturns422(t *testing.T) {
 	assertErrorResponse(t, rec, http.StatusUnprocessableEntity, "SPACE_NAME_REQUIRED")
 }
 
-// TestInviteMemberRejectsAnAddressThatAlreadyHasAUsersRow pins the fix for
-// the invite-to-an-existing-member 500: InviteRepo.Accept unconditionally
-// calls CreateUser and never reuses an existing row, so an owner inviting an
-// address that already belongs to a member (a mistype, or a re-invite) used
-// to get 201 with the mail sent, and the recipient would then 500 forever at
-// acceptance. This must be rejected at creation, where the owner who typed
-// the address can see it and act on it.
+// TestInviteMemberRejectsAnAddressThatAlreadyHasAUsersRow: InviteRepo.Accept
+// always calls CreateUser and never reuses an existing users row, so an
+// invite to an address that already belongs to a member (a mistype, or a
+// re-invite) would 201 and then 500 forever at acceptance. It must be
+// refused at creation, where the owner who typed the address can see it.
 func TestInviteMemberRejectsAnAddressThatAlreadyHasAUsersRow(t *testing.T) {
 	env := newTestEnv(t)
-	// This exercises the email channel's own duplicate-address check, which
-	// sits behind FlagEmailInvites (Task 4) -- turn it on so the request
-	// reaches that check instead of being refused for the channel being off.
+	// This exercises the email channel's own duplicate-address check, gated
+	// behind FlagEmailInvites (default off while production mail can't
+	// leave the box) -- turn it on so the request reaches that check
+	// instead of being refused for the channel being off.
 	if err := env.featureFlags.SetGlobal(context.Background(), string(domain.FlagEmailInvites), true, ""); err != nil {
 		t.Fatalf("enable email invites: %v", err)
 	}
@@ -521,15 +495,13 @@ func TestInviteMemberRejectsAnAddressThatAlreadyHasAUsersRow(t *testing.T) {
 	assertErrorResponse(t, rec, http.StatusConflict, "EMAIL_ALREADY_REGISTERED")
 }
 
-// TestSignInForARemovedMemberReturns401NotA404 pins the fix for the other
-// symptom sharing the invite-500's root cause: removing a member deletes
-// only its memberships row, not the users row underneath it, so the address
-// still resolves through Users.ByEmail. SignIn used to call Members.ByUser
-// next, get domain.ErrNotFound back, and propagate it bare -- MapDomainError
-// turns that into 404, a status no other sign-in failure produces and a
-// stranger's guess never gets, which itself discloses that the address once
-// belonged to someone. It must fail exactly like any other sign-in failure:
-// 401 INVALID_CREDENTIALS.
+// TestSignInForARemovedMemberReturns401NotA404 pins an enumeration-oracle
+// fix: removing a member deletes only its membership row, not the users
+// row, so the email still resolves. SignIn must not let a bare
+// domain.ErrNotFound from Members.ByUser reach MapDomainError, which maps
+// it to 404 -- a status no other sign-in failure produces, disclosing that
+// the address once belonged to someone. It must fail like any other
+// sign-in failure: 401 INVALID_CREDENTIALS.
 func TestSignInForARemovedMemberReturns401NotA404(t *testing.T) {
 	env := newTestEnv(t)
 	ownerSession, ownerCSRF := env.signIn(t, env.ownerEmail, env.ownerPassword)
@@ -546,38 +518,30 @@ func TestSignInForARemovedMemberReturns401NotA404(t *testing.T) {
 	assertErrorResponse(t, rec, http.StatusUnauthorized, "INVALID_CREDENTIALS")
 }
 
-// --- Task 20 fix round: PATCH /household/members/:id was the last PATCH
-// still behaving like a PUT ----------------------------------------------
+// --- PATCH /household/members/:id was the last PATCH still behaving like
+// a PUT --------------------------------------------------------------
 
 // TestUpdateMemberIsARealPatch is TestUpdateHouseholdIsARealPatch's and
 // TestUpdateNotificationPreferencesIsARealPatch's sibling for
-// PATCH /household/members/:id, which had the identical bug for longer:
-// plain (non-pointer) Role/Capabilities fields meant a caller had to send
-// both together, or the omitted one decoded to its zero value and 422'd as
-// an unknown role or an invalid capability set. Unlike the other two, this
-// endpoint's role and capabilities also interact through domain rules that
-// only make sense evaluated together (an owner must hold every capability;
-// a limited member may never hold "marriage"), so beyond "absent means
-// unchanged" this also pins that a role-only change is validated against
-// the membership's *existing* capabilities, not a zero-valued stand-in for
-// them.
+// PATCH /household/members/:id, which had the same bug plus an extra
+// twist: role and capabilities interact through domain rules (an owner
+// must hold every capability; a limited member may never hold "marriage"),
+// so a role-only change must validate against the membership's *existing*
+// capabilities, not a zero-valued stand-in for them.
 //
-// The seeded limited member (env.limitedMembership, capabilities
-// {calendar, chores}) is used throughout: it is the one membership in
-// newTestEnv whose existing capabilities are a strict subset of
-// domain.AllCapabilities(), which is exactly what makes the third subtest
-// below possible.
+// env.limitedMembership ({calendar, chores}) is used throughout because
+// its capabilities are a strict subset of domain.AllCapabilities() --
+// exactly what the third subtest below needs.
 func TestUpdateMemberIsARealPatch(t *testing.T) {
 	env := newTestEnv(t)
 	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
 
 	t.Run("a role-only patch leaves capabilities intact", func(t *testing.T) {
-		// Sent role equals the membership's current role -- a legitimate
-		// "role-only" body (only the "role" key is present at all) that
-		// exercises the exact regression a pointer-less fix would miss: if
-		// an absent capabilities field decoded to an empty slice instead of
-		// the current value, this would still succeed (an empty set is
-		// valid for "limited") while silently wiping Ethan's capabilities.
+		// Sent role equals the current role -- a legitimate "role-only" body
+		// that exercises the regression a pointer-less fix would miss: an
+		// absent capabilities field decoding to an empty slice (valid for
+		// "limited") would silently wipe capabilities instead of leaving
+		// them unchanged.
 		rec := env.authed(t, http.MethodPatch, "/api/v1/household/members/"+env.limitedMembership,
 			map[string]any{"role": "limited"}, session, csrf)
 		if rec.Code != http.StatusOK {
@@ -602,7 +566,7 @@ func TestUpdateMemberIsARealPatch(t *testing.T) {
 	})
 
 	t.Run("a capabilities-only patch leaves the role intact", func(t *testing.T) {
-		// This is the exact shape that used to 422 INVALID_ROLE: only
+		// With a plain Role field this shape would 422 INVALID_ROLE: only
 		// "capabilities" is sent, no "role" key at all.
 		rec := env.authed(t, http.MethodPatch, "/api/v1/household/members/"+env.limitedMembership,
 			map[string]any{"capabilities": []string{"calendar", "chores", "money"}}, session, csrf)
@@ -629,11 +593,10 @@ func TestUpdateMemberIsARealPatch(t *testing.T) {
 
 	t.Run("a role-only promotion to owner with a partial capability set still 422s", func(t *testing.T) {
 		// At this point env.limitedMembership holds {calendar, chores,
-		// money} (the previous subtest's result) -- still missing
-		// "marriage", so promoting it to owner without also sending every
-		// capability must be validated against those *existing*
-		// capabilities and rejected, not validated against an empty or
-		// full stand-in value that would let it through incorrectly.
+		// money} (the previous subtest's result), still missing "marriage"
+		// -- so promoting it to owner without sending every capability must
+		// be validated against those *existing* capabilities and rejected,
+		// not against an empty or full stand-in value.
 		rec := env.authed(t, http.MethodPatch, "/api/v1/household/members/"+env.limitedMembership,
 			map[string]any{"role": "owner"}, session, csrf)
 		assertErrorResponse(t, rec, http.StatusUnprocessableEntity, "INVALID_CAPABILITIES")

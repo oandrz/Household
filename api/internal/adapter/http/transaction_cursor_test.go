@@ -5,11 +5,10 @@ import (
 	"time"
 )
 
-// TestCursorRoundTrips pins encodeCursor/decodeCursor as inverses: whatever
-// date and id go in must come back out unchanged. This is the property the
-// keyset pager depends on -- decodeCursor feeds straight into
-// TransactionFilter.CursorDate/CursorID, so a round-trip that drifted would
-// silently reorder or skip a page rather than error.
+// TestCursorRoundTrips pins encodeCursor/decodeCursor as inverses -- the
+// property the keyset pager depends on, since decodeCursor feeds
+// TransactionFilter.CursorDate/CursorID directly and a drifted round-trip
+// would silently reorder or skip a page rather than error.
 func TestCursorRoundTrips(t *testing.T) {
 	occurredOn := time.Date(2026, 3, 18, 0, 0, 0, 0, time.UTC)
 	id := "b6f1a0d2-8f0a-4a11-9c3a-9d6f9e6b0f2a"
@@ -27,12 +26,10 @@ func TestCursorRoundTrips(t *testing.T) {
 	}
 }
 
-// TestDecodeCursorRejectsMalformedInput is the disproof half: Task 8 noted
-// that a bad cursor silently returning zero rows is indistinguishable from
-// "you've reached the end of the ledger". decodeCursor must refuse both
-// halves of a malformed cursor -- a bad date shape, and a date that parses
-// but is paired with an id that is not a uuid -- rather than letting either
-// one through to become a filter that looks legitimate but matches nothing.
+// TestDecodeCursorRejectsMalformedInput is the disproof half: a cursor that
+// silently returns zero rows is indistinguishable from reaching the end of
+// the ledger, so decodeCursor must refuse both a bad date shape and a date
+// paired with a non-uuid id rather than build a filter that matches nothing.
 func TestDecodeCursorRejectsMalformedInput(t *testing.T) {
 	cases := []string{
 		"",

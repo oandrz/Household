@@ -9,12 +9,11 @@ import (
 	"time"
 )
 
-// --- Task 38: accounts, the first capability gate, and redaction ----------
+// --- accounts, the first capability gate, and redaction --------------------
 
-// TestAccountsListRequiresTheMoneyCapability is the first capability gate in
-// the product. Until this route existed, requireCapability was defined and
-// unused, so the promise that the server enforces capabilities independently
-// of the UI was vacuous.
+// TestAccountsListRequiresTheMoneyCapability proves the server enforces a
+// capability on its own, independent of the UI: a limited member without
+// money gets 403.
 func TestAccountsListRequiresTheMoneyCapability(t *testing.T) {
 	env := newTestEnv(t)
 	session, _ := env.signIn(t, env.limitedEmail, env.limitedPassword) // calendar + chores
@@ -39,23 +38,17 @@ func TestAccountsWriteRequiresOwnership(t *testing.T) {
 }
 
 // TestAccountsAreRedactedForALimitedMember asserts the amount fields are
-// ABSENT, not zero. A zeroed balance still reads as a real one, and a zeroed
-// net worth says "this family has nothing" -- a different and worse untruth
-// than saying nothing.
+// ABSENT, not zero: a zeroed balance would read as real, a zeroed net worth
+// as "this family has nothing" -- a worse untruth than saying nothing.
 //
-// The redacted entry's key set is asserted exactly, not just that the amount
-// keys happen to be missing: redactedAccounts builds the field nils onto the
-// full accountDTO (account_handlers.go), which is a blacklist on the field
-// axis even though the role check ten lines above it is a deliberate
-// whitelist. A blacklist fails open -- add a new money-carrying field to
-// accountDTO later and every limited member receives it, with nothing here
-// going red, because the fields this test happened to name would still be
-// absent. Asserting the whole key set instead forces exactly that addition to
-// be a deliberate decision, at the one moment it matters. That is not
-// hypothetical: "openingBalance" was added to accountDTO after this test was
-// written, and this assertion is what caught it un-redacted. Naming the
-// blacklisted fields in this comment would have needed updating too, so it
-// deliberately does not.
+// The redacted entry's key set is asserted exactly, not just that the
+// amount keys are missing: redactedAccounts nils fields onto the full
+// accountDTO, a blacklist on the field axis even though the role check
+// above it is a whitelist. A blacklist fails open, so asserting the whole
+// key set forces a new money-carrying field to be added here deliberately.
+// Don't weaken this to checking named keys: "openingBalance" was added to
+// accountDTO un-redacted after this test was written, and only the
+// full-set check caught it.
 func TestAccountsAreRedactedForALimitedMember(t *testing.T) {
 	env := newTestEnv(t)
 	ownerSession, ownerCSRF := env.signIn(t, env.ownerEmail, env.ownerPassword)
@@ -171,18 +164,17 @@ func TestOwnerSeesEveryAccountAndTheSummary(t *testing.T) {
 	}
 }
 
-// TestAccountErrorCodesMatchTheSpecTable pins the wire contract for the design
-// doc's own §6.3 table at the one level nothing had asserted it before: each
-// of these five codes existed only as a string literal in errors.go and, for
-// two of them, a second literal in account_handlers.go, with nothing
-// confirming the two agreed or that either matched what the table promises.
+// TestAccountErrorCodesMatchTheSpecTable pins the wire contract for the
+// design doc's §6.3 table: each of these five codes is only a string
+// literal in errors.go (and, for two, a second one in
+// account_handlers.go); this test is what confirms they agree with each
+// other and with the table.
 //
-// This is a contract test, not a regression test for a live breakage: today,
-// a wrong code costs nothing, because AccountModal's error paragraph falls
-// back to a generic message whenever apiErrorMessage doesn't recognise the
-// code it was given. The cost arrives the day a caller starts keying off one
-// of these strings specifically — a typo here would then fail silently,
-// against a suite that stayed green.
+// This is a contract test, not a regression test for a live breakage: today
+// a wrong code costs nothing, since AccountModal falls back to a generic
+// message when apiErrorMessage doesn't recognise it. The cost arrives the
+// day a caller keys off one of these strings -- a typo would then fail
+// silently against a suite that stayed green.
 func TestAccountErrorCodesMatchTheSpecTable(t *testing.T) {
 	env := newTestEnv(t)
 	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
@@ -251,21 +243,15 @@ func TestAccountErrorCodesMatchTheSpecTable(t *testing.T) {
 // TestOwnerSeesTheTwelveMonthTrend pins the wire shape the Finances chart
 // reads.
 //
-// The clock is anchored to real now rather than to an absolute date, because
-// session expiry is not enforced by this clock at all: GetLiveSession's WHERE
-// clause carries `expires_at > now()` -- Postgres's now(), real wall time --
-// and session_repo.go states outright that there is no second check in Go. An
-// injected clock cannot reach that guard, so a test pinned to an absolute past
-// instant stops authenticating exactly one SessionTTL after it is written.
-// This one did: green for thirty days, then red every day after, while its own
-// comment promised a "known, reproducible range".
+// The clock is anchored to real now, not an absolute date: session expiry is
+// checked in SQL with Postgres `now()`, not by this clock, so a test pinned
+// to an absolute instant stops authenticating exactly one SessionTTL after
+// it's written -- this one did.
 //
-// The anchor is the 15th at midday because every month has a 15th. The 28th is
-// not safe in February, the 1st sits on a timezone boundary, and AddDate
-// normalises an overflowing day forward into the next month rather than
-// refusing -- so an anchor on the 31st would silently assert the wrong window.
-// Every month asserted below is derived from the anchor, so the window travels
-// with the calendar and the assertions stay exact.
+// The anchor is the 15th at midday because every month has a 15th. The 28th
+// isn't safe in February, the 1st sits on a timezone boundary, and AddDate
+// normalises an overflowing day into the next month rather than refusing --
+// so an anchor on the 31st would silently assert the wrong window.
 func TestOwnerSeesTheTwelveMonthTrend(t *testing.T) {
 	now := time.Now().UTC()
 	anchor := time.Date(now.Year(), now.Month(), 15, 12, 0, 0, 0, time.UTC)
@@ -278,10 +264,10 @@ func TestOwnerSeesTheTwelveMonthTrend(t *testing.T) {
 	env.mustCreateAccount(t, session, csrf, map[string]any{
 		"nickname": "DBS Everyday", "type": "cash",
 		"openingBalanceMinor": 824_055, "openingBalanceCurrency": "SGD",
-		// The first of the anchor's own month. usecase/account.go refuses an
+		// The first of the anchor's own month: usecase/account.go refuses an
 		// opening balance dated more than a day ahead of Clock.Now(), and the
-		// assertions below need the account tracked from this month and from
-		// no month earlier.
+		// assertions below need the account tracked from this month and no
+		// earlier.
 		"openingBalanceAsOf": thisMonth + "-01",
 	})
 
@@ -341,11 +327,10 @@ func TestOwnerSeesTheTwelveMonthTrend(t *testing.T) {
 	}
 
 	// complete needs the same byte-level pin netWorthMinor gets, for a reason
-	// specific to bool: a missing key and `false` decode to the exact same Go
-	// zero value, so a struct field alone cannot tell "the wire said false"
-	// from "the wire said nothing and Complete never got a JSON tag" -- only
-	// the raw bytes can. This is what an accidental `,omitempty` on the
-	// Complete tag would remove without any decoded assertion above noticing.
+	// specific to bool: a missing key and `false` decode to the same Go zero
+	// value, so a decoded field can't tell "the wire said false" from "the
+	// wire said nothing" -- only the raw bytes can. An accidental
+	// `,omitempty` on the Complete tag would slip past every assertion above.
 	if !bytes.Contains(rec.Body.Bytes(), []byte(`"complete":false`)) {
 		t.Error(`the oldest month's complete field is missing from the wire; want a literal "complete":false`)
 	}
@@ -359,10 +344,9 @@ func TestOwnerSeesTheTwelveMonthTrend(t *testing.T) {
 	}
 }
 
-// TestALimitedMemberGetsNoTrend needs no new guard to pass, and that is the
-// point: the trend rides inside the summary, which is already withheld whole.
-// The test exists so that a later refactor moving the trend to its own field
-// or its own route cannot leak amounts without going red.
+// TestALimitedMemberGetsNoTrend needs no new guard to pass -- the trend
+// rides inside the already-withheld summary. It exists so a future refactor
+// moving the trend to its own field or route can't leak amounts silently.
 func TestALimitedMemberGetsNoTrend(t *testing.T) {
 	env := newTestEnv(t)
 	session, _ := env.signIn(t, env.moneyLimitedEmail, env.moneyLimitedPassword)

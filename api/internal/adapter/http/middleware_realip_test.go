@@ -59,8 +59,8 @@ func TestRealIPKeepsThePeerWhenATrustedProxySendsNoUsableHeader(t *testing.T) {
 	}
 }
 
-// chi's RealIP read both of these, ahead of and after X-Real-IP. Neither is
-// read at all now, from a trusted peer or anyone else.
+// Don't read True-Client-IP or X-Forwarded-For, from a trusted peer or
+// anyone else: chi's RealIP did, and let a caller name its own address.
 func TestRealIPNeverReadsTrueClientIPOrXForwardedFor(t *testing.T) {
 	spoofed := map[string]string{"True-Client-IP": "198.51.100.7", "X-Forwarded-For": "198.51.100.8"}
 	for _, peer := range []string{"172.28.0.4:40000", "203.0.113.9:5555"} {

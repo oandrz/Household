@@ -22,13 +22,10 @@ import (
 // --- doubles for building a *usecase.TelegramAuthService in this package's
 // tests -----------------------------------------------------------------
 //
-// POST /auth/telegram/start only ever calls StartLink, which touches Tokens
-// and Links.Create. Every other port TelegramAuthDeps requires (Accounts,
-// MagicLinks, Signups, Sender, Invites) exists solely to satisfy the struct --
-// HandleStart's own behaviour is usecase/telegram_auth_test.go's job, not
-// this package's -- so each unused method panics: a future test that
-// accidentally exercises one fails loudly at the call site instead of
-// silently returning a zero value.
+// Only StartLink is exercised (POST /auth/telegram/start); HandleStart's
+// behaviour is usecase/telegram_auth_test.go's job, so every other port
+// (Accounts, MagicLinks, Signups, Sender, Invites) -- and Links' methods
+// other than Create -- panic rather than silently returning a zero value.
 
 type fakeTelegramLinkRepo struct{}
 
@@ -137,22 +134,20 @@ func newTelegramAuthServiceForTest() *usecase.TelegramAuthService {
 }
 
 // telegramRouter shares every dependency env's own router has (real
-// Postgres-backed sign-up, sessions, and so on), with Telegram wired to svc.
-// This is the same env.deps-copy-and-swap api_test.go's routerWithMemberships
-// already uses for Memberships, applied here without needing a change to
-// that shared file: this file is package httpadapter_test too, so env.deps
-// is already in scope.
+// Postgres-backed sign-up, sessions, and so on), with Telegram wired to svc
+// -- the same env.deps-copy-and-swap api_test.go's routerWithMemberships
+// uses, reused here without touching that file since this package already
+// has env.deps in scope.
 func telegramRouter(env *testEnv, svc *usecase.TelegramAuthService) http.Handler {
 	d := env.deps
 	d.Telegram = svc
 	return httpadapter.NewRouter(d)
 }
 
-// doOn issues a JSON request against an arbitrary router. env.do (api_test.go)
-// is pinned to env.router; the tests below need a second router built by
-// telegramRouter above. cookies is variadic and optional, the same shape
-// env.do (api_test.go) already uses, so every pre-existing zero-cookie call
-// below still compiles unchanged.
+// doOn issues a JSON request against an arbitrary router: env.do (api_test.go)
+// is pinned to env.router, but the tests below need a second router built by
+// telegramRouter above. cookies is variadic and optional, matching env.do's
+// shape, so every pre-existing zero-cookie call below still compiles.
 func doOn(h http.Handler, method, path string, body any, cookies ...*http.Cookie) *httptest.ResponseRecorder {
 	var reader io.Reader
 	if body != nil {
@@ -238,17 +233,16 @@ func TestTelegramStartReturnsADeepLink(t *testing.T) {
 	}
 }
 
-// With no bot configured the route must not exist at all, so an install
-// that never set up Telegram behaves exactly as it did before this feature
-// -- even down to the exact answer (NOT_FOUND), the same one any unrouted
-// path gets.
+// TestTelegramStartIs404WhenTheFeatureIsOff pins that with no bot
+// configured, the route must not exist at all -- an install that never set
+// up Telegram gets the exact NOT_FOUND any unrouted path gets.
 //
-// This is one of two ways this route answers 404, and the two must not be
-// conflated into "redundant" and one deleted: this test pins the pre-existing
-// gate, Deps.Telegram == nil (no bot configured at all).
-// TestTelegramSignInFlagOffAnswers404EvenWithABotConfigured below pins the
-// other -- domain.FlagTelegramSignIn switched off, with a bot properly
-// configured -- which is the one requireFeature actually adds in this task.
+// This is one of two distinct ways this route answers 404 -- don't conflate
+// them and delete one as redundant. This test pins the "no bot configured"
+// gate (Deps.Telegram == nil).
+// TestTelegramSignInFlagOffAnswers404EvenWithABotConfigured pins the other:
+// domain.FlagTelegramSignIn switched off via requireFeature, with a bot
+// properly configured.
 func TestTelegramStartIs404WhenTheFeatureIsOff(t *testing.T) {
 	env := newTestEnv(t) // the existing helper: Deps.Telegram is nil
 	rec := env.do(http.MethodPost, "/api/v1/auth/telegram/start", nil)
@@ -257,15 +251,12 @@ func TestTelegramStartIs404WhenTheFeatureIsOff(t *testing.T) {
 
 // TestTelegramSignInFlagOffAnswers404EvenWithABotConfigured is
 // TestTelegramStartIs404WhenTheFeatureIsOff's sibling for the OTHER way this
-// route can be hidden: a bot IS configured (Deps.Telegram non-nil, via
-// telegramRouter) but domain.FlagTelegramSignIn is switched off. The two
-// produce identical wire responses -- 404 NOT_FOUND -- and it would be easy
-// to assume they exercise the same guard and drop one as redundant. They do
-// not: this one is the only test anywhere that references
-// FlagTelegramSignIn at all, so without it router.go's
-// requireFeature(deps, domain.FlagTelegramSignIn) call could be deleted, or
-// swapped for the wrong flag constant, and nothing would fail -- the flag
-// defaults to true, and the no-bot test above never touches it.
+// route can be hidden: a bot IS configured, but domain.FlagTelegramSignIn is
+// switched off. Both produce 404 NOT_FOUND, which invites dropping one as
+// redundant -- don't: this is the only test anywhere that references
+// FlagTelegramSignIn, so without it router.go's requireFeature call (or the
+// wrong flag constant) could be deleted and nothing would fail, since the
+// flag defaults true and the no-bot test never touches it.
 func TestTelegramSignInFlagOffAnswers404EvenWithABotConfigured(t *testing.T) {
 	env := newTestEnv(t)
 	router := telegramRouter(env, newTelegramAuthServiceForTest())
@@ -286,24 +277,19 @@ func TestTelegramSignInFlagOffAnswers404EvenWithABotConfigured(t *testing.T) {
 }
 
 // TestTelegramStartIs404WhenTheFeatureIsOffIsByteIdenticalToAnUnroutedPath
-// pins the body itself, not only the status and code the test above already
-// checks. Status and code alone would still pass if the handler's message
-// text ever drifted from router.go's own NotFound handler -- say, to
-// "Telegram sign-in is not configured." -- and that drift is exactly the
-// distinguisher the comment above (and the design doc) claims does not
-// exist: a caller could then tell "no such route" apart from "Telegram not
-// configured" by the message alone, even though both still answer 404
-// NOT_FOUND. Comparing the two responses byte for byte is what actually
-// proves the message itself carries no distinguisher. It does not prove there
-// is none anywhere in the response: the per-IP limiter sits ahead of this
-// handler unconditionally (router.go), so a 21st POST from the same IP inside
-// the hour answers 429 RATE_LIMITED forever, where a genuinely unrouted path
-// never would. That gap is not a leak, though -- a configured install
-// rate-limits identically to an unconfigured one, so what a caller learns
-// from it is only "this build has the route", true of every install of this
-// version. See the mutation proof recorded in the final-fix-wave report:
-// changing the handler's message makes this test fail, and restoring it
-// makes this test pass again.
+// pins the body itself, not only the status and code the test above checks:
+// those alone would still pass if the handler's message ever drifted from
+// router.go's own NotFound handler (say, to "Telegram sign-in is not
+// configured."), letting a caller tell "no such route" apart from "Telegram
+// not configured" by the message even though both answer 404 NOT_FOUND.
+// Comparing byte for byte proves the message carries no distinguisher --
+// not that none exists anywhere in the response: the per-IP limiter sits
+// ahead of this handler unconditionally (router.go), so a 21st POST from the
+// same IP inside the hour answers 429 forever, where an unrouted path never
+// would. That's not a leak: a configured install rate-limits identically to
+// an unconfigured one, so all a caller learns is "this build has the
+// route", true of every install of this version. Mutation-tested: changing
+// the handler's message makes this test fail; restoring it passes again.
 func TestTelegramStartIs404WhenTheFeatureIsOffIsByteIdenticalToAnUnroutedPath(t *testing.T) {
 	env := newTestEnv(t) // the existing helper: Deps.Telegram is nil
 
@@ -322,16 +308,16 @@ func TestTelegramStartIs404WhenTheFeatureIsOffIsByteIdenticalToAnUnroutedPath(t 
 	}
 }
 
-// The route takes no identifier, so there is nothing to enumerate -- but it
-// still mints a row per call, so it must be limited per IP like sign-up is.
+// TestTelegramStartIsRateLimitedPerIP pins the per-IP limit: the route
+// takes no identifier, so there is nothing to enumerate -- but it still
+// mints a row per call, so it must be limited per IP like sign-up is.
 //
-// telegramStartsPerIPPerHour (middleware_ratelimit.go) is unexported and
-// this package is httpadapter_test, so its value (20) is repeated here as a
-// literal -- the same convention TestSignUpPassesThroughThePerIPLimiter
-// (auth_api_test.go) uses for signUpRequestsPerIPPerHour. Every request
-// under the limit is checked, not just the first and the last: a limiter
-// wired with limit=1 would still make the final request in a bare
-// "loop then check last" test come back 429.
+// telegramStartsPerIPPerHour (middleware_ratelimit.go) is unexported and this
+// package is httpadapter_test, so its value (20) is repeated here as a
+// literal, the same convention TestSignUpPassesThroughThePerIPLimiter uses for
+// signUpRequestsPerIPPerHour. Every request under the limit is checked, not
+// just the first and last: a limiter wired with limit=1 would still pass a
+// bare "loop then check last" test.
 func TestTelegramStartIsRateLimitedPerIP(t *testing.T) {
 	env := newTestEnv(t)
 	router := telegramRouter(env, newTelegramAuthServiceForTest())
@@ -350,13 +336,12 @@ func TestTelegramStartIsRateLimitedPerIP(t *testing.T) {
 	}
 }
 
-// TestTelegramStartHasItsOwnRateLimitBudgetSeparateFromSignUp pins the
-// controller's own reason this route needs its own limiter instance, not
-// the sign-up group's: a person who has just signed up should not find
-// Telegram sign-in already spent, and vice versa. Without a dedicated
-// limiter instance, router.go could share signUpRequestsPerIPPerHour's
-// limiter between the two groups and every other test in this file would
-// still pass, since none of them ever calls the other route.
+// TestTelegramStartHasItsOwnRateLimitBudgetSeparateFromSignUp pins why this
+// route needs its own limiter instance, not the sign-up group's: a person
+// who just signed up should not find Telegram sign-in already spent, and
+// vice versa. Without a dedicated instance, router.go could share
+// signUpRequestsPerIPPerHour's limiter between the groups and every other
+// test in this file would still pass, since none of them call both routes.
 func TestTelegramStartHasItsOwnRateLimitBudgetSeparateFromSignUp(t *testing.T) {
 	env := newTestEnv(t)
 	router := telegramRouter(env, newTelegramAuthServiceForTest())
@@ -387,17 +372,14 @@ func TestTelegramStartHasItsOwnRateLimitBudgetSeparateFromSignUp(t *testing.T) {
 	}
 }
 
-// --- CONTROLLER RULING R3: GET /auth/sign-up/{token} must carry channel
-// too --------------------------------------------------------------------
+// --- GET /auth/sign-up/{token} must carry channel too -----------------------
 //
-// Task 9's frontend expects {"email": ..., "channel": ...} from this route.
-// SignupPreview.Channel (usecase/signup.go, Task 4) already computes the
-// right value; nothing before this task ever put it on the wire. The email
-// shape is covered by TestSignUpPreviewAndComplete (auth_api_test.go),
-// extended by this task to also assert channel == "email". This test covers
-// the shape SignupPreview's own doc comment says would otherwise render as
-// "a field the person forgot to fill in": a Telegram sign-up's empty email,
-// sent as an actual "" value, not omitted.
+// The frontend expects {"email": ..., "channel": ...}; SignupPreview.Channel
+// (usecase/signup.go) already computes it, the handler just puts it on the
+// wire. TestSignUpPreviewAndComplete (auth_api_test.go) covers the email
+// shape, including channel == "email". This test covers the Telegram
+// shape: an empty email sent as an actual "" value, not omitted
+// (SignupPreview's doc warns an omitted one looks like a forgotten field).
 
 // fakeSignupRepoForPreview answers ByTokenHash from one canned row; every
 // other SignupRepository method panics, since handleSignUpPreview only ever
@@ -438,15 +420,12 @@ func (fakeSignupRepoForPreview) Prune(context.Context, time.Time) (int64, error)
 var _ usecase.SignupRepository = fakeSignupRepoForPreview{}
 
 // noFeatureFlagOverrides answers "no overrides recorded" for every flag, so
-// AdminService.GlobalFlags resolves every flag to its compile-time default --
-// signups_open defaults true (domain.AllFlags). It exists because Task 6 put
-// requireFeature in front of the sign-up preview route below, and that
-// route's pre-auth branch calls deps.Admin.GlobalFlags regardless of which
-// test is asking, so a Deps literal naming only Signups (as this file's
-// tests already did, to avoid a database) now needs a working, if minimal,
-// Admin too. The other two AdminDeps ports are left nil deliberately: this
-// route never reaches IsPlatformAdmin or RecordAudit, and wiring them would
-// only make it look like it did.
+// AdminService.GlobalFlags resolves each flag to its compile-time default
+// (signups_open defaults true). It exists because the sign-up preview
+// route below calls deps.Admin.GlobalFlags on every request via
+// requireFeature, so a minimal Deps needs a working Admin too. The other two
+// AdminDeps ports are left nil deliberately: this route never reaches
+// IsPlatformAdmin or RecordAudit.
 type noFeatureFlagOverrides struct{}
 
 func (noFeatureFlagOverrides) OverridesFor(context.Context, string) (map[string]bool, map[string]bool, error) {
@@ -506,8 +485,8 @@ func TestSignUpPreviewShowsTelegramChannelWithNoEmail(t *testing.T) {
 	// Decoded into map[string]any, not a typed struct: a struct field can be
 	// missing from the JSON and still decode to its Go zero value ("") with
 	// no way to tell "absent" from "explicitly empty" apart. The map does
-	// distinguish them, which is the whole point of this test -- Ruling R3
-	// says the empty email must not be dropped.
+	// distinguish them, which is the whole point of this test: the empty
+	// email must not be dropped.
 	var body map[string]any
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 		t.Fatalf("body: %v", err)
@@ -524,15 +503,14 @@ func TestSignUpPreviewShowsTelegramChannelWithNoEmail(t *testing.T) {
 	}
 }
 
-// --- Task 6: the routes for connecting and disconnecting a Telegram chat
+// --- the routes for connecting and disconnecting a Telegram chat
 // (GET/DELETE /auth/telegram, POST /auth/telegram/link,
 // GET /auth/telegram/link/{id}, POST /auth/telegram/link/{id}/confirm) ------
 
 // telegramLinkRepoTestDouble is a minimal, stateful TelegramLinkRepository
 // double for the guard tests below. Consume, CountLinksSince and Prune are
-// the chat-side half of the flow and the prune job -- never reached from
-// these browser-route tests -- and panic like this file's other unused*
-// doubles above.
+// the chat-side half of the flow and the prune job -- unreached from these
+// browser-route tests -- and panic like this file's other unused* doubles.
 type telegramLinkRepoTestDouble struct {
 	rows map[string]usecase.TelegramLinkRequest
 	n    int
@@ -640,9 +618,9 @@ func telegramLinkRouter(env *testEnv, svc *usecase.TelegramLinkService) http.Han
 	return httpadapter.NewRouter(d)
 }
 
-// telegramLinkRoutes is the exact five routes this task adds, reused by
-// every guard test below so a route added or removed here is felt by all of
-// them at once.
+// telegramLinkRoutes is the five link/unlink routes, reused by every guard
+// test below so a route added or removed here is felt by all of them at
+// once.
 var telegramLinkRoutes = []struct{ method, path string }{
 	{http.MethodGet, "/api/v1/auth/telegram"},
 	{http.MethodDelete, "/api/v1/auth/telegram"},
@@ -660,10 +638,9 @@ var telegramLinkWriteRoutes = []struct{ method, path string }{
 }
 
 // TestTelegramLinkRoutesRefuseWithoutASession pins requireSession as the
-// outermost guard of the group: no cookie at all, on the default env (bot
-// unconfigured) -- and it must still be 401, not the 404 a nil
-// Deps.TelegramLink would answer, because requireSession runs before the
-// handler ever gets a chance to check that.
+// outermost guard: no cookie at all, on the default env (bot unconfigured),
+// must still answer 401, not the 404 a nil Deps.TelegramLink would give --
+// requireSession runs before the handler ever gets to check that.
 func TestTelegramLinkRoutesRefuseWithoutASession(t *testing.T) {
 	env := newTestEnv(t)
 	for _, r := range telegramLinkRoutes {
@@ -674,10 +651,9 @@ func TestTelegramLinkRoutesRefuseWithoutASession(t *testing.T) {
 
 // TestTelegramLinkRoutesRefuseAnAPIToken pins requireCookieSession: a
 // personal API token authenticates the caller (requireSession succeeds) but
-// must not be able to bind or unbind a chat -- the same rule minting a
-// token itself follows (ADR 7, spec decision 8), because a leaked token
-// must not be able to make itself into a channel that outlives its own
-// revocation.
+// must not bind or unbind a chat -- the same rule minting a token itself
+// follows (ADR 7): a leaked token must not become a channel that outlives
+// its own revocation.
 func TestTelegramLinkRoutesRefuseAnAPIToken(t *testing.T) {
 	env := newTestEnv(t)
 	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
@@ -704,20 +680,20 @@ func TestTelegramLinkPostRefusesWithoutCSRF(t *testing.T) {
 
 // TestTelegramLinkRoutesAre404WhenTheFlagIsOff is
 // TestTelegramSignInFlagOffAnswers404EvenWithABotConfigured's sibling for
-// this task's five routes: a bot IS configured (Deps.TelegramLink non-nil,
-// via telegramLinkRouter) but domain.FlagTelegramSignIn is switched off.
+// these five routes: a bot IS configured (Deps.TelegramLink non-nil, via
+// telegramLinkRouter) but domain.FlagTelegramSignIn is switched off.
 // requireFeature sits ahead of requireCSRF in the group (router.go), so a
-// bare session cookie -- no CSRF cookie or header at all -- is enough to
-// prove the flag, not CSRF, is what answered 404 here.
+// bare session cookie -- no CSRF cookie or header -- is enough to prove the
+// flag, not CSRF, answered 404 here.
 func TestTelegramLinkRoutesAre404WhenTheFlagIsOff(t *testing.T) {
 	env := newTestEnv(t)
 	router := telegramLinkRouter(env, newTelegramLinkServiceForTest(env))
 	session, _ := env.signIn(t, env.ownerEmail, env.ownerPassword)
 
 	// The flag defaults on, and a bot is configured: the route works. This
-	// is what makes the loop below prove the flag, not the routes being
-	// unregistered, is what answers 404 -- without it this test would still
-	// pass against an unrouted path (the RED step showed exactly that).
+	// is what proves the flag, not an unregistered route, answers 404 below
+	// -- without it this test would still pass against a route that plain
+	// doesn't exist.
 	rec := doOn(router, http.MethodGet, "/api/v1/auth/telegram", nil, session)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("telegram_sign_in on = %d, want 200 (body = %s)", rec.Code, rec.Body.String())
@@ -735,14 +711,12 @@ func TestTelegramLinkRoutesAre404WhenTheFlagIsOff(t *testing.T) {
 }
 
 // TestTelegramLinkRoutesAre404WithNoBotConfigured is the other of the two
-// ways this group can answer 404 -- Deps.TelegramLink itself nil, the
-// default env every other test in this file starts from -- pinned
-// separately from the flag-off test above for the same reason
-// TestTelegramStartIs404WhenTheFeatureIsOff and
-// TestTelegramSignInFlagOffAnswers404EvenWithABotConfigured are kept apart:
-// the two produce the identical wire response but exercise different gates,
-// and collapsing them into one test would let either gate be deleted with
-// nothing left to notice.
+// ways this group can answer 404: Deps.TelegramLink itself nil, the default
+// env every other test in this file starts from. Kept separate from the
+// flag-off test above for the same reason
+// TestTelegramStartIs404WhenTheFeatureIsOff and its sibling are: identical
+// wire response, different gates -- merging them would let either gate be
+// deleted unnoticed.
 func TestTelegramLinkRoutesAre404WithNoBotConfigured(t *testing.T) {
 	env := newTestEnv(t) // Deps.TelegramLink is nil
 	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
@@ -758,12 +732,12 @@ func TestTelegramLinkRoutesAre404WithNoBotConfigured(t *testing.T) {
 	}
 }
 
-// TestTelegramLinkPollingRouteNeedsNoCSRFHeader pins the reason all five
-// routes share one group instead of splitting reads from writes: requireCSRF
-// returns early for GET, HEAD and OPTIONS (middleware_csrf.go), so
-// GET /auth/telegram/link/{id} needs no X-CSRF-Token header at all, only the
-// session cookie. If this route were ever moved into a group that required
-// the header unconditionally, this is the test that would go red.
+// TestTelegramLinkPollingRouteNeedsNoCSRFHeader pins why all five routes
+// share one group instead of splitting reads from writes: requireCSRF
+// returns early for GET, HEAD and OPTIONS (middleware_csrf.go), so GET
+// /auth/telegram/link/{id} needs only the session cookie, no X-CSRF-Token
+// header. If this route were ever moved into a group requiring the header
+// unconditionally, this is the test that would go red.
 func TestTelegramLinkPollingRouteNeedsNoCSRFHeader(t *testing.T) {
 	env := newTestEnv(t)
 	router := telegramLinkRouter(env, newTelegramLinkServiceForTest(env))

@@ -7,17 +7,14 @@ import (
 )
 
 // requireCapability answers 403 FORBIDDEN unless the caller's Scope carries
-// cap. The accounts routes are its first users: before them it was defined and
-// unwired, which made the promise that the server enforces capabilities
-// independently of the UI vacuous.
+// cap, so the server enforces capabilities independently of the UI.
 //
-// On the account write routes it is stacked with requireOwner, and today that
-// is redundant -- domain.ValidateMembershipChange refuses an owner who does not
-// hold every capability, so "an owner without money" is not a representable
-// state. It is stacked anyway: the alternative is for these routes to depend on
-// an invariant enforced in a different layer for a different reason, and if
-// that invariant is ever relaxed every route leaning on it opens silently. One
-// extra middleware call is a cheaper price than that coupling.
+// On the account write routes it is stacked with requireOwner, which today
+// makes it redundant -- domain.ValidateMembershipChange already refuses an
+// owner missing any capability. It stays anyway: relying only on that
+// invariant would couple these routes to a rule enforced in a different
+// layer for a different reason, and one extra middleware call is cheaper
+// than that coupling breaking silently if the invariant is ever relaxed.
 func requireCapability(cap domain.Capability) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

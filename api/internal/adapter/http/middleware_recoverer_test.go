@@ -9,8 +9,8 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 )
 
-// TestRecovererWritesTheStandardEnvelopeWithARequestID pins the fix: a panic
-// downstream must answer with the same error envelope every other failure
+// TestRecovererWritesTheStandardEnvelopeWithARequestID pins that a panic
+// downstream answers with the same error envelope every other failure
 // path uses, request ID included, rather than chi's own middleware.Recoverer
 // bare, bodyless 500 -- see recoverer's doc comment in
 // middleware_recoverer.go.

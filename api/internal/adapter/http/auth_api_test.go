@@ -18,13 +18,13 @@ import (
 	"github.com/andreasoentoro/hearth/api/internal/usecase"
 )
 
-// --- the eleven behaviours -------------------------------------------------
+// --- sign-in, session and CSRF basics ---------------------------------------
 
-// TestSignInAndLockoutFlow covers behaviours 1-3: a correct sign-in sets
-// both cookies with the right flags, a wrong password reports two tries
-// left, and continuing to guess locks the household with a 423 and a
-// lockedUntil timestamp. All three share one household's lockout state, so
-// they run as one continuous flow rather than three independent tests.
+// TestSignInAndLockoutFlow: a correct sign-in sets both cookies with the
+// right flags, a wrong password reports two tries left, and continuing to
+// guess locks the household with a 423 and a lockedUntil timestamp. All
+// three share one household's lockout state, so they run as one continuous
+// flow rather than three independent tests.
 func TestSignInAndLockoutFlow(t *testing.T) {
 	env := newTestEnv(t)
 
@@ -73,7 +73,7 @@ func TestSignInAndLockoutFlow(t *testing.T) {
 	}
 }
 
-// TestAuthMeRequiresASession covers behaviour 4.
+// TestAuthMeRequiresASession: GET /auth/me without a cookie is 401 UNAUTHENTICATED.
 func TestAuthMeRequiresASession(t *testing.T) {
 	env := newTestEnv(t)
 
@@ -81,7 +81,6 @@ func TestAuthMeRequiresASession(t *testing.T) {
 	assertErrorResponse(t, rec, http.StatusUnauthorized, "UNAUTHENTICATED")
 }
 
-// TestAuthMeReturnsTheFullBundle covers behaviour 5.
 func TestAuthMeReturnsTheFullBundle(t *testing.T) {
 	env := newTestEnv(t)
 	session, _ := env.signIn(t, env.ownerEmail, env.ownerPassword)
@@ -129,13 +128,13 @@ func TestAuthMeReturnsTheFullBundle(t *testing.T) {
 	}
 }
 
-// TestCSRFIsRequiredForMutatingRequests covers behaviours 6-7, using
-// sign-out as the mutating route under test.
+// TestCSRFIsRequiredForMutatingRequests uses sign-out as the mutating
+// route under test.
 func TestCSRFIsRequiredForMutatingRequests(t *testing.T) {
 	env := newTestEnv(t)
 	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
 
-	// 6: no X-CSRF-Token header at all.
+	// 1: no X-CSRF-Token header at all.
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/sign-out", nil)
 	req.AddCookie(session)
 	req.AddCookie(csrf)
@@ -143,7 +142,7 @@ func TestCSRFIsRequiredForMutatingRequests(t *testing.T) {
 	env.router.ServeHTTP(rec, req)
 	assertErrorResponse(t, rec, http.StatusForbidden, "CSRF_INVALID")
 
-	// 7: header present but does not match the cookie.
+	// 2: header present but does not match the cookie.
 	req2 := httptest.NewRequest(http.MethodPost, "/api/v1/auth/sign-out", nil)
 	req2.AddCookie(session)
 	req2.AddCookie(csrf)
@@ -153,7 +152,6 @@ func TestCSRFIsRequiredForMutatingRequests(t *testing.T) {
 	assertErrorResponse(t, rec2, http.StatusForbidden, "CSRF_INVALID")
 }
 
-// TestSignOutRevokesTheSession covers behaviour 8.
 func TestSignOutRevokesTheSession(t *testing.T) {
 	env := newTestEnv(t)
 	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
@@ -167,11 +165,10 @@ func TestSignOutRevokesTheSession(t *testing.T) {
 	assertErrorResponse(t, rec, http.StatusUnauthorized, "UNAUTHENTICATED")
 }
 
-// TestEveryProtectedRouteRejectsAnUnauthenticatedCaller covers behaviour 9.
-// It walks the real, fully wired router (rather than a hand-maintained list
-// of routes) so that a route registered without its session guard -- the
-// exact failure this task exists to prevent -- cannot hide from the test by
-// simply not being mentioned in it.
+// TestEveryProtectedRouteRejectsAnUnauthenticatedCaller walks the real,
+// fully wired router rather than a hand-maintained list, so a route
+// registered without its session guard cannot hide by simply not being
+// mentioned here.
 func TestEveryProtectedRouteRejectsAnUnauthenticatedCaller(t *testing.T) {
 	env := newTestEnv(t)
 
@@ -187,11 +184,10 @@ func TestEveryProtectedRouteRejectsAnUnauthenticatedCaller(t *testing.T) {
 		"POST /api/v1/auth/sign-up/{token}/complete": true,
 		// Public: the sign-up form reads this before any session exists.
 		"GET /api/v1/currencies": true,
-		// Telegram sign-in: reached before any session exists, same as
-		// sign-up above. It answers 404 rather than 401 when no bot is
-		// configured (telegram_handlers.go's own doc comment) -- the same
-		// answer any unrouted path gets -- which this walk would otherwise
-		// flag as a route that "forgot" its 401 guard.
+		// Telegram sign-in: reached before any session exists, same as sign-up
+		// above. It answers 404, not 401, when no bot is configured
+		// (telegram_handlers.go's doc comment) -- the same answer any unrouted
+		// path gets, which this walk would otherwise flag as a missing 401 guard.
 		"POST /api/v1/auth/telegram/start": true,
 	}
 
@@ -240,24 +236,14 @@ func TestEveryProtectedRouteRejectsAnUnauthenticatedCaller(t *testing.T) {
 	// (a routing regression, a chi API change), the loop above asserts
 	// nothing and the test would pass for the wrong reason.
 	t.Logf("checked %d protected routes", checked)
-	// 75 is this walk's own re-measured output, never a number to bump by
-	// hand: tracked that way, this exact floor drifted through several
-	// tasks that each added protected routes without anyone re-running the
-	// walk: a stale 18 against a real count that had already reached 59
-	// before the task that finally re-ran the walk, 62 by the time it did,
-	// 69 once three more protected routes (admin households/metrics, the
-	// outbound message inspector, and read-only database browse) had landed
-	// between that measurement and Agreements' own GET, and 75 once the six
-	// Agreements write routes joined the GET -- the vacuous-pass risk this
-	// comment warns about, realised slowly instead of all at once. Whenever
-	// a route is added, re-run the walk and set this to what it reports,
-	// not to whatever seems like enough of an increase.
+	// 75 is this walk's own re-measured output. Don't bump it by hand or
+	// guess at an increase: this floor has drifted stale before, silently,
+	// as routes were added without re-running the walk. Whenever a route is
+	// added, re-run the walk and set this to exactly what it reports.
 	//
-	// Raising this number is not what would catch a single route losing its
-	// session guard -- chi.Walk enumerates it into checked either way. The
-	// per-route `rec.Code != http.StatusUnauthorized` assertion inside the
-	// loop above is what catches that. This floor's own job is the vacuous
-	// pass the comment above it already names: a walk that silently stopped
+	// Raising this number does not catch a single route losing its session
+	// guard -- the per-route assertion above does that. This floor's only
+	// job is catching a vacuous pass: a walk that silently stopped
 	// enumerating routes at all.
 	if checked < 75 {
 		t.Fatalf("checked %d protected routes, want at least 75 -- "+
@@ -265,36 +251,30 @@ func TestEveryProtectedRouteRejectsAnUnauthenticatedCaller(t *testing.T) {
 	}
 }
 
-// TestEveryMutatingRouteRequiresCSRF is the CSRF guard's sibling of the same
-// two matrices: it walks the live router and, for every mutating route,
-// sends a request carrying a *valid* session cookie but no X-CSRF-Token
-// header (and no csrf_token cookie), and asserts 403 CSRF_INVALID.
-// TestCSRFIsRequiredForMutatingRequests above already pins the missing-
-// header and mismatched-header cases concretely on one route (sign-out);
-// this walk is the exhaustive check that no other mutating route was wired
-// outside the requireCSRF group.
+// TestEveryMutatingRouteRequiresCSRF walks the live router and, for every
+// mutating route, sends a request with a *valid* session cookie but no
+// X-CSRF-Token header or csrf_token cookie, asserting 403 CSRF_INVALID.
+// TestCSRFIsRequiredForMutatingRequests above pins the missing- and
+// mismatched-header cases concretely on sign-out; this is the exhaustive
+// check that no other mutating route was wired outside the requireCSRF
+// group.
 //
 // The three public /auth/* routes and everything under /invites/ are
-// skipped -- not via some second allowlist, but because they are
-// structurally pre-CSRF: router.go never wraps them in requireCSRF at all
-// (there is no session yet to fixate before one exists), so calling them
-// without a header succeeds or fails on their own terms, never with
-// CSRF_INVALID.
+// skipped because they are structurally pre-CSRF: router.go never wraps
+// them in requireCSRF (there's no session yet to fixate), so they succeed
+// or fail on their own terms, never with CSRF_INVALID.
 func TestEveryMutatingRouteRequiresCSRF(t *testing.T) {
 	env := newTestEnv(t)
 	// The owner is made a platform admin so this walk can reach the CSRF
-	// check on the /admin subtree at all. router.go stacks requireCSRF
-	// INNERMOST there, behind requirePlatformAdmin, so that a forged admin
-	// request still writes an audit row -- which means a caller with no
-	// platform_admins row meets the 404 first and this matrix would assert
-	// nothing about CSRF on those routes.
+	// check on the /admin subtree: router.go stacks requireCSRF INNERMOST
+	// there, behind requirePlatformAdmin, so a forged admin request still
+	// writes an audit row. Without this, a non-admin caller hits 404 first
+	// and the matrix asserts nothing about CSRF on those routes.
 	//
-	// Do not delete this line to "simplify the fixture": it is what keeps
-	// POST /api/v1/admin/session inside the walk instead of allowlisted out
-	// of it. Granting platform admin is safe for every OTHER assertion here
-	// because it changes the behaviour of exactly one middleware --
-	// requirePlatformAdmin is IsPlatformAdmin's only caller, and nothing
-	// else in non-test code reads platform_admins.
+	// Don't delete this line: it keeps POST /api/v1/admin/session inside the
+	// walk instead of allowlisted out. It's safe for every other assertion
+	// here because it changes only requirePlatformAdmin's behaviour --
+	// nothing else in non-test code reads platform_admins.
 	env.makePlatformAdmin(t, env.ownerEmail)
 	session, _ := env.signIn(t, env.ownerEmail, env.ownerPassword)
 
@@ -352,30 +332,24 @@ func TestEveryMutatingRouteRequiresCSRF(t *testing.T) {
 		t.Fatalf("chi.Walk: %v", err)
 	}
 	t.Logf("checked %d mutating routes", checked)
-	// 50 is this walk's own re-measured output, never a number to bump by
-	// hand -- the identical reasoning the 75 floor above states in full:
-	// this exact floor drifted the same way: a stale 11 against a real
-	// count that had already reached 41 before the walk was finally
-	// re-run, 44 when it was, and 50 once the six Agreements writes joined
-	// the mutating surface. Whenever a route is added, re-run the walk and
-	// set this to what it reports.
+	// 50 is this walk's own re-measured output. Don't bump it by hand or
+	// guess at an increase -- same reasoning as the 75 floor above: it has
+	// drifted stale before. Whenever a route is added, re-run the walk and
+	// set this to exactly what it reports.
 	if checked < 50 {
 		t.Fatalf("checked %d mutating routes, want at least 50 -- "+
 			"the walk may not be enumerating routes correctly", checked)
 	}
 }
 
-// --- fix round 3 -----------------------------------------------------------
+// --- session cookie refresh and oversized-body regressions -----------------
 
-// TestSessionCookiesSlideWhenExtended pins the fix for the missing cookie
-// refresh: requireSession already extended the database row when a session
-// drifted inside its extension window, but never re-issued the cookies
-// carrying that new expiry, so the browser discarded hearth_session (and
-// csrf_token, set with the identical fixed lifetime) on the original
-// sign-in-plus-30-days schedule no matter how actively the session was
-// used. A request made inside the window must now come back with a
-// refreshed Set-Cookie for both, with the same token values and a later
-// expiry.
+// TestSessionCookiesSlideWhenExtended pins that when requireSession extends
+// a session inside its extension window, it also re-issues hearth_session
+// and csrf_token with the new expiry: otherwise the browser drops both on
+// the original sign-in-plus-30-days schedule, however active the session
+// is. A request inside the window must come back with a refreshed
+// Set-Cookie for both, same token values, later expiry.
 func TestSessionCookiesSlideWhenExtended(t *testing.T) {
 	clk := &movableClock{now: time.Now().UTC()}
 	env := newTestEnvWithClock(t, clk)
@@ -419,12 +393,11 @@ func TestSessionCookiesSlideWhenExtended(t *testing.T) {
 	}
 }
 
-// TestSignInRejectsAnOversizedBody pins the fix for the unbounded body read:
-// a body over the shared size limit must be rejected with 413 before it is
-// ever handed to json.Decode, let alone SignIn. Deliberately tested on a
-// public route -- sign-in is reachable pre-auth and pre-CSRF, which is
-// exactly where an unbounded read is most dangerous: nothing has gated the
-// request yet.
+// TestSignInRejectsAnOversizedBody pins that a body over the shared size
+// limit is rejected with 413 before it ever reaches json.Decode, let alone
+// SignIn. Tested on a public route on purpose -- sign-in is reachable
+// pre-auth and pre-CSRF, exactly where an unbounded read is most dangerous
+// since nothing has gated the request yet.
 func TestSignInRejectsAnOversizedBody(t *testing.T) {
 	env := newTestEnv(t)
 
@@ -438,11 +411,12 @@ func TestSignInRejectsAnOversizedBody(t *testing.T) {
 	assertErrorResponse(t, rec, http.StatusRequestEntityTooLarge, "PAYLOAD_TOO_LARGE")
 }
 
-// --- Task 28: self-serve sign-up --------------------------------------------
+// --- self-serve sign-up -----------------------------------------------------
 
-// The HTTP half of the indistinguishability property. The service-level test
-// (usecase/signup_test.go) pins the read sequence; this pins what a caller can
-// actually see.
+// TestSignUpAnswersIdenticallyForEveryAddress is the HTTP half of the
+// indistinguishability property. The service-level test
+// (usecase/signup_test.go) pins the read sequence; this pins what a caller
+// can actually see.
 func TestSignUpAnswersIdenticallyForEveryAddress(t *testing.T) {
 	env := newTestEnv(t)
 
@@ -462,13 +436,13 @@ func TestSignUpAnswersIdenticallyForEveryAddress(t *testing.T) {
 	}
 }
 
-// Repeating the same request past the hourly limit must not change the
-// answer. 5 attempts, not more: every request through env.do shares the same
-// fixed RemoteAddr (see TestSignUpPassesThroughThePerIPLimiter's doc comment),
-// so this loop is already spending this test's own per-IP budget
-// (signUpRequestsPerIPPerHour) as well as the per-address one this test is
-// actually about -- a 6th call here would hit the per-IP limiter instead and
-// prove nothing about the per-address limit this test exists to check.
+// TestSignUpStaysSilentPastTheRateLimit: repeating the same request past
+// the hourly limit must not change the answer. 5 attempts, not more:
+// env.do shares one fixed RemoteAddr (see
+// TestSignUpPassesThroughThePerIPLimiter's doc comment), so this loop
+// already spends this test's per-IP budget as well as the per-address one
+// it's actually testing -- a 6th call would hit the per-IP limiter instead
+// and prove nothing about the per-address limit.
 func TestSignUpStaysSilentPastTheRateLimit(t *testing.T) {
 	env := newTestEnv(t)
 	for i := 0; i < 5; i++ {
@@ -480,26 +454,23 @@ func TestSignUpStaysSilentPastTheRateLimit(t *testing.T) {
 	}
 }
 
-// TestSignUpPassesThroughThePerIPLimiter is unlike every other sign-up test in
-// this file: it proves the router's *wiring*, not the limiter type in
-// isolation (middleware_ratelimit_test.go already covers ipRateLimiter and
-// rateLimitByIP directly). Every other sign-up test here sends too few
-// requests to ever reach signUpRequestsPerIPPerHour, so none of them would
-// notice if router.go's su.Use(rateLimitByIP(...)) line were ever deleted.
-// This one sends enough to find out.
+// TestSignUpPassesThroughThePerIPLimiter proves the router's *wiring*, not
+// the limiter type in isolation (middleware_ratelimit_test.go covers
+// ipRateLimiter and rateLimitByIP directly). Every other sign-up test here
+// sends too few requests to reach signUpRequestsPerIPPerHour, so none would
+// notice if router.go's su.Use(rateLimitByIP(...)) line were ever deleted --
+// this one sends enough to find out.
 //
-// httptest.NewRequest gives every request in this file the same fixed
-// RemoteAddr, so repeated calls through env.do share one bucket exactly as a
-// real repeat caller would.
+// httptest.NewRequest gives every request here the same fixed RemoteAddr,
+// so repeated env.do calls share one bucket like a real repeat caller.
 func TestSignUpPassesThroughThePerIPLimiter(t *testing.T) {
 	env := newTestEnv(t)
 
-	// signUpRequestsPerIPPerHour (router.go) is unexported and this package is
-	// httpadapter_test, so its value is repeated here as a literal -- keep the
-	// two in lockstep if that constant ever changes. Requests beyond
-	// signupPerHourLimit (3, per-address) for this one address are still
-	// silently declined by SignupService.Request itself and still answer 202
-	// -- only the per-IP limiter answers 429, and only past this count.
+	// signUpRequestsPerIPPerHour (router.go) is unexported, so its value is
+	// repeated here as a literal -- keep both in lockstep. Requests beyond
+	// signupPerHourLimit (3, per-address) for this one address are silently
+	// declined by SignupService.Request itself and still answer 202; only
+	// the per-IP limiter answers 429, past this count.
 	const perIPLimit = 5
 	for i := 0; i < perIPLimit; i++ {
 		rec := env.do(http.MethodPost, "/api/v1/auth/sign-up",
@@ -514,22 +485,20 @@ func TestSignUpPassesThroughThePerIPLimiter(t *testing.T) {
 	assertErrorResponse(t, rec, http.StatusTooManyRequests, "RATE_LIMITED")
 }
 
-// TestClosedSignUpsStillCountAgainstTheIPLimiter pins the ordering router.go's
-// own comment insists on: su.Use(rateLimitByIP(...)) sits OUTSIDE
-// su.Use(requireFeature(...)) in the sign-up group, not inside it, so a
-// closed sign-up route cannot become an unmetered way to make flag lookups.
+// TestClosedSignUpsStillCountAgainstTheIPLimiter pins the ordering
+// router.go insists on: su.Use(rateLimitByIP(...)) sits OUTSIDE
+// su.Use(requireFeature(...)) in the sign-up group, so a closed sign-up
+// route can't become an unmetered way to probe flag lookups.
 //
-// Sending signUpRequestsPerIPPerHour closed requests and checking they all
-// answer 404 would not, on its own, distinguish "the limiter still runs
-// first and hasn't tripped yet" from "requireFeature short-circuits before
-// the limiter is ever reached" -- both look identical for the first five
-// requests. The sixth request is what tells them apart: if the limiter is
-// still outermost, its counter was incremented by all five closed requests
-// and the sixth answers 429, exactly as
-// TestSignUpPassesThroughThePerIPLimiter's open-signups version does. If the
-// two .Use() lines were ever swapped, every request here -- the sixth
-// included -- would answer 404 forever, because requireFeature would refuse
-// the request before the limiter's counter ever saw it.
+// Five closed 404s alone can't tell "the limiter hasn't tripped yet" from
+// "requireFeature short-circuits before the limiter runs" -- both look
+// identical for five requests. The sixth tells them apart: if the limiter
+// is still outermost, its counter was already incremented by the first
+// five, so the sixth answers 429 (as
+// TestSignUpPassesThroughThePerIPLimiter's open-signups version does). If
+// the two .Use() lines were swapped, every request would answer 404
+// forever, since requireFeature refuses before the limiter's counter sees
+// it.
 func TestClosedSignUpsStillCountAgainstTheIPLimiter(t *testing.T) {
 	env := newTestEnv(t)
 	if err := env.featureFlags.SetGlobal(context.Background(),
@@ -551,11 +520,11 @@ func TestClosedSignUpsStillCountAgainstTheIPLimiter(t *testing.T) {
 	assertErrorResponse(t, rec, http.StatusTooManyRequests, "RATE_LIMITED")
 }
 
-// signUpMeBundle mirrors the shape of meResponseBody (auth_handlers.go) for
-// decoding the sign-up completion response. meResponseBody itself is
-// unexported outside package httpadapter -- this package is httpadapter_test
-// -- which is why householdResponse (household_api_test.go) exists as the
-// identical kind of local mirror for GET /household.
+// signUpMeBundle mirrors the shape of meResponseBody (auth_handlers.go) to
+// decode the sign-up completion response. meResponseBody is unexported
+// outside package httpadapter, which is why householdResponse
+// (household_api_test.go) exists as the same kind of local mirror for GET
+// /household.
 type signUpMeBundle struct {
 	Household  householdResponse `json:"household"`
 	Membership struct {
@@ -587,12 +556,12 @@ func TestSignUpPreviewAndComplete(t *testing.T) {
 		if body["email"] != "founder@example.test" {
 			t.Fatalf("email = %q, want founder@example.test", body["email"])
 		}
-		// CONTROLLER RULING R3: the create-household screen needs channel
-		// alongside email (usecase.SignupPreview's own doc comment). The
-		// Telegram-channel shape -- empty email, channel "telegram" -- is
-		// covered separately by TestSignUpPreviewShowsTelegramChannelWithNoEmail
-		// (telegram_api_test.go), since building that row needs a fake
-		// SignupRepository rather than this file's real-Postgres testEnv.
+		// The create-household screen needs channel alongside email
+		// (usecase.SignupPreview's doc comment). The Telegram-channel shape --
+		// empty email, channel "telegram" -- is covered separately by
+		// TestSignUpPreviewShowsTelegramChannelWithNoEmail (telegram_api_test.go),
+		// since building that row needs a fake SignupRepository rather than
+		// this file's real-Postgres testEnv.
 		if body["channel"] != "email" {
 			t.Fatalf("channel = %q, want email", body["channel"])
 		}
@@ -622,9 +591,8 @@ func TestSignUpPreviewAndComplete(t *testing.T) {
 	// JPY is a well-formed, active ISO 4217 code -- unlike ZZZ above -- but it
 	// has zero minor units, and domain.Money.String() hard-codes two decimal
 	// places. GET /api/v1/currencies never offers it (see
-	// TestCurrenciesIsPublicAndOnlyOffersTwoMinorUnitCodes), but this proves
-	// the same rule holds for a client that posts the code directly, bypassing
-	// the form's own currency list.
+	// TestCurrenciesIsPublicAndOnlyOffersTwoMinorUnitCodes); this proves the
+	// same rule holds for a client posting the code directly.
 	t.Run("a currency Money cannot render is 422", func(t *testing.T) {
 		rec := env.do(http.MethodPost, "/api/v1/auth/sign-up/"+token+"/complete", map[string]string{
 			"householdName": "Ade & Kris", "displayName": "Ade", "primaryCurrency": "JPY",
@@ -730,8 +698,9 @@ func TestCurrenciesIsPublicAndOnlyOffersTwoMinorUnitCodes(t *testing.T) {
 	}
 }
 
-// Sign-up is pre-auth and pre-session, so it must not require CSRF -- there is
-// no csrf_token cookie to double-submit yet.
+// TestSignUpRoutesDoNotRequireCSRF: sign-up is pre-auth and pre-session, so
+// it must not require CSRF -- there is no csrf_token cookie to
+// double-submit yet.
 func TestSignUpRoutesDoNotRequireCSRF(t *testing.T) {
 	env := newTestEnv(t)
 	rec := env.do(http.MethodPost, "/api/v1/auth/sign-up", map[string]string{"email": "nocsrf@example.test"})
@@ -741,13 +710,12 @@ func TestSignUpRoutesDoNotRequireCSRF(t *testing.T) {
 }
 
 // TestSignInPassesThroughThePerIPLimiter proves the router's wiring for the
-// sign-in limiter, the same way TestSignUpPassesThroughThePerIPLimiter does for
-// sign-up. Every sign-in attempt runs a full argon2id derivation -- a decoy for
-// an unknown address, so the answer cannot reveal who has an account -- which
-// makes an unmetered sign-in route a way for a stranger to spend the box's CPU
-// and memory. Unknown addresses are used on purpose: they never trip the
-// per-household lockout, so the only thing that can answer 429 here is the
-// per-IP limiter.
+// sign-in limiter, the same way TestSignUpPassesThroughThePerIPLimiter does
+// for sign-up. Every sign-in attempt runs a full argon2id derivation (a
+// decoy so an unknown address can't reveal whether it has an account),
+// which makes an unmetered sign-in route a way to spend the box's CPU and
+// memory. Unknown addresses are used on purpose: they never trip the
+// per-household lockout, so only the per-IP limiter can answer 429 here.
 //
 // signInAttemptsPerIPPerWindow (router.go) is unexported, so its value is
 // repeated as a literal -- keep the two in lockstep.
@@ -772,11 +740,11 @@ func TestSignInPassesThroughThePerIPLimiter(t *testing.T) {
 	assertErrorResponse(t, rec, http.StatusTooManyRequests, "RATE_LIMITED")
 }
 
-// TestMagicLinkRequestPassesThroughThePerIPLimiter: the per-address limit in
-// AuthService is bypassed by varying the address, exactly as sign-up's is, so
+// TestMagicLinkRequestPassesThroughThePerIPLimiter: the per-address limit
+// in AuthService is bypassed by varying the address, like sign-up's, so
 // without a per-IP limit this route is an unmetered way to make the server
-// send mail. magicLinkRequestsPerIPPerHour (router.go) is repeated as a
-// literal for the same reason as above.
+// send mail. magicLinkRequestsPerIPPerHour is repeated as a literal for the
+// same reason as above.
 func TestMagicLinkRequestPassesThroughThePerIPLimiter(t *testing.T) {
 	env := newTestEnv(t)
 
@@ -794,20 +762,20 @@ func TestMagicLinkRequestPassesThroughThePerIPLimiter(t *testing.T) {
 	assertErrorResponse(t, rec, http.StatusTooManyRequests, "RATE_LIMITED")
 }
 
-// TestSignInRefusesABodyThatIsNotDeclaredJSON closes login CSRF. A page on any
-// other site can auto-submit an HTML form to /auth/sign-in with
-// enctype="text/plain", and a form field named `{"email":"…","password":"…","x":"`
-// with value `"}` produces a body that is valid JSON. SameSite=Lax stops the
+// TestSignInRefusesABodyThatIsNotDeclaredJSON closes a login-CSRF hole: a
+// page on another site can auto-submit an HTML form to /auth/sign-in with
+// enctype="text/plain" and a field named `{"email":"…","password":"…","x":"`
+// (value `"}`) to produce a body that is valid JSON. SameSite=Lax stops the
 // browser *sending* our cookie on that cross-site post, not *storing* the
-// session cookie that comes back -- so without this check the visitor is
-// silently signed in to the attacker's household and types their real
-// balances into it. An HTML form cannot send application/json without a CORS
-// preflight, and this API answers no preflight, so demanding the JSON media
-// type is what makes the form unable to reach the handler at all.
+// session cookie that comes back, so without this check the visitor is
+// silently signed into the attacker's household. An HTML form can't send
+// application/json without a CORS preflight, which this API never answers,
+// so demanding the JSON media type keeps the form from reaching the
+// handler at all.
 //
-// The credentials here are the owner's real ones on purpose: the request must
-// be refused for its shape, not because the password was wrong, and it must
-// leave no session cookie behind.
+// The credentials here are the owner's real ones on purpose: the refusal
+// must be for the request's shape, not a wrong password, and it must leave
+// no session cookie behind.
 func TestSignInRefusesABodyThatIsNotDeclaredJSON(t *testing.T) {
 	env := newTestEnv(t)
 

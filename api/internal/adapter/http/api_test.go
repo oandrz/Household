@@ -24,39 +24,30 @@ import (
 )
 
 // invitePreAuthRoutes is the exact, complete set of routes reached before any
-// session exists at all: GET .../invites/{token} (the preview) and POST
-// .../invites/{token}/accept (mutating, but pre-auth by design -- there is no
-// caller identity yet to check a session, a CSRF token or ownership against).
+// session exists: GET .../invites/{token} (preview) and POST
+// .../invites/{token}/accept (mutating but pre-auth by design -- there is no
+// caller identity yet to check a session, CSRF or ownership against).
 //
-// The three route-walk matrices that reference this map --
-// TestEveryProtectedRouteRejectsAnUnauthenticatedCaller and
-// TestEveryMutatingRouteRequiresCSRF in auth_api_test.go, and
-// TestOwnerOnlyRoutesRejectALimitedMember in household_api_test.go -- name
-// these two routes explicitly rather than skipping anything matching a
-// "/api/v1/invites/" prefix, which is what each used to do. A prefix skip
-// silently exempts *any* future route
-// added under that prefix from whichever guard the matrix checks -- a
-// mutating admin route added under /invites/ later would be auto-exempt from
-// the CSRF and owner checks with no test ever noticing. Naming the two
-// routes that actually exist means a third one added later is walked and
-// checked like every other route, not quietly waved through.
+// TestEveryProtectedRouteRejectsAnUnauthenticatedCaller,
+// TestEveryMutatingRouteRequiresCSRF (auth_api_test.go) and
+// TestOwnerOnlyRoutesRejectALimitedMember (household_api_test.go) name these
+// two routes explicitly instead of skipping any "/api/v1/invites/" prefix:
+// a prefix skip would silently exempt a future route under it from whichever
+// guard the matrix checks, with no test ever noticing.
 var invitePreAuthRoutes = map[string]bool{
 	"GET /api/v1/invites/{token}":         true,
 	"POST /api/v1/invites/{token}/accept": true,
 }
 
-// movableClock is a controllable usecase.Clock. It has two callers, for two
-// different reasons: TestSessionCookiesSlideWhenExtended fast-forwards time
-// without sleeping to prove a session's cookies slide when the session is
-// extended near expiry, and TestOwnerSeesTheTwelveMonthTrend anchors the clock
-// to a stable instant inside the current month so the twelve-month trend
-// window it asserts on is exact.
+// movableClock is a controllable usecase.Clock, with two callers:
+// TestSessionCookiesSlideWhenExtended fast-forwards time to prove cookies
+// slide near expiry, and TestOwnerSeesTheTwelveMonthTrend pins it to a
+// stable instant for an exact twelve-month window.
 //
-// Both callers anchor on real now, and a third must too. Session expiry is
-// enforced by Postgres's now() inside GetLiveSession's WHERE clause, not by
-// this clock, so a test that pins this clock to an absolute past date still
-// signs in against real wall time -- and starts failing one SessionTTL after
-// it is written. That is not hypothetical; it is what happened here.
+// Both anchor on real now, and a third must too: session expiry is enforced
+// by Postgres's now() in GetLiveSession's WHERE clause, not by this clock.
+// Pinning it to an absolute past date still signs in against real wall time
+// and fails one SessionTTL later -- this has happened.
 type movableClock struct{ now time.Time }
 
 func (c *movableClock) Now() time.Time          { return c.now }
@@ -74,35 +65,35 @@ func (noopMailer) SendSignupForExistingAccount(context.Context, string, string) 
 	return nil
 }
 
-// noopInviteChats satisfies usecase.InviteChats the same way noopMailer
-// satisfies usecase.Mailer just above: this file's tests exercise the HTTP
-// layer's wiring and authorization for POST /household/invites/{id}/link,
-// not Telegram delivery, and there is no bot available in this test
-// binary's environment. It must not panic the way telegram_api_test.go's
-// unused* doubles do -- InviteService.NewLink calls SendLinkCancelled for
-// real whenever a test's invite was knocked before the route is called, and
-// a courtesy send is best-effort by design (NewLink's own doc comment), so
-// silently succeeding is the correct double here, not a loud failure.
+// noopInviteChats mirrors noopMailer: these tests exercise HTTP wiring and
+// authorization for POST /household/invites/{id}/link, not Telegram
+// delivery, and no bot exists in this test environment.
+//
+// Unlike telegram_api_test.go's unused* doubles, it must not panic:
+// InviteService.NewLink calls SendLinkCancelled for real when a test's
+// invite was knocked before the route runs, and that courtesy send is
+// best-effort by design (NewLink's doc comment), so silent success is
+// correct here.
 type noopInviteChats struct{}
 
 func (noopInviteChats) SendSignIn(context.Context, int64, string) error { return nil }
 func (noopInviteChats) SendLinkCancelled(context.Context, int64) error  { return nil }
 
-// signupMailer is a usecase.Mailer stub used only for SignupService, so tests
-// can recover the raw token a sign-up link carried -- exactly the same need
-// noopMailer's silence can't satisfy.
+// signupMailer is a usecase.Mailer stub used only for SignupService, so
+// tests can recover the raw token a sign-up link carried -- what
+// noopMailer's silence can't give them.
 //
-// SignupService.Request sends off the request path (see sendAsync in
-// usecase/signup.go), deliberately, so a slow relay cannot make one branch
-// measurably slower than another. That means the URL is not yet captured the
-// instant env.do returns; lastSignupToken (below) synchronizes on sent rather
-// than reading lastURL immediately, and mu guards the field because it is
-// written from that background goroutine and read from the test's.
+// SignupService.Request sends off the request path (sendAsync in
+// usecase/signup.go) so a slow relay can't make one branch measurably
+// slower than another. The URL is therefore not captured the instant
+// env.do returns: lastSignupToken (below) synchronizes on sent rather than
+// reading lastURL immediately, and mu guards the field since it's written
+// from that goroutine and read from the test's.
 //
 // Only SendSignupLink signals sent. TestSignUpAnswersIdenticallyForEveryAddress
-// exercises both the fresh-address and already-registered branches in the same
-// test; if SendSignupForExistingAccount also signalled, a lastSignupToken call
-// could wake on that send instead and read the wrong (or an empty) URL.
+// exercises both branches (fresh address and already-registered) in one
+// test; if SendSignupForExistingAccount also signalled, lastSignupToken
+// could wake on the wrong send and read a stale or empty URL.
 type signupMailer struct {
 	mu      sync.Mutex
 	lastURL string
@@ -146,27 +137,26 @@ type testEnv struct {
 	limitedPassword   string
 	limitedMembership string
 
-	// moneyLimitedEmail is a limited member who holds the money capability --
-	// the state Settings' "off for kids by default" switch produces when an
+	// moneyLimitedEmail is a limited member holding the money capability --
+	// the state Settings' "off for kids by default" switch produces once an
 	// owner turns Money on for a child.
 	//
-	// It exists because env.limitedEmail holds only calendar and chores, so
-	// every accounts write route would refuse them at requireCapability and
-	// TestOwnerOnlyRoutesRejectALimitedMember would pass without ever
-	// exercising requireOwner -- a green that proves nothing about the guard
-	// it is named after.
+	// It exists because env.limitedEmail holds only calendar and chores:
+	// every accounts write route would refuse them at requireCapability
+	// before ever reaching requireOwner, making
+	// TestOwnerOnlyRoutesRejectALimitedMember a green that proves nothing
+	// about the guard it's named for.
 	moneyLimitedEmail    string
 	moneyLimitedPassword string
 
 	signupMailer *signupMailer
 
-	// These four are repositories the env already wires into the router, kept
-	// so a test can reach the database behind the API. The admin tests need
-	// all four: there is deliberately no HTTP route that creates a platform
-	// admin; a test that asserts on the audit log must not read it through a
-	// route that is itself audited; and featureFlags lets
-	// TestAdminLookupFailureIs500NotHidden rebuild a complete AdminService
-	// with only its Admins port swapped for a broken one.
+	// These four are repositories the env already wires into the router, so
+	// a test can reach the database behind the API. Admin tests need all
+	// four: no HTTP route creates a platform admin; a test asserting on the
+	// audit log must not read it through a route that is itself audited;
+	// and featureFlags lets TestAdminLookupFailureIs500NotHidden rebuild a
+	// full AdminService with only its Admins port swapped for a broken one.
 	users     usecase.UserRepository
 	apiTokens usecase.APITokenRepository
 	// telegramAccounts lets a test bind a chat directly: binding one through
@@ -191,18 +181,15 @@ type testEnv struct {
 }
 
 // routerWithMemberships builds a second router sharing every dependency
-// env.router has except Memberships, which is swapped for m. It exists for
+// env.router has except Memberships, swapped for m. It exists for
 // TestMarriageRouteRejectsALimitedMemberHoldingMarriage: requireSession
 // resolves scope.Membership through deps.Memberships.ByUser
-// (middleware_session.go), and that is the one seam this codebase's own
-// "every service is testable against in-memory doubles" convention
-// (CLAUDE.md) lets a test substitute to construct a caller identity no real
-// write path can produce -- see that test's own comment for why three
-// independent layers (domain.NewMembership, usecase.MemberService, and
-// Postgres' own limited_members_have_no_marriage CHECK constraint) all
-// refuse to let a real request build this state. A router built fresh per
-// call, serving one request in one test, is why swapping the whole port
-// unconditionally is safe here: nothing else ever sees it.
+// (middleware_session.go), the one seam the "every service is testable
+// against in-memory doubles" convention (CLAUDE.md) lets a test use to
+// construct a caller identity no real write path can produce -- see that
+// test's own comment for why three independent layers all refuse to build
+// this state for real. Swapping the whole port unconditionally is safe
+// because this router is built fresh per call and serves only one request.
 func (env *testEnv) routerWithMemberships(m usecase.MembershipRepository) http.Handler {
 	d := env.deps
 	d.Memberships = m
@@ -214,12 +201,10 @@ func newTestEnv(t *testing.T) *testEnv {
 	return newTestEnvWith(t, clock.System{}, nil)
 }
 
-// newTestEnvWithClock is newTestEnv's more general form, used by the two
-// tests that need control over the clock rather than the real wall clock
-// newTestEnv gives everything else: TestSessionCookiesSlideWhenExtended
-// fast-forwards time to prove a session's cookies slide when it's extended,
-// and TestOwnerSeesTheTwelveMonthTrend pins the clock so its twelve-month
-// window is a fixed, assertable range.
+// newTestEnvWithClock is newTestEnv's more general form, for the two tests
+// that need control over the clock instead of the real wall clock
+// newTestEnv gives everything else -- see movableClock's doc comment for
+// which tests and why.
 func newTestEnvWithClock(t *testing.T, clk usecase.Clock) *testEnv {
 	t.Helper()
 	return newTestEnvWith(t, clk, nil)
@@ -304,9 +289,9 @@ func newTestEnvWith(t *testing.T, clk usecase.Clock, outbox usecase.MailOutbox) 
 		Households:    households,
 		Spaces:        spaces,
 		Notifications: notifications,
-		// Wired here as well as in main.go on purpose: this file builds its
-		// own Deps, and a dependency added to one and not the other is how
-		// milestone 1 shipped routes that 500ed only under test.
+		// Wired here as well as in main.go on purpose: this file builds its own
+		// Deps, and a dependency added to one and not the other has shipped
+		// routes that 500ed only under test.
 		Holdings: postgres.NewHoldingRepo(db),
 	})
 	signupSvc := usecase.NewSignupService(usecase.SignupDeps{
@@ -361,11 +346,10 @@ func newTestEnvWith(t *testing.T, clk usecase.Clock, outbox usecase.MailOutbox) 
 		Households:   households,
 		Members:      memberships,
 		FX:           fxProvider,
-		// Goals is read only by BudgetService.RollOver (Task 9's route) to
+		// Goals is read only by BudgetService.RollOver (POST .../rollover), to
 		// fetch the target goal before writing a contribution -- wired here,
-		// alongside Deps.Goals below, even though no route in this task
-		// reaches it, because a nil port reachable from an already-wired
-		// service is a panic waiting for the next task to trip over.
+		// alongside Deps.Goals below, because leaving it out makes that route
+		// panic on a nil port.
 		Goals: goalRepo,
 	})
 	billSvc := usecase.NewBillService(usecase.BillDeps{
@@ -496,7 +480,7 @@ func newTestEnvWith(t *testing.T, clk usecase.Clock, outbox usecase.MailOutbox) 
 	}
 
 	// The limited member is given real credentials (unlike the design's
-	// credential-less child case) specifically so tests 10 and 11 can sign
+	// credential-less child case) so the limited-member refusal tests can sign
 	// in as them through the public API, the same way a browser would.
 	env.limitedEmail = "ethan@hearth.family"
 	env.limitedPassword = "ilovechores123"
@@ -609,12 +593,11 @@ func (env *testEnv) authedGet(t *testing.T, path string, session *http.Cookie) *
 	return rec
 }
 
-// mustCreateAccount is test setup, not an assertion in itself: it POSTs
-// /accounts as whichever caller is passed in and fails the test immediately
-// if that didn't succeed, so a broken create surfaces at the setup line
-// rather than as a confusing failure in whatever the real test goes on to
-// check. 201, not 200: POST /accounts creates a row, the same as POST
-// /spaces and POST /household/members/invite.
+// mustCreateAccount is test setup, not an assertion: it POSTs /accounts as
+// whichever caller is passed in and fails the test immediately if that
+// didn't succeed, so a broken create surfaces at the setup line, not as a
+// confusing failure later. Expects 201, not 200: POST /accounts creates a
+// row, like POST /spaces and POST /household/members/invite.
 func (env *testEnv) mustCreateAccount(t *testing.T, session, csrf *http.Cookie, body map[string]any) {
 	t.Helper()
 	rec := env.authed(t, http.MethodPost, "/api/v1/accounts", body, session, csrf)
@@ -694,12 +677,12 @@ func (env *testEnv) auditEntries(t *testing.T, limit int) []usecase.AdminAuditEn
 // signIn signs in through the public API, exactly as a browser would, and
 // returns the two cookies the response sets.
 //
-// Each call arrives from its own client address. Role-matrix tests sign in
-// dozens of times per environment, and from one address they would trip the
-// per-IP sign-in limiter (router.go) -- a real limit on a real client, not
-// something a setup helper should be able to exhaust. The limiter's wiring is
-// pinned separately by TestSignInPassesThroughThePerIPLimiter, which uses
-// env.do's single fixed address on purpose.
+// Each call gets its own client address: role-matrix tests sign in dozens
+// of times per environment, and one address would trip the per-IP sign-in
+// limiter (router.go) -- a real limit a setup helper shouldn't be able to
+// exhaust. The limiter's own wiring is pinned separately by
+// TestSignInPassesThroughThePerIPLimiter, which uses env.do's single fixed
+// address on purpose.
 func (env *testEnv) signIn(t *testing.T, email, password string) (session, csrf *http.Cookie) {
 	t.Helper()
 	env.signInSeq++

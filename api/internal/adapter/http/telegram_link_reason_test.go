@@ -7,11 +7,9 @@ import (
 )
 
 // TestTelegramLinkReasonMessage pins the one place a usecase.TelegramLinkStatus
-// refusal code becomes the sentence a member reads. It is unexported and has
-// no HTTP surface of its own -- handleTelegramLinkStatus's test coverage
-// proves the route compiles and returns 200, not that the two codes map to
-// the two sentences the confirm 409s use. That is what this test is for, and
-// it needs no container: it is a pure function.
+// refusal code becomes the sentence a member reads. handleTelegramLinkStatus's
+// own test only proves the route returns 200, not that the codes map to the
+// confirm 409 sentences -- this pure function needs no container to test that.
 func TestTelegramLinkReasonMessage(t *testing.T) {
 	tests := []struct {
 		name string
@@ -34,12 +32,10 @@ func TestTelegramLinkReasonMessage(t *testing.T) {
 			want: "",
 		},
 		{
-			// Fail closed on a code this function was not written to expect,
-			// the same rule a switch over any value it did not construct
-			// follows elsewhere in this codebase: never guess at a sentence
-			// for a case nobody named. Reason is `omitempty` on the wire, so
-			// "" here means the panel's own `reason ?? "..."` fallback
-			// renders instead of a raw code leaking to the screen.
+			// Fail closed: never guess a sentence for a code nobody named, the
+			// same rule any switch over an unconstructed value follows here.
+			// Reason is `omitempty` on the wire, so "" lets the panel's own
+			// fallback render instead of a raw code leaking to the screen.
 			name: "an unrecognised code answers empty rather than leaking the raw code",
 			code: "something-nobody-named",
 			want: "",

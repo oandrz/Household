@@ -13,36 +13,31 @@ import (
 )
 
 // signUpRequestsPerIPPerHour bounds one client's sign-up requests. The
-// per-address limit in SignupService is bypassed by varying the address; this is
-// what actually bounds outbound mail. 5 is generous for a household setting
-// itself up (one request, maybe a couple of retries) and far below what a loop
-// needs to be useful.
+// per-address limit in SignupService is bypassed by varying the address;
+// this is what actually bounds outbound mail. 5 is generous for a
+// household setting itself up and far below what a loop needs to be
+// useful.
 //
-// This limit must bind before usecase.SignupGlobalDailyLimit, the global
-// daily mail ceiling, and the arithmetic has to be checked whenever either
-// number changes: signUpRequestsPerIPPerHour * 24 is the most mail a single
-// IP can ever cause in a day while staying entirely within its own budget. If
-// that figure reaches the global ceiling, one address, never having been
-// rate-limited itself, can silently exhaust the platform's entire daily mail
-// budget -- and because the global ceiling's own failure mode is silent (every
-// sign-up still answers 202 and mails nothing, for up to a day, with no
-// caller-visible signal), nobody finds out from a complaint the way they would
-// from this limit's very loud, very local 429. The asymmetry is the whole
-// reason this limit exists: it must trip first, for one caller, long before
-// the shared ceiling ever could. TestSignUpRateLimitsCompose
-// (middleware_ratelimit_test.go) asserts the inequality so raising either
-// number in isolation fails a test instead of silently reopening this.
+// This must bind before usecase.SignupGlobalDailyLimit, the global daily
+// ceiling: signUpRequestsPerIPPerHour * 24 is the most mail one IP can
+// cause per day while staying inside its own budget. If that ever reaches
+// the global ceiling, one un-rate-limited address could silently exhaust
+// the platform's whole daily mail budget -- the global ceiling fails
+// silently (202, no mail, no signal) where this limit's 429 is loud and
+// local. Recheck the arithmetic whenever either number changes;
+// TestSignUpRateLimitsCompose (middleware_ratelimit_test.go) asserts the
+// inequality so raising either number in isolation fails a test instead of
+// silently reopening this.
 const signUpRequestsPerIPPerHour = 5
 
 // Deps carries everything the HTTP layer needs. Handlers receive their
 // collaborators through this struct rather than reaching for globals.
 //
 // Users and Memberships are raw repository ports, not routed through a
-// service, because no Task 12-15 service exposes what this layer needs from
-// them directly: GET /auth/me assembles its bundle from the user's own
-// profile (Users.ByID) and the session middleware resolves a caller's
-// Membership (Memberships.ByUser) to populate Scope. Every other Deps field
-// mirrors what the task brief names.
+// service, because no service exposes what this layer needs from them
+// directly: GET /auth/me assembles its bundle from the user's own profile
+// (Users.ByID), and the session middleware resolves a caller's Membership
+// (Memberships.ByUser) to populate Scope.
 type Deps struct {
 	Pinger       Pinger
 	Auth         *usecase.AuthService
@@ -77,26 +72,22 @@ type Deps struct {
 	// feature exists.
 	TelegramLink *usecase.TelegramLinkService
 	// Access serves the household access list (GET /household/access). Like
-	// Admin below, it is never nil in a real deployment: main.go constructs
-	// it unconditionally, behind no feature flag or optional config, unlike
-	// Telegram/TelegramLink above which are nil until a bot is configured.
-	// Unlike Admin, though, nothing outside its own handler reads it, so a
-	// nil Access would only ever panic that one route, not the rest of the
-	// authenticated surface.
+	// Admin below, it is never nil in a real deployment -- main.go
+	// constructs it unconditionally, unlike Telegram/TelegramLink above,
+	// which are nil until a bot is configured. Unlike Admin, though,
+	// nothing outside its own handler reads it, so a nil Access would only
+	// ever panic that one route, not the rest of the authenticated surface.
 	Access *usecase.AccessListService
 	// Admin and AdminReauth are the platform-operator surface's two
 	// services. Unlike Telegram above they are never nil in a real
 	// deployment: the /admin subtree is always routed, and
 	// requirePlatformAdmin's 404 -- not conditional registration -- is what
-	// hides it. Admin is required well beyond /admin, though: requireSession
-	// resolves flags through it on every authenticated request, before Scope
-	// is even built, so a nil Admin panics into recoverer's 500 across the
-	// entire authenticated surface -- household, spaces, accounts, money,
-	// the admin subtree itself, everything requireSession gates. The
-	// pre-session auth routes need it too, through buildMeResponse -- see its
-	// own doc comment in auth_handlers.go for which callers that is and why --
-	// since they run before a session exists to hand requireSession anything
-	// to check.
+	// hides it. Admin's blast radius reaches well beyond /admin, though:
+	// requireSession resolves flags through it on every authenticated
+	// request, before Scope is even built, so a nil Admin panics into
+	// recoverer's 500 across the entire authenticated surface. The
+	// pre-session auth routes need it too, through buildMeResponse -- see
+	// its own doc comment in auth_handlers.go.
 	Admin          *usecase.AdminService
 	AdminReauth    *usecase.AdminReauthService
 	AdminDirectory *usecase.AdminDirectoryService
@@ -158,14 +149,14 @@ func NewRouter(deps Deps) http.Handler {
 			// Public: no session exists yet.
 			//
 			// Sign-in and the magic-link request each get their own per-IP
-			// limiter, for two different reasons. Every sign-in attempt runs a
-			// full argon2id derivation -- a decoy one for unknown addresses, so
-			// the answer never reveals who has an account -- which makes an
-			// unmetered sign-in route a way for one stranger to spend the box's
-			// CPU. The magic-link request's per-address limit is bypassed by
-			// varying the address, exactly like sign-up's, so it needs a per-IP
-			// limit to stop being an unmetered way to send mail. Consume has
-			// none: it runs no argon2, sends nothing, and its token is 256 bits.
+			// limiter, for different reasons. Every sign-in attempt runs a full
+			// argon2id derivation -- a decoy one for unknown addresses, so the
+			// answer never reveals who has an account -- which makes an
+			// unmetered sign-in route a CPU-spend vector. The magic-link
+			// request's per-address limit is bypassed by varying the address,
+			// exactly like sign-up's, so without a per-IP limit it is an
+			// unmetered way to send mail. Consume needs none: no argon2, no
+			// mail sent, and its token is 256 bits.
 			//
 			// Separate instances, not one shared: a person who mistypes their
 			// password a few times must still be able to ask for a magic link.
@@ -188,11 +179,11 @@ func NewRouter(deps Deps) http.Handler {
 			auth.Group(func(su chi.Router) {
 				// deps.Clock.Now, not a bound method value: forming the method
 				// value would read deps.Clock immediately, while NewRouter is
-				// still building the route tree -- and some callers (health_test.go's
-				// Deps{Pinger: ...}) build a router with every other field left
-				// zero, deliberately, because they only exercise /healthz. A closure
-				// defers that read to request time, when every route's Deps is
-				// actually complete.
+				// still building the route tree, and some callers
+				// (health_test.go's Deps{Pinger: ...}) deliberately build a
+				// router with every other field left zero to exercise only
+				// /healthz. A closure defers that read to request time, when
+				// every route's Deps is actually complete.
 				now := func() time.Time { return deps.Clock.Now() }
 				// The limiter stays outermost: a closed sign-up route must
 				// not become an unmetered way to make flag lookups.
@@ -249,8 +240,8 @@ func NewRouter(deps Deps) http.Handler {
 
 				// Minting and revoking a token needs a browser session, not
 				// a token: a leaked token must not be able to make itself
-				// permanent (spec decision 7). requireCookieSession sits
-				// inside requireCSRF so the order reads guard-then-guard.
+				// permanent. requireCookieSession sits inside requireCSRF so
+				// the order reads guard-then-guard.
 				g.Group(func(m chi.Router) {
 					m.Use(requireCSRF)
 					m.Use(requireCookieSession)
@@ -288,8 +279,7 @@ func NewRouter(deps Deps) http.Handler {
 			// handler narrows a limited member to their own rows -- but only
 			// from a browser session: a leaked token that could list every
 			// member's token prefixes and chats would hand an attacker a map
-			// of the household's other credentials (spec decision 5). A GET,
-			// so no CSRF guard.
+			// of the household's other credentials. A GET, so no CSRF guard.
 			g.Group(func(a chi.Router) {
 				a.Use(requireCookieSession)
 				a.Get("/household/access", handleHouseholdAccess(deps))
@@ -316,10 +306,9 @@ func NewRouter(deps Deps) http.Handler {
 					// Creating, changing or removing a way into the
 					// household needs a browser session as well as an
 					// owner: a leaked API token must not be able to mint a
-					// co-owner, demote the other owner, or remove them
-					// (partner-invite spec decision 12, the reason behind
-					// ADR 7 rule 2). hearthctl is unaffected -- it signs in
-					// with a cookie.
+					// co-owner, demote the other owner, or remove them (ADR
+					// 7 rule 2). hearthctl is unaffected -- it signs in with
+					// a cookie.
 					o.Group(func(c chi.Router) {
 						c.Use(requireCookieSession)
 						c.Post("/household/members/invite", handleInviteMember(deps))
@@ -356,22 +345,21 @@ func NewRouter(deps Deps) http.Handler {
 			// Transactions requires money AND owner for reads as well as
 			// writes, which is deliberately unlike accounts above.
 			//
-			// A limited member's accounts view shows names with no amounts
-			// (accounts decision 5). Applied to a ledger that is a table whose
-			// every figure is blank, next to a "Spent this month" that has to
-			// be absent rather than zero -- a page that reads as broken. So
-			// for a limited member the money capability means "see which
-			// accounts this household has" and nothing further. Do not
-			// "simplify" this to match the accounts group.
+			// A limited member's accounts view shows names with no amounts.
+			// Applied to a ledger, every figure would be blank next to a
+			// "Spent this month" that has to be absent rather than zero -- a
+			// page that reads as broken. So for a limited member the money
+			// capability means "see which accounts this household has" and
+			// nothing further. Do not "simplify" this to match the accounts
+			// group.
 			g.Group(func(txn chi.Router) {
 				txn.Use(requireCapability(domain.CapMoney))
 				// The capability guard above is stacked on requireOwner below
-				// even though an owner without money is not a representable
-				// state today (domain.ValidateMembershipChange refuses it).
-				// This route must not lean on an invariant enforced in
-				// another layer for another reason: if that invariant were
-				// ever relaxed, this route would silently open with no
-				// failing test to catch it.
+				// even though an owner without money isn't representable
+				// today (domain.ValidateMembershipChange refuses it). This
+				// route must not lean on an invariant enforced elsewhere: if
+				// that invariant were ever relaxed, this route would
+				// silently open with no failing test to catch it.
 				txn.Use(requireOwner)
 
 				txn.Get("/transactions", handleListTransactions(deps))
@@ -397,14 +385,12 @@ func NewRouter(deps Deps) http.Handler {
 				})
 
 				// PUT /budgets/{month} gets its own CSRF group rather than
-				// joining the one above -- the task brief that introduced
-				// this route pinned this exact shape, and keeping it
-				// distinct means budgets and transactions guards can each
-				// change without touching the other's route list. POST
-				// .../rollover joins it: both are budget-month writes behind
-				// the same money+owner+CSRF stack, and there is no reason
+				// joining the one above, so budgets and transactions guards
+				// can each change without touching the other's route list.
+				// POST .../rollover joins it: both are budget-month writes
+				// behind the same money+owner+CSRF stack, with no reason
 				// for the two to diverge the way budgets and transactions
-				// were kept apart above.
+				// are kept apart.
 				txn.Group(func(w chi.Router) {
 					w.Use(requireCSRF)
 					w.Put("/budgets/{month}", handlePutBudgetMonth(deps))
@@ -436,13 +422,12 @@ func NewRouter(deps Deps) http.Handler {
 				})
 
 				// Holdings sit in the same money+owner group as
-				// transactions, goals and budgets, and for the reason the
-				// txn group's own comment above gives: a portfolio is a
-				// table whose every figure is money, so a limited member
-				// reading it with every number blanked would see a page that
-				// looks broken rather than a page that is private. 403 is
-				// the honest answer, and it means no redaction code exists
-				// here to forget to apply.
+				// transactions, goals and budgets, for the reason the txn
+				// group's comment above gives: a portfolio is a table whose
+				// every figure is money, so a limited member reading it with
+				// every number blanked would see a page that looks broken
+				// rather than private. 403 is the honest answer, with no
+				// redaction code here to forget to apply.
 				txn.Get("/holdings", handleListHoldings(deps))
 				// Registered beside the /holdings/{id}/... routes and not
 				// shadowed by them: chi prefers a static segment over a
@@ -505,12 +490,12 @@ func NewRouter(deps Deps) http.Handler {
 			})
 
 			// Marriage is parents-only, and its capability is refused to
-			// limited members in the domain (domain.ErrLimitedCannotHoldMarriage)
-			// -- so requireOwner is redundant here TODAY. It is stacked anyway,
-			// for the reason the money group's own comment above already gives
-			// (the txn group's requireCapability/requireOwner pairing): a route
-			// leaning on an invariant enforced in another layer for another
-			// reason opens silently the day that invariant is relaxed, with no
+			// limited members in the domain
+			// (domain.ErrLimitedCannotHoldMarriage) -- so requireOwner is
+			// redundant here today. It is stacked anyway, for the reason
+			// the txn group's requireCapability/requireOwner pairing gives
+			// above: a route leaning on an invariant enforced elsewhere
+			// opens silently the day that invariant is relaxed, with no
 			// failing test to catch it.
 			g.Group(func(m chi.Router) {
 				m.Use(requireCapability(domain.CapMarriage))
@@ -540,10 +525,10 @@ func NewRouter(deps Deps) http.Handler {
 					w.Put("/marriage/vision/{year}", handleSaveVision(deps))
 
 					// Each action is its own POST, not a patchable status, or
-					// saving a note could withdraw a proposal. Nothing is ever
-					// deleted (decision 9), so there is no DELETE, no restore
-					// route -- Restore is a propose with kind "add" (decision
-					// 18) -- and no 204 anywhere in this feature.
+					// saving a note could withdraw a proposal. Nothing is
+					// ever deleted, so there is no DELETE and no restore
+					// route -- restore is a propose with kind "add" -- and
+					// no 204 anywhere in this feature.
 					w.Post("/marriage/agreements/sections", handleCreateAgreementSection(deps))
 					w.Post("/marriage/agreements/starter-set", handleSeedStarterAgreementSections(deps))
 					w.Post("/marriage/agreements/proposals", handleProposeAgreementChange(deps))
@@ -558,31 +543,30 @@ func NewRouter(deps Deps) http.Handler {
 			// auditAdmin wraps it rather than each handler: a handler that
 			// forgets to log is the failure mode.
 			//
-			// requireCSRF is stacked at the subtree root, but INNERMOST of the
-			// three -- behind both admin guards. Each half of that is
-			// deliberate and neither survives on its own:
+			// requireCSRF is stacked at the subtree root, but INNERMOST of
+			// the three -- behind both admin guards. Each half of that
+			// placement is deliberate and neither survives alone.
 			//
-			// At the root, rather than around POST /session alone, every
-			// mutating admin route is CSRF-checked by construction. Nesting
-			// it around the one route that needs it today would leave a
-			// mutating route added to the granted group tomorrow with no CSRF
-			// guard at all and no test to notice. GET is exempt inside
-			// requireCSRF itself, so the reads are unaffected.
+			// At the root, rather than around POST /session alone, so every
+			// mutating admin route is CSRF-checked by construction: nesting
+			// it around only today's one route would leave a mutating route
+			// added to the granted group tomorrow with no CSRF guard and no
+			// test to notice. GET is exempt inside requireCSRF itself, so
+			// the reads are unaffected.
 			//
-			// Innermost, rather than ahead of the guards, so that a
-			// CSRF-rejected admin request still writes its audit row. A
+			// Innermost, rather than ahead of the guards, so a
+			// CSRF-rejected admin request still writes its audit row -- a
 			// cross-site forgery aimed at a real platform admin is exactly
-			// the event admin_audit_log exists to make visible, and with the
-			// CSRF check in front of auditAdmin it would be refused without
-			// leaving a trace. It also keeps requirePlatformAdmin's 404 as
-			// the first thing a signed-in non-admin meets, whatever they send
-			// or omit.
+			// what admin_audit_log exists to make visible, and a CSRF check
+			// in front of auditAdmin would refuse it without a trace. It
+			// also keeps requirePlatformAdmin's 404 as the first thing a
+			// signed-in non-admin meets, whatever they send or omit.
 			//
-			// The cost is paid by a test, not by the product:
-			// TestEveryMutatingRouteRequiresCSRF walks this subtree like any
-			// other and needs its caller to get past requirePlatformAdmin
-			// first, so it makes its owner a platform admin. See the comment
-			// on that line -- it is load-bearing, not scaffolding.
+			// The cost is paid by a test, not the product:
+			// TestEveryMutatingRouteRequiresCSRF walks this subtree and
+			// needs its caller to get past requirePlatformAdmin first, so it
+			// makes its owner a platform admin -- see the comment on that
+			// line.
 			g.Route("/admin", func(adm chi.Router) {
 				adm.Use(requirePlatformAdmin(deps))
 				adm.Use(auditAdmin(deps))
@@ -600,9 +584,9 @@ func NewRouter(deps Deps) http.Handler {
 					// subtree root, above requireAdminGrant, so every
 					// mutating route in this group is covered by
 					// construction -- see this file's own comment on the
-					// /admin subtree for why it is deliberately outermost
-					// of the three guards rather than nested around just
-					// these three routes.
+					// /admin subtree for why it sits at the subtree root,
+					// innermost of the three guards, rather than nested
+					// around just these three routes.
 					granted.Put("/flags/{key}", handleSetGlobalFlag(deps))
 					granted.Put("/flags/{key}/households/{householdID}", handleSetHouseholdFlag(deps))
 					granted.Delete("/flags/{key}/households/{householdID}", handleClearHouseholdFlag(deps))

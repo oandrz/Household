@@ -10,17 +10,17 @@ type adminSessionRequest struct {
 	Password string `json:"password"`
 }
 
-// handleAdminSession is the re-authentication. It answers 204: there is
-// nothing to tell the caller that they do not already know, and the grant
-// lives on the session row rather than in the response.
+// handleAdminSession is the re-authentication. It answers 204 -- there is
+// nothing new to tell the caller, and the grant lives on the session row,
+// not the response.
 //
-// The grant is written against the session this request authenticated with,
-// not against the user, so re-authenticating in one browser does not open
-// the surface in another that happens to hold a second live session for the
-// same operator. That session comes from the request context, never from
-// re-reading the cookie header: a request can carry a cookie beside a
-// different credential, and the grant must land on the session that was
-// actually checked, whatever order the guards in front of this run in.
+// The grant is written against the session THIS request authenticated with,
+// not the user, so re-authenticating in one browser cannot open the surface
+// on a second live session for the same operator. That session comes from
+// the request context, never a re-read of the cookie header -- a request
+// can carry a cookie beside a different credential, so the grant must land
+// on the session that was actually checked, whatever order the guards in
+// front of this run in.
 func handleAdminSession(deps Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		scope, ok := RequestScope(r)
@@ -31,7 +31,7 @@ func handleAdminSession(deps Deps) http.HandlerFunc {
 		// Checked before the password, so a request with no session behind
 		// it never spends one of the operator's re-auth attempts.
 		// requirePlatformAdmin already turns such a request away; this is
-		// the handler refusing to depend on that, not the line that keeps
+		// the handler not depending on that guard, not the line that keeps
 		// tokens out.
 		sessionHash, ok := requestSessionHash(r)
 		if !ok {

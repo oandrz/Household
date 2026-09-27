@@ -35,10 +35,9 @@ func agreementRoutes() []struct{ method, path string } {
 }
 
 // The decode targets below mirror agreement_handlers.go's DTOs field for
-// field. They are test-side copies rather than the handlers' own unexported
-// structs because this package is httpadapter_test, outside the package under
-// test -- the shape billResponseBody and transactionsListBody already use in
-// this directory.
+// field. They are test-side copies, not the handlers' own unexported structs,
+// because this package is httpadapter_test outside the package under test --
+// the shape billResponseBody and transactionsListBody already use here.
 type agreementLineBody struct {
 	ID     string `json:"id"`
 	Number int    `json:"number"`
@@ -101,11 +100,10 @@ type agreementsReadBody struct {
 	Agreements agreementsDocumentBody `json:"agreements"`
 }
 
-// mustReadAgreements is setup, not an assertion: a read that did not answer
-// 200 with a parseable body fails here rather than as a confusing empty
-// struct in whatever asserts on the document next. Decoding it is also what
-// proves the 2xx carries JSON at all -- apiFetch throws on an ok response it
-// cannot parse.
+// mustReadAgreements is setup, not an assertion: a read that fails to answer
+// 200 with a parseable body fails here, not as a confusing empty struct
+// later. Decoding it also proves the 2xx carries JSON at all -- apiFetch
+// throws on an ok response it cannot parse.
 func mustReadAgreements(t *testing.T, env *testEnv, session *http.Cookie) agreementsDocumentBody {
 	t.Helper()
 	rec := env.authedGet(t, "/api/v1/marriage/agreements", session)
@@ -124,11 +122,10 @@ func mustReadAgreements(t *testing.T, env *testEnv, session *http.Cookie) agreem
 // applied to this feature: every agreements route against no session, a
 // limited member, and an owner.
 //
-// The owner leg asserts only that NO GUARD refused. On newTestEnv's one-owner
-// household the read answers 200 and, once Task 8 routes them, the writes
-// answer 409, 404 or 400 -- each write's real status is its own test in Task
-// 8, and pinning it twice would make this matrix fail whenever a body shape
-// changed.
+// The owner leg asserts only that NO GUARD refused: on newTestEnv's
+// one-owner household the read answers 200 and the writes answer 409, 404
+// or 400 -- each write's real status has its own test below, and pinning it
+// twice here would make this matrix fail whenever a body shape changed.
 func TestAgreementRoutesRequireMarriageAndOwner(t *testing.T) {
 	env := newTestEnv(t)
 	for _, route := range agreementRoutes() {
@@ -149,14 +146,15 @@ func TestAgreementRoutesRequireMarriageAndOwner(t *testing.T) {
 	}
 }
 
-// requireCapability and requireOwner both answer 403 FORBIDDEN, so the matrix
-// above cannot say which one refused the limited member. Only a caller HOLDING
-// marriage without being an owner can see requireOwner, and three independent
-// layers refuse to build that membership (domain.NewMembership, MemberService,
-// and 00002_identity.sql's limited_members_have_no_marriage CHECK). So it is
-// doctored through the same membershipDouble seam
-// TestMarriageRouteRejectsALimitedMemberHoldingMarriage uses
-// (marriage_api_test.go:155), swapped in for this one request only.
+// requireCapability and requireOwner both answer 403 FORBIDDEN, so the
+// matrix above cannot say which one refused the limited member. Only a
+// caller HOLDING marriage without being an owner can see requireOwner, and
+// three independent layers refuse to build that membership naturally
+// (domain.NewMembership, MemberService, and 00002_identity.sql's
+// limited_members_have_no_marriage CHECK). So it is doctored through the
+// same membershipDouble seam
+// TestMarriageRouteRejectsALimitedMemberHoldingMarriage uses, swapped in for
+// this one request only.
 //
 // HouseholdID on the doctored membership must match env.householdID:
 // requireSession cross-checks it against the session row and answers 401 on a
@@ -185,26 +183,20 @@ func TestAgreementsRouteRejectsALimitedMemberHoldingMarriage(t *testing.T) {
 }
 
 // TestAgreementProposeRouteRejectsALimitedMemberHoldingMarriage extends the
-// doctored-membership pattern above to a WRITE route. Propose is the write
-// picked to isolate requireOwner for, because it is the one write with
-// nothing else beneath the HTTP layer to catch a missing guard: Sign's own
-// SQL only inserts a signature `WHERE ... m.role = 'owner'`
-// (queries/agreements.sql, SignAgreementProposal) and Withdraw's SQL refuses
-// unless the caller IS the proposer or the proposer has left ownership
-// (WithdrawAgreementProposal) -- but InsertAgreementProposal performs no
-// role check at all. If requireOwner were ever dropped from this group, or
-// the six writes moved to a sibling group that forgot it, Propose is the one
-// call a limited member could reach and have fully succeed: an arbitrary
-// proposal landed in the household's agreements document, nothing left to
-// refuse it.
+// doctored-membership pattern above to a WRITE route. Propose isolates
+// requireOwner because it is the only one of the six writes with no defense
+// left beneath the HTTP layer: SignAgreementProposal's SQL only inserts a
+// signature `WHERE ... m.role = 'owner'`, and WithdrawAgreementProposal's
+// SQL refuses unless the caller IS the proposer or the proposer has left
+// ownership -- but InsertAgreementProposal performs no role check at all.
+// Drop requireOwner here, or move Propose to a group that forgot it, and a
+// limited member could fully create an arbitrary proposal.
 //
-// The request carries a real CSRF cookie and a matching X-CSRF-Token header,
-// so of the three guards this route sits behind (requireCapability,
-// requireOwner, requireCSRF), only requireOwner is left able to answer here
-// -- the doctored membership holds CapMarriage, so capability passes, and
-// CSRF is satisfied on purpose. A bare status/code check on this one request
-// is therefore a real isolation of requireOwner, not a guess about which of
-// three guards fired.
+// The request carries a real CSRF cookie and matching X-CSRF-Token, so of
+// the three guards on this route only requireOwner is left able to answer:
+// the doctored membership holds CapMarriage, so requireCapability passes,
+// and CSRF is satisfied on purpose. The status/code check here is therefore
+// a real isolation of requireOwner, not a guess among three guards.
 func TestAgreementProposeRouteRejectsALimitedMemberHoldingMarriage(t *testing.T) {
 	env := newTestEnv(t)
 	session, csrf := env.signIn(t, env.limitedEmail, env.limitedPassword)
@@ -232,13 +224,13 @@ func TestAgreementProposeRouteRejectsALimitedMemberHoldingMarriage(t *testing.T)
 // TestLockedAgreementsReadCarriesLiteralEmptyArrays reads the RAW WIRE BYTES,
 // because Go decodes null and [] into the same nil slice -- only the bytes
 // prove the frontend's Zod schemas get []. Vision's
-// TestGetVisionForANeverSetYearCarriesLiteralEmptyArrays
-// (vision_api_test.go:118) is this test's shape.
+// TestGetVisionForANeverSetYearCarriesLiteralEmptyArrays is this test's
+// shape.
 //
-// newTestEnv's household has one owner, so this is decision 2's state: locked,
-// nothing written yet. 200 rather than 403 because what it lacks is a second
-// owner, not permission, and the empty state IS the page (decision 3 -- the
-// read is never gated on locked).
+// newTestEnv's household has one owner, so this is locked with nothing
+// written yet. It answers 200, not 403: what it lacks is a second owner,
+// not permission, and the empty state IS the page -- the read is never
+// gated on locked.
 func TestLockedAgreementsReadCarriesLiteralEmptyArrays(t *testing.T) {
 	env := newTestEnv(t)
 	session, _ := env.signIn(t, env.ownerEmail, env.ownerPassword)
@@ -270,18 +262,18 @@ const agreementProposalsPath = "/api/v1/marriage/agreements/proposals"
 
 func proposalPath(id string) string { return agreementProposalsPath + "/" + id }
 
-// addSecondOwner seeds the partner through the repositories -- api_test.go's
-// own owner-seeding shape (api_test.go:420-433) -- and signs them in for real
-// cookies, because every test below needs two sessions rather than two
-// membership rows.
+// addSecondOwner seeds the partner through the repositories -- the same
+// owner-seeding shape newTestEnvWith uses -- and signs them in for real
+// cookies, because every test below needs two sessions, not two membership
+// rows.
 //
 // It is per-file and deliberately NOT part of newTestEnv: other files assert
-// on that household having exactly one owner, and moving this into the
-// constructor would break them in a way that looks unrelated to this feature.
+// that household has exactly one owner, and moving this into the constructor
+// would break them in a way that looks unrelated to this feature.
 //
-// The cheap argon2 parameters are the ones newTestEnv itself uses -- this is
-// still the real hasher, only its cost is turned down, so sign-in exercises
-// Verify exactly as it does in production.
+// The cheap argon2 parameters are newTestEnv's own -- still the real hasher,
+// just turned down in cost, so sign-in exercises Verify exactly as it does
+// in production.
 func addSecondOwner(t *testing.T, env *testEnv) (session, csrf *http.Cookie) {
 	t.Helper()
 	hash, err := crypto.NewArgon2Hasher(1, 8*1024, 1).Hash("hunter2hunter2")
@@ -313,11 +305,10 @@ type agreementProposalWriteBody struct {
 	Agreements agreementsDocumentBody `json:"agreements"`
 }
 
-// mustCreateAgreementSection and mustProposalWrite are setup, not assertions:
-// a write that did not land fails here rather than as a confusing failure in
-// whatever reads its id next. Decoding every response is also what proves each
-// 2xx carries parseable JSON -- apiFetch throws on an ok response it cannot
-// parse, so an unparseable 200 is a broken screen, not a passing test.
+// mustCreateAgreementSection and mustProposalWrite are setup, not
+// assertions: a write that didn't land fails here, not as a confusing
+// failure later. Decoding every response also proves each 2xx carries
+// parseable JSON -- apiFetch throws on an ok response it cannot parse.
 func mustCreateAgreementSection(t *testing.T, env *testEnv, name string, session, csrf *http.Cookie) agreementSectionBody {
 	t.Helper()
 	rec := env.authed(t, http.MethodPost, "/api/v1/marriage/agreements/sections",
@@ -405,8 +396,7 @@ func TestAgreementWritesOnATwoOwnerHousehold(t *testing.T) {
 	b, bCSRF := addSecondOwner(t, env)
 
 	// A section is a label, not a promise: creating one is immediate and
-	// unsigned, and it stays invisible until an agreed agreement sits in it
-	// (decision 8).
+	// unsigned, and it stays invisible until an agreed agreement sits in it.
 	section := mustCreateAgreementSection(t, env, "Money", a, aCSRF)
 	if section.Count != 0 || section.Visible {
 		t.Fatalf("new section = %+v, want count 0 and visible false", section)
@@ -420,15 +410,14 @@ func TestAgreementWritesOnATwoOwnerHousehold(t *testing.T) {
 	if first.Proposal.Status != "pending" {
 		t.Fatalf("status = %q, want pending", first.Proposal.Status)
 	}
-	// The proposer signed implicitly, in the same transaction (decision 5), so
-	// only the other owner is awaited -- "needs Christine", never "needs both".
+	// The proposer signed implicitly, in the same transaction, so only the
+	// other owner is awaited -- "needs Christine", never "needs both".
 	if len(first.Proposal.AwaitingNames) != 1 || first.Proposal.AwaitingNames[0] != "Christine" {
 		t.Fatalf("awaitingNames = %v, want [Christine]", first.Proposal.AwaitingNames)
 	}
 
-	// 404 before 403 (decision 22): an unknown id is not somebody else's
-	// proposal, and the handler has to read the row before it can know whose
-	// it is.
+	// 404 before 403: an unknown id is not somebody else's proposal, and the
+	// handler has to read the row before it can know whose it is.
 	rec := env.authed(t, http.MethodPost, proposalPath(zeroProposalID)+"/withdraw", nil, a, aCSRF)
 	assertErrorResponse(t, rec, http.StatusNotFound, "NOT_FOUND")
 	// B did not propose it and A is still an owner: 403, ahead of any 409.
@@ -444,7 +433,7 @@ func TestAgreementWritesOnATwoOwnerHousehold(t *testing.T) {
 	}
 
 	second := mustProposalWrite(t, env, agreementProposalsPath, propose, a, aCSRF, http.StatusCreated)
-	// Discuss parks it: still open, still answerable (decision 7).
+	// Discuss parks it: still open, still answerable.
 	parked := mustProposalWrite(t, env, proposalPath(second.Proposal.ID)+"/park",
 		map[string]any{"note": "next retro"}, b, bCSRF, http.StatusOK)
 	if parked.Proposal.Status != "parked" || parked.Proposal.ParkNote != "next retro" {
@@ -476,7 +465,7 @@ func TestAgreementWritesOnATwoOwnerHousehold(t *testing.T) {
 // TestStarterSetSeedsFourSectionsAndIsIdempotent covers the one write that
 // answers the bare document envelope rather than a row plus a document, and
 // the one that may create nothing -- which is why it is 200 and not 201, and
-// why a second click is a no-op rather than a 409 (decision 17).
+// why a second click is a no-op rather than a 409.
 func TestStarterSetSeedsFourSectionsAndIsIdempotent(t *testing.T) {
 	env := newTestEnv(t)
 	a, aCSRF := env.signIn(t, env.ownerEmail, env.ownerPassword)
@@ -495,8 +484,8 @@ func TestStarterSetSeedsFourSectionsAndIsIdempotent(t *testing.T) {
 			t.Fatalf("attempt %d: %d sections, want 4 -- %+v",
 				attempt, len(out.Agreements.Sections), out.Agreements.Sections)
 		}
-		// Sections only, never agreements (decision 17): "everything on this
-		// page is here because you both agreed" has no bulk-signed exception.
+		// Sections only, never agreements: "everything on this page is here
+		// because you both agreed" has no bulk-signed exception.
 		for _, s := range out.Agreements.Sections {
 			if s.Count != 0 || s.Visible {
 				t.Fatalf("attempt %d: section %q has count %d and visible %v, want 0 and false",
@@ -513,7 +502,7 @@ func TestStarterSetSeedsFourSectionsAndIsIdempotent(t *testing.T) {
 // TestAStaleAgreeIsRefusedAndTheProposalSurvives is the spec's "stale agree
 // through two real sessions". It cannot be built from one session: two edits
 // have to exist against the same wording before either lands, which is the
-// race the whole feature exists to refuse (decision 13).
+// race the whole feature exists to refuse.
 func TestAStaleAgreeIsRefusedAndTheProposalSurvives(t *testing.T) {
 	env := newTestEnv(t)
 	a, aCSRF := env.signIn(t, env.ownerEmail, env.ownerPassword)
@@ -554,8 +543,8 @@ func TestAStaleAgreeIsRefusedAndTheProposalSurvives(t *testing.T) {
 	assertErrorResponse(t, rec, http.StatusConflict, "AGREEMENT_CHANGED")
 
 	// Nothing was written and nothing was hidden: the refused proposal is
-	// still listed, still open, and targetChanged now says so before the next
-	// click (decision 14) -- the read-side echo of the check that just fired.
+	// still listed, still open, and targetChanged now says so before the
+	// next click -- the read-side echo of the check that just fired.
 	doc := mustReadAgreements(t, env, b)
 	stale, ok := findProposal(doc, secondEdit.Proposal.ID)
 	if !ok {
@@ -570,10 +559,10 @@ func TestAStaleAgreeIsRefusedAndTheProposalSurvives(t *testing.T) {
 }
 
 // TestProposeRefusesAnUnknownKindAndAnOversizedBody covers both refusals the
-// handler answers without the service: the kind, parsed at the boundary
-// (decision 21), and decodeJSONBodyLimit's 8 KiB ceiling. Neither reaches
-// requireTwoOwners, which is why a one-owner env is the right fixture -- a 409
-// here would mean the order of the two checks had silently swapped.
+// handler answers without the service: the kind, parsed at the boundary, and
+// decodeJSONBodyLimit's 8 KiB ceiling. Neither reaches requireTwoOwners,
+// which is why a one-owner env is the right fixture -- a 409 here would mean
+// the order of the two checks had silently swapped.
 func TestProposeRefusesAnUnknownKindAndAnOversizedBody(t *testing.T) {
 	env := newTestEnv(t)
 	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)

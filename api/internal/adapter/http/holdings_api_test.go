@@ -133,7 +133,7 @@ func TestCreatingAHoldingOnACashAccountIsRefused(t *testing.T) {
 	}
 }
 
-// The whole milestone-1 flow at the wire: a holding, two lots at different
+// The whole holdings flow at the wire: a holding, two lots at different
 // prices, a valuation, and the figures that come back. This is the path the
 // portfolio page renders.
 func TestPortfolioReportsPositionCostAndMarketValue(t *testing.T) {
@@ -187,7 +187,7 @@ func TestPortfolioReportsPositionCostAndMarketValue(t *testing.T) {
 	rec = env.authed(t, http.MethodGet, "/api/v1/holdings", nil, session, csrf)
 	body := decodePortfolio(t, rec)
 	if !body.NotInNetWorth {
-		t.Fatal("notInNetWorth = false; milestone 1 keeps holdings out of net worth and the page says so")
+		t.Fatal("notInNetWorth = false; holdings stay out of net worth and the page says so")
 	}
 	if len(body.Holdings) != 1 {
 		t.Fatalf("len = %d, want 1", len(body.Holdings))
@@ -274,9 +274,9 @@ func TestAnUnknownHoldingIdIsNotFound(t *testing.T) {
 	}
 }
 
-// The account-type refusal on the SHIPPED accounts route. Task 4 added this
-// guard to a walked feature, so it is proved at the wire as well as in a
-// service test.
+// The account-type refusal on the SHIPPED accounts route: the guard sits
+// on a route the holdings feature does not otherwise touch, so it is
+// proved at the wire as well as in a service test.
 func TestAnAccountHoldingInvestmentsCannotChangeType(t *testing.T) {
 	env := newTestEnv(t)
 	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
@@ -643,12 +643,12 @@ func TestFutureDatedIncomeIsRefusedAtTheWire(t *testing.T) {
 	}
 }
 
-// The primary-currency refusal on the SHIPPED Settings route. Milestone 2
-// stores every holding's cost in the household's primary currency as an
+// The primary-currency refusal on the SHIPPED Settings route. Every
+// holding's cost is stored in the household's primary currency as an
 // AMOUNT, not a rate, so changing that currency would silently reinterpret
 // every one of those amounts -- the guard exists for that, and like the
 // account-type guard above it is proved at the wire because the screen it
-// changes is one this milestone otherwise never touches.
+// changes is one the holdings feature otherwise never touches.
 func TestAHouseholdHoldingInvestmentsCannotChangeCurrency(t *testing.T) {
 	env := newTestEnv(t)
 	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
@@ -677,8 +677,8 @@ func TestAHouseholdHoldingInvestmentsCannotChangeCurrency(t *testing.T) {
 }
 
 // A child row belongs to the holding in the URL, not merely to the household.
-// Both deletes used to scope on (household_id, id) alone, so a request naming
-// holding A and a row of holding B succeeded -- inside one household, so no
+// If a delete scoped on (household_id, id) alone, a request naming holding A
+// and a row of holding B would succeed -- inside one household, so no
 // disclosure, but the URL said one thing and the database did another. The UI
 // never sends such a request; that is exactly why nothing caught it.
 func TestDeletingAChildRowThroughTheWrongHoldingIsNotFound(t *testing.T) {
@@ -721,14 +721,12 @@ func TestDeletingAChildRowThroughTheWrongHoldingIsNotFound(t *testing.T) {
 
 	// Both deletes name the SECOND holding, which owns neither row.
 	//
-	// The two halves are not equally load-bearing, and saying so here saves the
-	// next reader the experiment. The INCOME half is the one that was broken:
-	// it failed with a 204 before the query gained its holding scope. The EVENT
-	// half already passed, because DeleteWithFold lists the named holding's
-	// events first and refuses an id that is not among them -- the scoped SQL
-	// behind it is a second lock on a door that was shut. Mutating that SQL
-	// therefore does not turn this test red, and that is the correct outcome
-	// rather than a gap in it.
+	// The two halves aren't equally load-bearing. INCOME is the load-bearing
+	// half: without the holding scope in its query it answers 204. EVENT
+	// already passed, because DeleteWithFold lists the named holding's
+	// events first and refuses an id not among them -- a second lock on a
+	// door already shut. So mutating that SQL won't turn this test red;
+	// that's correct, not a gap.
 	rec = env.authed(t, http.MethodDelete, "/api/v1/holdings/"+second+"/income/"+incomeID, nil, session, csrf)
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("income delete via the wrong holding = %d, want 404 (body = %s)", rec.Code, rec.Body.String())
@@ -798,8 +796,8 @@ func decodeID(t *testing.T, rec *httptest.ResponseRecorder, key string) string {
 
 // TestANegativeHoldingAmountIsNamedAsNegative: every money field on the
 // holdings surface refuses a negative figure, and the refusal must say that
-// -- not "That currency code is not valid.", which is what the shared
-// ErrInvalidMoney sentinel used to answer for all of them.
+// -- not "That currency code is not valid.", which is what a shared
+// ErrInvalidMoney sentinel would answer for all of them.
 func TestANegativeHoldingAmountIsNamedAsNegative(t *testing.T) {
 	env := newTestEnv(t)
 	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)

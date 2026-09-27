@@ -49,9 +49,8 @@ func TestAdminRoutesAre404ToANonAdmin(t *testing.T) {
 var errPlatformAdminLookupFailed = errors.New("platform admin lookup failed")
 
 // failingPlatformAdmins is a usecase.PlatformAdminRepository that cannot
-// answer anything. Every method fails, not just Get: a half-working double
-// invites a future test to lean on the half that works and quietly stop
-// testing what this one is for.
+// answer anything. Every method fails, not just Get, so a future test can't
+// lean on a half that works and quietly stop testing what this is for.
 type failingPlatformAdmins struct{}
 
 func (failingPlatformAdmins) Get(context.Context, string) (domain.PlatformAdmin, error) {
@@ -71,20 +70,18 @@ func (failingPlatformAdmins) List(context.Context) ([]usecase.PlatformAdminListi
 }
 
 // TestAdminLookupFailureIs500NotHidden is the second of the gate's three
-// properties, and the reason requirePlatformAdmin does not route its error
-// branch through MapDomainError.
+// properties, and the reason requirePlatformAdmin's error branch skips
+// MapDomainError.
 //
 // "The database is down" must never read as a clean "you are not an admin".
-// The caller here IS a platform admin, which is what makes the failure mode
-// concrete: if an outage answered 404, the one person who could fix it would
-// be told the page does not exist, and would have no reason to look at the
-// database at all.
+// The caller here IS a platform admin: if an outage answered 404, the one
+// person who could fix it would be told the page doesn't exist and have no
+// reason to look at the database.
 //
-// Only the Admins port is swapped -- the router, the session, and every other
-// dependency are the real ones, on a router built for this one request. That
-// is the seam routerWithMemberships established for the same reason: there is
-// no way to make a live Postgres fail this specific lookup on demand.
-// adminRouterWith is the shared form of it, used by the three tests that each
+// Only the Admins port is swapped; everything else is real, on a router
+// built for this one request -- the same seam routerWithMemberships uses,
+// since there is no way to make live Postgres fail this lookup on demand.
+// adminRouterWith is the shared form, used by the three tests that each
 // break one admin port.
 func TestAdminLookupFailureIs500NotHidden(t *testing.T) {
 	env := newTestEnv(t)
@@ -109,22 +106,17 @@ func (failingAdminAudit) Record(context.Context, usecase.AdminAuditEntry) error 
 }
 
 // panickingFeatureFlags makes the flags handler panic rather than merely
-// fail. That is the difference that gives
-// TestTheAuditRowIsWrittenBeforeTheHandlerRuns its teeth: a handler that
-// returns an error still lets an audit call placed AFTER it run, so a
-// returning double could not tell the two orderings apart. A panic unwinds
-// straight past anything downstream to recoverer, so the row exists only if
-// it was written first.
+// fail -- the difference TestTheAuditRowIsWrittenBeforeTheHandlerRuns needs:
+// a returning-error double can't tell "audit ran before" from "audit ran
+// after", but a panic unwinds straight to recoverer, so the row exists only
+// if it was written first.
 //
-// OverridesFor is the one method that does NOT panic. Task 6 put
-// AdminService.FlagsFor (which calls OverridesFor) on every authenticated
-// request, inside requireSession -- upstream of requirePlatformAdmin and
-// auditAdmin. A double that panicked there too would blow up before the
-// request ever reached the admin subtree this test is about, so the audit
-// row would never be written and the test would fail for a reason that has
-// nothing to do with auditAdmin's ordering. Leaving it healthy keeps the
-// panic where the test needs it: inside GET /admin/flags's own handler,
-// which calls GlobalOverrides and AllHouseholdOverrides, not OverridesFor.
+// OverridesFor is the one method that does NOT panic: AdminService.FlagsFor
+// (which calls it) runs on every authenticated request, upstream of
+// requirePlatformAdmin and auditAdmin. A double that panicked there too
+// would blow up before reaching the admin subtree, failing the test for a
+// reason unrelated to auditAdmin's ordering -- so the panic stays inside
+// GET /admin/flags's own handler instead.
 type panickingFeatureFlags struct{}
 
 func (panickingFeatureFlags) OverridesFor(context.Context, string) (map[string]bool, map[string]bool, error) {
@@ -187,15 +179,15 @@ func get(t *testing.T, router http.Handler, path string, session *http.Cookie) *
 }
 
 // TestTheAdminGrantExpires pins adminGrantTTL and the comparison that reads
-// it. Without this, widening the constant to 30 hours -- or reducing
-// requireAdminGrant's condition to a bare nil check, which drops the expiry
-// comparison altogether -- leaves every other admin test green.
+// it. Without this, widening the constant or reducing requireAdminGrant's
+// condition to a bare nil check that drops the expiry comparison leaves
+// every other admin test green.
 //
-// The successful read before the clock moves is not padding: it is what makes
-// the second read's 401 mean "the grant expired" rather than "the grant never
-// worked". Together they also pin that the grant is NOT extended by activity
-// the way a session is (see sessionExtendThreshold) -- the read happens inside
-// the window and buys no more time.
+// The successful read before the clock moves is not padding: it makes the
+// second read's 401 mean "the grant expired," not "the grant never
+// worked." Together they also pin that the grant is NOT extended by
+// activity the way a session is (see sessionExtendThreshold) -- the read
+// happens inside the window and buys no more time.
 func TestTheAdminGrantExpires(t *testing.T) {
 	clk := &movableClock{now: time.Now().UTC()}
 	env := newTestEnvWithClock(t, clk)
@@ -220,15 +212,13 @@ func TestTheAdminGrantExpires(t *testing.T) {
 	assertErrorResponse(t, rec, http.StatusUnauthorized, "ADMIN_REAUTH_REQUIRED")
 }
 
-// TestAnUnwritableAuditLogClosesTheSurface pins auditAdmin's refusal branch.
-// Deleting that branch and serving the request anyway leaves every other
-// admin test green, which is precisely the silently-unaudited admin surface
-// the audit table exists to make impossible.
+// TestAnUnwritableAuditLogClosesTheSurface pins auditAdmin's refusal
+// branch: deleting it and serving the request anyway would leave every
+// other admin test green -- exactly what the audit table exists to prevent.
 //
-// The grant is minted against env.router, whose audit log works. Only the
-// read afterwards goes to the router with the broken one -- otherwise the
-// re-auth itself would be refused and the test would never reach the
-// behaviour it is named after.
+// The grant is minted against env.router (working audit log); only the
+// read afterwards uses the router with the broken one, or the re-auth
+// itself would be refused before reaching the behaviour under test.
 func TestAnUnwritableAuditLogClosesTheSurface(t *testing.T) {
 	env := newTestEnv(t)
 	env.makePlatformAdmin(t, env.ownerEmail)
@@ -242,14 +232,13 @@ func TestAnUnwritableAuditLogClosesTheSurface(t *testing.T) {
 	assertErrorResponse(t, rec, http.StatusServiceUnavailable, "AUDIT_UNAVAILABLE")
 }
 
-// TestTheAuditRowIsWrittenBeforeTheHandlerRuns pins the ordering inside
-// auditAdmin. The row goes in before next.ServeHTTP so that a handler which
-// panics still leaves a trace of the attempt -- the case where the log
-// matters most is the one where the request did not finish.
+// TestTheAuditRowIsWrittenBeforeTheHandlerRuns pins auditAdmin's ordering:
+// the row goes in before next.ServeHTTP, so a handler that panics still
+// leaves a trace -- the case where the log matters most.
 //
-// The flags port panics rather than returning an error, deliberately: see
-// panickingFeatureFlags. recoverer turns the panic into the 500 asserted
-// below, and the audit row must exist regardless.
+// The flags port panics rather than returning an error, deliberately (see
+// panickingFeatureFlags): recoverer turns it into the 500 asserted below,
+// and the audit row must exist regardless.
 func TestTheAuditRowIsWrittenBeforeTheHandlerRuns(t *testing.T) {
 	env := newTestEnv(t)
 	env.makePlatformAdmin(t, env.ownerEmail)
@@ -398,16 +387,14 @@ func TestEveryAdminRequestIsAudited(t *testing.T) {
 	}
 }
 
-// TestAdminAuditRowRecordsTheRealRequest guards what TestEveryAdminRequestIsAudited
-// does not: that the row auditAdmin writes carries THIS request's own method
-// and path, not merely that a row of some kind exists.
-// TestAdminAuditRepoRecordsAndReadsBack next door proves the repository
-// round-trips whatever Action, Target and Detail it is given -- it says
-// nothing about what auditAdmin actually passes it. Without this test,
-// auditAdmin could go back to writing Target: "" for every row (as it did
-// for the field's entire life -- see LEARNING.md's admin-surface entries) and
-// every other admin test, including the count-only one above, would stay
-// green.
+// TestAdminAuditRowRecordsTheRealRequest guards what
+// TestEveryAdminRequestIsAudited does not: that the row carries THIS
+// request's own method and path, not merely that some row exists.
+// TestAdminAuditRepoRecordsAndReadsBack proves the repository round-trips
+// whatever it's given, not what auditAdmin actually passes it. Without this
+// test, auditAdmin could regress to writing Target: "" for every row -- as
+// it did for the field's entire life (see LEARNING.md's admin-surface
+// entries) -- and every other admin test would stay green.
 func TestAdminAuditRowRecordsTheRealRequest(t *testing.T) {
 	env := newTestEnv(t)
 	env.makePlatformAdmin(t, env.ownerEmail)
@@ -429,10 +416,10 @@ func TestAdminAuditRowRecordsTheRealRequest(t *testing.T) {
 	}
 }
 
-// TestAdminAuditRowRecordsTheQueryString: a search is a fact the log should
-// hold ("the operator looked for christine@"), and it is the one part of a
-// request that is available before chi has parsed route parameters -- see
-// auditAdmin's own comment on why Detail is otherwise empty.
+// TestAdminAuditRowRecordsTheQueryString: a search is a fact the log
+// should hold, and the one part of a request available before chi parses
+// route parameters -- see auditAdmin's own comment on why Detail is
+// otherwise empty.
 func TestAdminAuditRowRecordsTheQueryString(t *testing.T) {
 	env := newTestEnv(t)
 	env.makePlatformAdmin(t, env.ownerEmail)
@@ -481,19 +468,16 @@ func TestMeCarriesEveryDefinedFlag(t *testing.T) {
 	}
 }
 
-// TestMeMasksTelegramSignInWhenNoBotIsConfigured is the spec's decision 11
-// edge: telegram_sign_in's stored value (set to true here, the flag's own
-// default) is left alone -- ResolveFlags stays a pure function of the
-// stored rows -- but buildMeResponse masks it to false in the response when
-// this install has no bot (deps.Telegram is nil, env's own router). That is
-// what makes InviteMemberModal's "Inviting is unavailable on this install"
-// copy render instead of a Send invite button that always answers 409
-// TELEGRAM_INVITES_UNAVAILABLE.
+// TestMeMasksTelegramSignInWhenNoBotIsConfigured: Telegram invites need
+// telegram_sign_in on AND a bot configured, or InviteMemberModal renders
+// "Inviting is unavailable on this install" instead of a Send button that
+// always answers 409 TELEGRAM_INVITES_UNAVAILABLE. The stored flag (true
+// here, ResolveFlags stays pure) is untouched -- buildMeResponse masks it
+// to false in the response only when this install has no bot
+// (deps.Telegram is nil, env's own router).
 //
-// A second router sharing every other dependency but with Telegram wired in
-// (telegramRouter, telegram_api_test.go) proves the true value still passes
-// through unmasked -- the false answer above is masking, not the flag
-// actually being off.
+// A second router with Telegram wired in (telegramRouter,
+// telegram_api_test.go) proves the true value passes through unmasked.
 func TestMeMasksTelegramSignInWhenNoBotIsConfigured(t *testing.T) {
 	env := newTestEnv(t)
 	if err := env.featureFlags.SetGlobal(context.Background(),
@@ -582,13 +566,12 @@ func TestAdminFlagWritesRefuseAnUnknownKey(t *testing.T) {
 	assertErrorResponse(t, rec, http.StatusUnprocessableEntity, "UNKNOWN_FLAG")
 }
 
-// TestClearingAHouseholdOverrideIsNotTheSameAsTurningItOff pins the rule the
-// whole DELETE route exists for: "no opinion" and "explicitly off" are
-// different states. Setting a household override to false must make the
-// gated route answer 404 (explicitly off); clearing that same override must
-// make it answer 200 again, because with no override left the household falls
-// back to the global true set above -- not to false, and not to a second
-// 404 that would mean the DELETE quietly became another way to turn it off.
+// TestClearingAHouseholdOverrideIsNotTheSameAsTurningItOff pins the rule
+// the DELETE route exists for: "no opinion" and "explicitly off" are
+// different states. A false override must answer 404 (explicitly off);
+// clearing it must answer 200 again, since with no override the household
+// falls back to the global true set above -- not to false, and not to a
+// second way of turning it off.
 func TestClearingAHouseholdOverrideIsNotTheSameAsTurningItOff(t *testing.T) {
 	env := newTestEnv(t)
 	env.makePlatformAdmin(t, env.ownerEmail)

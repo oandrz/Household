@@ -8,27 +8,25 @@ import (
 	"time"
 )
 
-// --- Task 9: budget month, save and history routes -------------------------
+// --- Budget month, save and history routes ---------------------------------
 
 // monthPath formats t as the "budgets/{month}" wire form: "2006-01".
 func monthPath(t time.Time) string {
 	return "/api/v1/budgets/" + t.Format("2006-01")
 }
 
-// firstExpenseCategory reads GET /categories (seeding the starter set on
-// first call, same as CategoryService.List documents) and returns the id
-// and name of the first expense-kind category -- every route under test
-// needs a real category id, and this is the same list PUT /budgets' modal
-// would offer.
+// firstExpenseCategory reads GET /categories -- seeding the starter set on
+// first call, same as CategoryService.List -- and returns the id and name
+// of the first expense-kind category, the real id every route under test
+// needs (the same list PUT /budgets' modal would offer).
 func (env *testEnv) firstExpenseCategory(t *testing.T, session *http.Cookie) (id, name string) {
 	t.Helper()
 	return env.firstCategoryOfKind(t, session, "expense")
 }
 
-// firstIncomeCategory is firstExpenseCategory's counterpart, for a test that
-// needs a category of the WRONG kind -- bills refuse one (BillService's own
-// category check), and the only way to try it is with a real income id from
-// this household's own starter set.
+// firstIncomeCategory is firstExpenseCategory's counterpart, for a test
+// that needs a category of the WRONG kind (e.g. BillService refuses an
+// income category) -- the only way to try that is a real income id.
 func (env *testEnv) firstIncomeCategory(t *testing.T, session *http.Cookie) string {
 	t.Helper()
 	id, _ := env.firstCategoryOfKind(t, session, "income")
@@ -106,21 +104,18 @@ func (env *testEnv) mustPutBudget(t *testing.T, session, csrf *http.Cookie, path
 	}
 }
 
-// TestBudgetRoutesRequireMoneyAndOwner is transactions_api_test.go's
-// TestTransactionRoutesRequireMoneyAndOwner shape applied to the three
-// budget routes: reads and the write alike sit behind CapMoney AND
-// requireOwner, the same as transactions and categories (router.go's own
-// comment on the txn group explains why -- an unbudgeted or half-redacted
-// Budget screen would be as broken as a half-redacted ledger).
+// TestBudgetRoutesRequireMoneyAndOwner applies
+// TestTransactionRoutesRequireMoneyAndOwner's shape to the three budget
+// routes: reads and the write sit behind CapMoney AND requireOwner, same as
+// transactions and categories -- a half-redacted Budget screen would be as
+// broken as a half-redacted ledger (router.go's txn-group comment).
 //
 // wantOwner pins the exact status an owner receives, not merely "not
-// 401/403" -- the same reasoning the transactions matrix documents: a route
-// wired with a nil deps.Budgets would pass neither guard and panic into a
-// 500, which "not 401/403" would let slide by silently. PUT's owner case is
-// a bare, bodyless PUT reaching the handler and failing to decode an empty
-// body -- 400 INVALID_BODY -- proving the guards let the owner through and
-// the handler is wired, without needing a valid payload here (that is
-// covered by the round-trip and validation tests below).
+// 401/403": a route wired with a nil deps.Budgets would pass both guards
+// and panic into a 500, which a looser check would miss. PUT's owner case
+// is a bare, bodyless PUT that fails to decode -- 400 INVALID_BODY --
+// proof the guards passed without needing a valid payload (the round-trip
+// tests below cover that).
 func TestBudgetRoutesRequireMoneyAndOwner(t *testing.T) {
 	env := newTestEnv(t)
 	month := monthPath(time.Now().UTC())
@@ -132,11 +127,10 @@ func TestBudgetRoutesRequireMoneyAndOwner(t *testing.T) {
 		{http.MethodGet, month, http.StatusOK},
 		{http.MethodGet, "/api/v1/budgets/history", http.StatusOK},
 		{http.MethodPut, month, http.StatusBadRequest},
-		// A bare POST with no body reaches the handler exactly the way the
-		// bare PUT above does, and fails at the same decodeJSONBody step --
-		// proving the guards passed and the route is wired without needing
-		// a real goalId or a closed month here (those are what the
-		// dedicated rollover tests below exist to cover).
+		// A bare POST fails at the same decodeJSONBody step the bare PUT above
+		// does, proving the guards passed and the route is wired -- no real
+		// goalId or closed month needed (the dedicated rollover tests below
+		// cover that).
 		{http.MethodPost, month + "/rollover", http.StatusBadRequest},
 	}
 
@@ -170,11 +164,10 @@ func TestBudgetRoutesRequireMoneyAndOwner(t *testing.T) {
 
 // TestBudgetWriteRouteRequiresCSRF mirrors
 // TestTransactionWriteRoutesRequireCSRF for both mutating budget routes --
-// PUT (save) and POST .../rollover, which joins PUT's own CSRF group
-// (router.go's own comment on why): no token at all, and a token that does
-// not match the cookie, both refused by the CSRF_INVALID code specifically
-// (not merely a 403 status, which requireOwner above it in the guard stack
-// would also produce).
+// PUT and POST .../rollover, which joins PUT's CSRF group (router.go). No
+// token, and a token that doesn't match the cookie, must both refuse with
+// CSRF_INVALID specifically, not merely the 403 that requireOwner above it
+// would also produce.
 func TestBudgetWriteRouteRequiresCSRF(t *testing.T) {
 	env := newTestEnv(t)
 	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
@@ -205,14 +198,12 @@ func TestBudgetWriteRouteRequiresCSRF(t *testing.T) {
 	}
 }
 
-// TestBudgetMalformedMonthIs400 pins the brief's INVALID_MONTH/400 shape --
+// TestBudgetMalformedMonthIs400 pins the INVALID_MONTH/400 shape --
 // deliberately different from the 422 the transactions month filter answers
-// for the same malformed-month case (transaction_handlers.go's
-// parseTransactionFilter). GET, PUT and POST .../rollover all parse {month}
-// through the same parseBudgetMonth helper, so all three must answer
-// identically -- and parseBudgetMonth runs before decodeJSONBody in every
-// handler that has a body, so the rollover case below needs no valid goalId
-// to prove this: a malformed month never reaches the body at all.
+// for the same case (transaction_handlers.go's parseTransactionFilter). GET,
+// PUT and POST .../rollover all parse {month} through the same
+// parseBudgetMonth helper, so all three must answer identically; it runs
+// before decodeJSONBody, so the rollover case needs no valid goalId here.
 func TestBudgetMalformedMonthIs400(t *testing.T) {
 	env := newTestEnv(t)
 	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
@@ -230,11 +221,10 @@ func TestBudgetMalformedMonthIs400(t *testing.T) {
 
 // TestBudgetMonthUnbudgetedStillReportsRealSpend is the wire-level pin of
 // BudgetService.Month's empty-state contract: a month with no budget row
-// answers 200 with "budget": null, while Categories and the top-level spend
-// figures stay real. It also carries the Task 8 "Over requires an actual
-// line" decision through to the wire for the first time -- the spending
-// category shows capMinor: 0 and over: false despite real spend, not a cap
-// that happens to read as exceeded.
+// answers 200 with "budget": null, while Categories and the top-level
+// spend figures stay real. It also proves on the wire that a category
+// with no cap line can never read as over: it shows capMinor: 0 and
+// over: false despite real spend.
 func TestBudgetMonthUnbudgetedStillReportsRealSpend(t *testing.T) {
 	env := newTestEnv(t)
 	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
@@ -285,7 +275,7 @@ func TestBudgetMonthUnbudgetedStillReportsRealSpend(t *testing.T) {
 		}
 		if c.Over {
 			t.Fatal("category over = true, want false: a category with no cap line can never be over " +
-				"(Task 8's 'Over requires an actual line' decision)")
+				"(Over requires an actual cap line)")
 		}
 	}
 	if !found {
@@ -315,9 +305,9 @@ func decodeBudgetBody(t *testing.T, rec *httptest.ResponseRecorder) budgetBody {
 	return body
 }
 
-// TestBudgetPutRoundTripsThroughGet is the brief's "PUT round-trips" case:
-// a save's own response and a follow-up GET must both echo exactly what was
-// sent, expected income included.
+// TestBudgetPutRoundTripsThroughGet pins "PUT round-trips": a save's own
+// response and a follow-up GET must both echo exactly what was sent,
+// expected income included.
 func TestBudgetPutRoundTripsThroughGet(t *testing.T) {
 	env := newTestEnv(t)
 	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
@@ -350,12 +340,11 @@ func assertBudgetRoundTrip(t *testing.T, body budgetBody, categoryID string) {
 	}
 }
 
-// TestBudgetPutWithNoExpectedIncomeKeepsCardsHidden is the brief's
-// "expectedIncomeMinor: null preserved" case: omitting the field entirely
-// (not sending it as JSON null, which map[string]any can't distinguish from
-// omission -- the pointer-nil convention BudgetService.Save documents makes
-// them the same wire shape either way) must round-trip as nil, not a stored
-// zero, on both the save's own response and a follow-up GET.
+// TestBudgetPutWithNoExpectedIncomeKeepsCardsHidden pins
+// "expectedIncomeMinor: null preserved": omitting the field must
+// round-trip as nil, not a stored zero, on both the save response and a
+// follow-up GET. Omission and JSON null are the same wire shape here
+// (BudgetService.Save's pointer-nil convention).
 func TestBudgetPutWithNoExpectedIncomeKeepsCardsHidden(t *testing.T) {
 	env := newTestEnv(t)
 	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
@@ -378,11 +367,10 @@ func TestBudgetPutWithNoExpectedIncomeKeepsCardsHidden(t *testing.T) {
 	}
 }
 
-// TestBudgetPutDuplicateCategoryDoesNotChangeTheSavedBudget is the brief's
-// "PUT duplicate-category 422s and a follow-up GET shows nothing written"
-// case. The pre-save step is what makes "shows nothing written" a real
-// assertion rather than the trivially true "budget: null" an unbudgeted
-// month would answer regardless of whether the guard worked.
+// TestBudgetPutDuplicateCategoryDoesNotChangeTheSavedBudget pins "PUT
+// duplicate-category 422s and a follow-up GET shows nothing written". The
+// pre-save step makes "shows nothing written" a real assertion, not the
+// trivially true "budget: null" an unbudgeted month always answers.
 func TestBudgetPutDuplicateCategoryDoesNotChangeTheSavedBudget(t *testing.T) {
 	env := newTestEnv(t)
 	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
@@ -410,24 +398,19 @@ func TestBudgetPutDuplicateCategoryDoesNotChangeTheSavedBudget(t *testing.T) {
 }
 
 // TestBudgetSaveValidationErrors covers the remaining three per-field save
-// guards -- a negative cap, a negative expected income, and a category id
-// that doesn't belong to this household -- against one shared,
-// never-successfully-saved month, since none of the cases is expected to
-// write anything, so one follow-up GET after all of them proves that rather
-// than repeating the same check per case.
+// guards -- negative cap, negative expected income, and a category id
+// outside this household -- against one shared month. None should write
+// anything, so one follow-up GET after all three proves that once.
 //
 // The unknown-category id doubles as this route's foreign-household check:
-// a budget month carries no household-scoped id in its own URL (unlike
-// transactions/{id} or accounts/{id}), so there is no request shape that
-// could target another household's *budget* directly. The one place
-// another household's data could leak in is exactly this -- a categoryId in
-// the PUT body that names a category this household does not own, be that
-// because the id is simply made up or because it belongs to someone else's
-// household. validateLineCategories (postgres/budget_repo.go) can't and
-// doesn't distinguish the two: both fail the same ownership count check and
-// answer the same 422, which is also why a single well-formed-but-unowned
-// UUID is enough to exercise it here without standing up a second
-// household in the shared testEnv fixture.
+// a budget month carries no household-scoped id of its own in the URL
+// (unlike transactions/{id} or accounts/{id}), so a categoryId in the PUT
+// body naming a category this household doesn't own is the only place
+// another household's data could leak in. validateLineCategories
+// (postgres/budget_repo.go) can't tell "made up" from "someone else's" --
+// both fail the same ownership check and answer the same 422 -- so one
+// well-formed-but-unowned UUID is enough, without a second household in
+// testEnv.
 func TestBudgetSaveValidationErrors(t *testing.T) {
 	env := newTestEnv(t)
 	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
@@ -471,9 +454,8 @@ func TestBudgetSaveValidationErrors(t *testing.T) {
 	}
 
 	// None of the three cases above wrote anything, so this one follow-up
-	// GET is enough to prove the month is still exactly as unbudgeted as it
-	// started -- including for the negative-income case, whose own request
-	// carried no line to fail on independently.
+	// GET is enough to prove the month is still unbudgeted -- including for
+	// the negative-income case, whose request carried no line of its own.
 	getRec := env.authedGet(t, path, session)
 	if getRec.Code != http.StatusOK {
 		t.Fatalf("get: status = %d, body = %s", getRec.Code, getRec.Body.String())
@@ -487,17 +469,15 @@ func TestBudgetSaveValidationErrors(t *testing.T) {
 	}
 }
 
-// int64Ptr is a small literal-to-pointer helper for table-driven cases that
-// need to distinguish "field omitted" from "field sent as zero" -- the same
-// distinction BudgetService.Save's own nil-round-trips-as-nil comment
-// documents.
+// int64Ptr is a small literal-to-pointer helper for table-driven cases
+// that need to distinguish "field omitted" from "field sent as zero" --
+// the same distinction BudgetService.Save's nil-round-trip comment documents.
 func int64Ptr(v int64) *int64 { return &v }
 
 // TestBudgetHistoryMonthsIsClamped proves both ends of the [1, 24] clamp
-// against the same fixture: budgets one, twenty-three and thirty months
-// back from today. months=0 (below the floor) must still surface the
-// one-month-back row, which a literal, unclamped 0 (a [today, today]
-// window) would exclude; months=999 (above the ceiling) must surface the
+// against one fixture: budgets one, twenty-three and thirty months back.
+// months=0 must still surface the one-month-back row, which an unclamped 0
+// (a [today, today] window) would exclude; months=999 must surface the
 // one- and twenty-three-month-back rows but never the thirty-month-back
 // one, which an unclamped 999 would wrongly include.
 func TestBudgetHistoryMonthsIsClamped(t *testing.T) {
@@ -569,17 +549,15 @@ func decodeBudgetHistoryMonths(t *testing.T, rec *httptest.ResponseRecorder) []s
 	return out
 }
 
-// --- Task 9: budget rollover route ------------------------------------------
+// --- Budget rollover route ---------------------------------------------------
 
-// mustBudgetClosedMonth PUTs a single-category budget for the calendar month
-// immediately before the real one -- always closed, regardless of which day
-// this suite happens to run on -- and returns its wire path plus the amount
-// RollOver should move: the cap in full, since nothing is ever spent against
-// it. It is the shared fixture for every rollover test below that needs a
-// real closed, budgeted, unspent month (the 200 case, the already-done case,
-// the currency-mismatch case and the unknown-goal case all need the exact
-// same state), so a fixture mismatch between those tests can never look like
-// a mismatch in RollOver's own behaviour.
+// mustBudgetClosedMonth PUTs a single-category budget for the calendar
+// month immediately before the real one -- always closed, whatever day this
+// suite runs on -- and returns its wire path plus the amount RollOver
+// should move (the cap in full, since nothing is ever spent against it).
+// It is the shared fixture for every rollover test below that needs a
+// real closed, budgeted, unspent month, so a fixture mismatch between
+// those tests can never look like a mismatch in RollOver's own behaviour.
 func (env *testEnv) mustBudgetClosedMonth(t *testing.T, session, csrf *http.Cookie, capMinor int64) (path string, remainingMinor int64) {
 	t.Helper()
 	categoryID, _ := env.firstExpenseCategory(t, session)
@@ -592,13 +570,12 @@ func (env *testEnv) mustBudgetClosedMonth(t *testing.T, session, csrf *http.Cook
 	return path, capMinor
 }
 
-// assertRolloverFieldsNull confirms budgetMonthResponse's two new fields read
-// as literal JSON null, not merely absent from the body. A Go struct field
-// left at its zero value cannot tell "the server sent null" apart from "the
-// server sent nothing at all" -- decoding `{}` and `{"rolledOverAt":null}`
-// into the same *time.Time field gives nil either way -- so this reads the
-// raw message the same way TestGoalListEmptyState's own raw-JSON check does
-// for "goals": [].
+// assertRolloverFieldsNull confirms budgetMonthResponse's two rollover
+// fields read as literal JSON null, not merely absent from the body. A Go
+// struct field at its zero value can't tell "sent null" from "sent
+// nothing" -- decoding `{}` and `{"rolledOverAt":null}` both give nil --
+// so this reads the raw message, the same technique TestGoalListEmptyState
+// uses for "goals": [].
 func assertRolloverFieldsNull(t *testing.T, rec *httptest.ResponseRecorder) {
 	t.Helper()
 	if rec.Code != http.StatusOK {
@@ -625,10 +602,9 @@ func assertRolloverFieldsNull(t *testing.T, rec *httptest.ResponseRecorder) {
 }
 
 // assertRolloverFieldsSet is assertRolloverFieldsNull's after-the-fact
-// counterpart: both fields populated, and rolloverGoalId names the exact
-// goal the rollover under test named -- the two are documented to move
-// together (budgetMonthResponse's own brief), and this is what proves it on
-// the wire rather than merely in domain.Budget.
+// counterpart: both fields populated, naming the exact goal the rollover
+// named. The two move together by contract (budgetMonthResponse's doc) --
+// this proves it on the wire, not just in domain.Budget.
 func assertRolloverFieldsSet(t *testing.T, rec *httptest.ResponseRecorder, wantGoalID string) {
 	t.Helper()
 	if rec.Code != http.StatusOK {
@@ -649,14 +625,13 @@ func assertRolloverFieldsSet(t *testing.T, rec *httptest.ResponseRecorder, wantG
 	}
 }
 
-// TestBudgetRolloverMovesUnspentIntoGoalAndStampsTheMonth is the brief's
-// central round trip: a closed, budgeted month with unspent money answers
+// TestBudgetRolloverMovesUnspentIntoGoalAndStampsTheMonth pins the central
+// round trip: a closed, budgeted month with unspent money answers
 // 200 with the written contribution; GET /budgets/{month} reads
-// rolledOverAt: null before and both fields populated (naming this goal)
-// after; and GET /goals afterwards shows the goal's contributedMinor risen
-// by exactly the month's remainingMinor -- three separate assertions in the
-// brief's own list, combined here because they are one state change seen
-// from three different reads, not three independent behaviours.
+// rolledOverAt: null before and both fields populated after; and GET
+// /goals shows the goal's contributedMinor risen by exactly the month's
+// remainingMinor -- one state change seen from three reads, combined here
+// rather than split into three tests.
 func TestBudgetRolloverMovesUnspentIntoGoalAndStampsTheMonth(t *testing.T) {
 	env := newTestEnv(t)
 	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
@@ -703,18 +678,13 @@ func TestBudgetRolloverMovesUnspentIntoGoalAndStampsTheMonth(t *testing.T) {
 	}
 }
 
-// TestBudgetRolloverAmountSurvivesALaterTransactionInThatMonth is Finding 1's
-// own regression test, run against the real HTTP route and a real database:
-// remainingMinor is Budgeted minus Spent, recomputed on every GET from
-// whatever transactions exist in the month right now, so a late expense
-// entered in an already-rolled-over month used to change what the "done"
-// sentence would read -- rolloverAmountMinor did not exist on the wire at
-// all before this fix, so this decoded as a permanent nil regardless of what
-// the server actually stamped. Run against the pre-fix tree, this test fails
-// on the first assertion (rolloverAmountMinor decodes nil, not 200000);
-// after the fix it passes and additionally proves remainingMinor DID move
-// while rolloverAmountMinor did not, so the fixture is provably exercising
-// the defect rather than missing it by accident.
+// TestBudgetRolloverAmountSurvivesALaterTransactionInThatMonth pins, on
+// the real route and database, that the amount a rollover moved never
+// drifts: remainingMinor is recomputed on every GET from the month's
+// current transactions, so a late expense in an already-rolled-over month
+// moves it, and the "moved into X" sentence must not move with it. The
+// test also asserts remainingMinor DID move, so the fixture provably
+// exercises the case rather than passing by accident.
 func TestBudgetRolloverAmountSurvivesALaterTransactionInThatMonth(t *testing.T) {
 	env := newTestEnv(t)
 	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
@@ -734,12 +704,11 @@ func TestBudgetRolloverAmountSurvivesALaterTransactionInThatMonth(t *testing.T) 
 		t.Fatalf("rolloverAmountMinor right after rollover = %v, want %d", before.RolloverAmountMinor, remaining)
 	}
 
-	// A late receipt landing in the rolled-over month -- mustBudgetClosedMonth's
-	// own "always the calendar month before this one" fixture, duplicated
-	// here (not imported) the same way budget_repo_test.go's firstOfMonth
-	// deliberately duplicates the repository's own normalisation: this date
-	// must land inside that same closed month regardless of which day this
-	// suite happens to run on.
+	// A late receipt landing in the rolled-over month -- duplicating
+	// mustBudgetClosedMonth's "month before this one" logic here rather than
+	// importing it, the same way budget_repo_test.go's firstOfMonth
+	// duplicates the repository's own normalisation, so this date lands in
+	// that closed month regardless of which day the suite runs on.
 	now := time.Now().UTC()
 	lastMonth := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC).AddDate(0, -1, 0)
 	categoryID, _ := env.firstExpenseCategory(t, session)
@@ -775,10 +744,10 @@ func decodeBudgetMonthRollover(t *testing.T, rec *httptest.ResponseRecorder) str
 	return body
 }
 
-// TestBudgetRolloverCurrentMonthIsOpen is the brief's "current month -> 422
-// ROLLOVER_MONTH_OPEN" case: RollOver refuses before ever looking at whether
-// the month is budgeted or has anything unspent (usecase/budget.go's own
-// ordering comment), so this needs no budget at all to prove.
+// TestBudgetRolloverCurrentMonthIsOpen pins "current month -> 422
+// ROLLOVER_MONTH_OPEN": RollOver refuses before checking whether the
+// month is budgeted or has anything unspent (usecase/budget.go's ordering
+// comment), so this needs no budget at all to prove.
 func TestBudgetRolloverCurrentMonthIsOpen(t *testing.T) {
 	env := newTestEnv(t)
 	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
@@ -791,11 +760,11 @@ func TestBudgetRolloverCurrentMonthIsOpen(t *testing.T) {
 	assertErrorResponse(t, rec, http.StatusUnprocessableEntity, "ROLLOVER_MONTH_OPEN")
 }
 
-// TestBudgetRolloverTwiceIsAlreadyDone is the brief's "a second call -> 409
-// ROLLOVER_ALREADY_DONE" case: the conditional stamp update
-// (StampBudgetRollover) finds nothing left to update the second time, and
-// GetBudgetRolloverStamp's follow-up read tells "already stamped" apart from
-// "never budgeted" -- see budget_repo.go's diagnoseUnstampedRollover.
+// TestBudgetRolloverTwiceIsAlreadyDone pins "a second call -> 409
+// ROLLOVER_ALREADY_DONE": StampBudgetRollover's conditional update
+// finds nothing left to update the second time, and
+// GetBudgetRolloverStamp tells "already stamped" from "never budgeted"
+// (budget_repo.go's diagnoseUnstampedRollover).
 func TestBudgetRolloverTwiceIsAlreadyDone(t *testing.T) {
 	env := newTestEnv(t)
 	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
@@ -813,20 +782,18 @@ func TestBudgetRolloverTwiceIsAlreadyDone(t *testing.T) {
 	assertErrorResponse(t, second, http.StatusConflict, "ROLLOVER_ALREADY_DONE")
 }
 
-// TestBudgetRolloverNoBudgetRowIsNotFound is the brief's "a month with no
-// budget row -> 404" case: a real, closed month that nothing ever PUT a
-// budget for. BudgetService.Month's own empty state (Budget == nil) is what
-// RollOver reads as domain.ErrNotFound, before it ever looks at Remaining or
-// reaches for the goal -- so a real goal is enough here; the goal's own id
-// is never consulted.
+// TestBudgetRolloverNoBudgetRowIsNotFound pins "a month with no
+// budget row -> 404": a real, closed month nothing ever PUT a budget
+// for. BudgetService.Month's empty state (Budget == nil) is what RollOver
+// reads as domain.ErrNotFound, before it ever checks Remaining or the goal
+// -- so a real goal is enough here; its id is never consulted.
 //
-// The message is asserted, not just the status and code: chi's own
-// catch-all 404 (router.go's r.NotFound) answers the identical
-// {404, "NOT_FOUND"} shape for a route that plain does not exist, so a
-// deleted or mistyped route registration would leave this test green for
-// the wrong reason if it stopped at the code. "That could not be found."
-// (errors.go's domain.ErrNotFound case) is the one signal that distinguishes
-// a real service refusal from the router never having matched anything.
+// The message is asserted, not just the status and code: chi's catch-all
+// 404 (router.go's r.NotFound) answers the identical {404, "NOT_FOUND"}
+// shape for a route that plain doesn't exist, so a mistyped or deleted
+// route would leave this test green for the wrong reason. "That could not
+// be found." (errors.go's domain.ErrNotFound case) is the one signal that
+// tells a real refusal apart from the router never matching anything.
 func TestBudgetRolloverNoBudgetRowIsNotFound(t *testing.T) {
 	env := newTestEnv(t)
 	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
@@ -846,13 +813,11 @@ func TestBudgetRolloverNoBudgetRowIsNotFound(t *testing.T) {
 	}
 }
 
-// TestBudgetRolloverCurrencyMismatchIs422 is the brief's "an IDR goal in an
-// SGD household -> 422 ROLLOVER_CURRENCY_MISMATCH" case. The seeded
-// household's primary is SGD (api_test.go's newTestEnv), so a goal created
-// with currency: "IDR" is exactly the mismatch spec decision 11 refuses --
-// budgets carry no currency column of their own and are implicitly the
-// household's primary, so a rollover into any other currency would store a
-// rate nobody can audit.
+// TestBudgetRolloverCurrencyMismatchIs422 pins "an IDR goal in an
+// SGD household -> 422 ROLLOVER_CURRENCY_MISMATCH". The seeded
+// household's primary is SGD (api_test.go's newTestEnv); budgets carry no
+// currency column of their own and are implicitly the household's primary,
+// so rolling into an IDR goal would store a rate nobody can audit.
 func TestBudgetRolloverCurrencyMismatchIs422(t *testing.T) {
 	env := newTestEnv(t)
 	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
@@ -870,20 +835,19 @@ func TestBudgetRolloverCurrencyMismatchIs422(t *testing.T) {
 // and that test's own reasoning for covering them together applies here too.
 
 // TestBudgetRolloverUnknownGoalIsNotFound is this route's "another
-// household's member" matrix row, realised the way goals_api_test.go's own
-// comment documents for this whole suite: zeroUUID stands in for a goal
-// belonging to another household, since GoalRepository.Get scopes by
-// household id and cannot tell "made up" and "someone else's" apart -- both
-// simply match no row. The fixture is a real closed, budgeted, unspent
-// month (not merely "no budget row", which TestBudgetRolloverNoBudgetRowIsNotFound
-// already covers) specifically so this 404 can only come from Goals.Get's
-// own household scoping.
+// household's member" matrix row (goals_api_test.go's convention for this
+// suite): zeroUUID stands in for a goal belonging to another household,
+// since GoalRepository.Get scopes by household id and can't tell "made up"
+// from "someone else's" -- both simply match no row. The fixture is a
+// real closed, budgeted, unspent month, not merely "no budget row"
+// (TestBudgetRolloverNoBudgetRowIsNotFound already covers that), so this
+// 404 can only come from Goals.Get's own scoping.
 //
 // The message is asserted for the same reason
-// TestBudgetRolloverNoBudgetRowIsNotFound's own comment gives: {404,
-// "NOT_FOUND"} alone does not distinguish a real Goals.Get refusal from
-// chi's route-not-found catch-all, which would answer the identical status
-// and code if the route itself were ever deleted or mistyped.
+// TestBudgetRolloverNoBudgetRowIsNotFound's comment gives: {404,
+// "NOT_FOUND"} alone doesn't distinguish a real Goals.Get refusal from
+// chi's route-not-found catch-all, which would answer identically if the
+// route were ever deleted or mistyped.
 func TestBudgetRolloverUnknownGoalIsNotFound(t *testing.T) {
 	env := newTestEnv(t)
 	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
@@ -899,21 +863,20 @@ func TestBudgetRolloverUnknownGoalIsNotFound(t *testing.T) {
 	}
 }
 
-// --- Task 10: category create, rename, archive and restore routes ----------
+// --- Category create, rename, archive and restore routes --------------------
 
-// TestCategoryWriteRoutesRequireMoneyAndOwner is
+// TestCategoryWriteRoutesRequireMoneyAndOwner applies
 // TestTransactionRoutesRequireMoneyAndOwner's matrix (transactions_api_test.go)
-// applied to the four category write routes, which sit in the same
-// money+owner group. wantOwner pins the exact status an owner receives, not
-// merely "not 401/403", for the same reason that file's comment gives: a
+// to the four category write routes, which sit in the same money+owner
+// group. wantOwner pins the exact status, not merely "not 401/403": a
 // route wired with a nil deps.Categories would pass both guards and panic
-// into a 500, which a bare non-401/403 check would let slide by silently.
+// into a 500, which a looser check would miss.
 //
 // POST and PATCH answer 400 for the owner case: requestRouteAs sends a nil
-// body, and decodeJSONBody refuses an empty one before either handler ever
-// reaches the service. Archive and restore need no body at all, so a real
-// guard pass against a made-up id reaches the service and comes back 404 --
-// proof the handler is wired, without needing an existing category here.
+// body, refused by decodeJSONBody before either handler reaches the
+// service. Archive and restore need no body, so a guard pass against a
+// made-up id reaches the service and returns 404 -- proof of wiring
+// without an existing category.
 func TestCategoryWriteRoutesRequireMoneyAndOwner(t *testing.T) {
 	env := newTestEnv(t)
 	zeroUUID := "00000000-0000-0000-0000-000000000000"
@@ -958,8 +921,8 @@ func TestCategoryWriteRoutesRequireMoneyAndOwner(t *testing.T) {
 
 // TestCategoryWriteRoutesRequireCSRF mirrors TestBudgetWriteRouteRequiresCSRF
 // and TestTransactionWriteRoutesRequireCSRF for the four category write
-// routes: no token at all, and a token that does not match the cookie, both
-// refused by the CSRF_INVALID code specifically.
+// routes: no token, and a token that doesn't match the cookie, both refused
+// by CSRF_INVALID specifically.
 func TestCategoryWriteRoutesRequireCSRF(t *testing.T) {
 	env := newTestEnv(t)
 	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
@@ -1045,7 +1008,7 @@ func listHasCategory(t *testing.T, env *testEnv, session *http.Cookie, path, cat
 	return false
 }
 
-// TestCategoryCreateRenameRoundTrip is the brief's create-then-rename case:
+// TestCategoryCreateRenameRoundTrip pins the create-then-rename case:
 // Create trims the name and always answers CategoryExpense, and Rename
 // changes the name on the same row without disturbing its id or kind.
 func TestCategoryCreateRenameRoundTrip(t *testing.T) {
@@ -1082,10 +1045,10 @@ func TestCategoryCreateRenameRoundTrip(t *testing.T) {
 	}
 }
 
-// TestCategoryCreateRenameDuplicateNameIs409 is the brief's "duplicate name
-// -> 409 CATEGORY_NAME_TAKEN" case for both write routes that can collide:
-// Create against an existing starter-set name, and Rename of one category
-// onto another's name.
+// TestCategoryCreateRenameDuplicateNameIs409 pins "duplicate
+// name -> 409 CATEGORY_NAME_TAKEN" for both routes that can collide:
+// Create against an existing starter-set name, and Rename onto another
+// category's name.
 func TestCategoryCreateRenameDuplicateNameIs409(t *testing.T) {
 	env := newTestEnv(t)
 	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
@@ -1107,12 +1070,11 @@ func TestCategoryCreateRenameDuplicateNameIs409(t *testing.T) {
 	assertErrorResponse(t, rec, http.StatusConflict, "CATEGORY_NAME_TAKEN")
 }
 
-// TestCategoryArchiveOmitsFromListRestoreUndoes is the brief's
-// "archive->list omits/includes correctly; restore undoes" case: the default
-// list (the transaction modal's dropdown) must stop offering an archived
-// category, ?includeArchived=true (Budget's "Edit categories" screen) must
-// keep showing it with archived: true, and Restore must put it straight back
-// in the default list.
+// TestCategoryArchiveOmitsFromListRestoreUndoes pins
+// "archive->list omits/includes correctly; restore undoes": the
+// default list (the modal's dropdown) stops offering an archived category,
+// ?includeArchived=true (Budget's "Edit categories" screen) keeps showing
+// it with archived: true, and Restore puts it back in the default list.
 func TestCategoryArchiveOmitsFromListRestoreUndoes(t *testing.T) {
 	env := newTestEnv(t)
 	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
@@ -1167,12 +1129,12 @@ func TestCategoryArchiveOmitsFromListRestoreUndoes(t *testing.T) {
 	}
 }
 
-// TestCategoryRenameUnknownIDIsNotFound is the matrix's not-found precedent
-// (TestAccountErrorCodesMatchTheSpecTable and TestTransactionRoutesRequireMoneyAndOwner's
-// zeroUUID delete case) applied to Rename: an id that is not this
-// household's -- here, one that does not exist at all, since this suite has
-// no second-household fixture to construct a real cross-household id from --
-// surfaces domain.ErrNotFound's 404 NOT_FOUND untranslated.
+// TestCategoryRenameUnknownIDIsNotFound is the matrix's not-found
+// precedent (TestAccountErrorCodesMatchTheSpecTable,
+// TestTransactionRoutesRequireMoneyAndOwner's zeroUUID case) applied to
+// Rename: an id that isn't this household's -- here, one that simply
+// doesn't exist, since this suite has no second-household fixture --
+// surfaces domain.ErrNotFound's 404 untranslated.
 func TestCategoryRenameUnknownIDIsNotFound(t *testing.T) {
 	env := newTestEnv(t)
 	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)

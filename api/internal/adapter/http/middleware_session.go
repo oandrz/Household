@@ -39,17 +39,17 @@ func RequestScope(r *http.Request) (Scope, bool) {
 	return scope, ok
 }
 
-// requireScope is RequestScope plus the refusal, for the handlers that have
+// requireScope is RequestScope plus the refusal, for handlers that have
 // nothing sensible to do without a scope -- which is all of them.
 //
-// It exists because `scope, _ := RequestScope(r)` reads as harmless and is not:
-// the discarded bool leaves an EMPTY household id in a variable every query
-// below then trusts. A list route answers 404 for it, which is wrong but loud;
-// a report route answers 200 with no rows, which tells a caller who never
-// signed in that they own nothing. Fail closed on values you did not construct.
+// `scope, _ := RequestScope(r)` looks harmless but isn't: the discarded bool
+// leaves an empty household id that every query below then trusts, answering
+// a wrong-but-loud 404 on a list route or a silent 200-with-no-rows on a
+// report route that tells an unauthenticated caller they own nothing. Fail
+// closed on values you did not construct.
 //
-// The guard chain makes this unreachable today. It is the second lock, not the
-// first, and it costs two lines a handler.
+// The guard chain already makes this unreachable; it is the second lock, not
+// the first, and it costs two lines a handler.
 func requireScope(w http.ResponseWriter, r *http.Request) (Scope, bool) {
 	scope, ok := RequestScope(r)
 	if !ok {
@@ -72,30 +72,25 @@ const (
 
 // bearerPrefix is the Authorization scheme a token arrives under. A header
 // with any other scheme is a malformed credential and is refused; it never
-// falls through to the cookie (spec decision 4).
+// falls through to the cookie.
 const bearerPrefix = "Bearer "
 
 const sessionCookieName = "hearth_session"
 
-// SessionTTL is how long a session lives from the moment it is issued or
-// extended: 30 days, per the design's global constraints. cmd/api/main.go
-// hands this exact value to both AuthDeps.SessionTTL and
-// InviteDeps.SessionTTL, so a session minted at sign-in and one minted by
-// accepting an invite expire on the identical schedule, and requireSession's
-// own extension below (see sessionExtendThreshold) resets a session to that
-// same horizon.
+// SessionTTL is how long a session lives from issue or extension: 30 days,
+// per the design's global constraints. cmd/api/main.go hands this same value
+// to both AuthDeps.SessionTTL and InviteDeps.SessionTTL, so a session from
+// sign-in and one from accepting an invite expire on the same schedule;
+// requireSession's own extension (sessionExtendThreshold) resets a session
+// to that same horizon.
 const SessionTTL = 30 * 24 * time.Hour
 
 // sessionExtendThreshold governs how often an active session's expiry is
-// actually rewritten. The brief's own wording here is ambiguous ("extends
-// the session when it is more than a day from expiry"), and no test in this
-// task pins the choice down either way, but only one reading is coherent
-// with the reason a conditional check exists at all: extending on literally
-// every authenticated request would mean a write on every single API call
-// for the life of a session, which is exactly the write amplification a
-// threshold is meant to avoid. So the session's expiry is only pushed back
-// out once it has drifted within a day of lapsing -- a session used daily
-// gets roughly one extension every 29 days, not one per request.
+// actually rewritten -- extending on every request would mean a write per
+// API call for the life of the session, exactly the write amplification a
+// threshold exists to avoid. Expiry is pushed back out only once it has
+// drifted within a day of lapsing, so a session used daily gets roughly one
+// extension every 29 days, not one per request.
 const sessionExtendThreshold = 24 * time.Hour
 
 // sessionTouchInterval is how stale sessions.last_seen_at may be before a
@@ -138,11 +133,11 @@ func requireSession(deps Deps) func(http.Handler) http.Handler {
 			}
 
 			// ByUser cannot take a household scope (see
-			// usecase.MembershipRepository.ByUser's doc comment), so its
+			// usecase.MembershipRepository.ByUser's doc comment), so the
 			// result is cross-checked against the session's own HouseholdID
-			// rather than trusted blindly -- a defensive check against a
-			// future multi-household user, not something the current schema's
-			// UNIQUE constraint should ever actually trigger.
+			// rather than trusted blindly. This defends against a future
+			// multi-household user; the current schema's UNIQUE constraint
+			// should never actually trigger it.
 			membership, err := deps.Memberships.ByUser(ctx, record.UserID)
 			if err != nil || membership.HouseholdID != record.HouseholdID {
 				WriteError(w, http.StatusUnauthorized, "UNAUTHENTICATED", "Sign in required.", nil)
@@ -154,22 +149,20 @@ func requireSession(deps Deps) func(http.Handler) http.Handler {
 				newExpiry := now.Add(SessionTTL)
 				if err := deps.Sessions.Extend(ctx, hash, newExpiry); err != nil {
 					// Best-effort: a failure here must not turn an
-					// otherwise-valid, already-authenticated request into a
-					// 401. The session keeps its existing (still-live, per
-					// the ByTokenHash lookup above) expiry and gets another
-					// chance to extend on the next request.
+					// already-authenticated request into a 401. The session
+					// keeps its existing (still-live, per the ByTokenHash
+					// lookup above) expiry and gets another chance to extend
+					// on the next request.
 					slog.Warn("failed to extend session", "error", err)
 				} else {
-					// Extending the database row is only half of "extended
-					// on use": the browser's copy of hearth_session was set
-					// once, at sign-in, with a fixed Expires, and would
-					// otherwise still discard it on that original schedule no
-					// matter how actively the session was used -- Extend
-					// succeeding above changed the row, not the cookie. Same
-					// for csrf_token: it was issued with the identical fixed
-					// lifetime at sign-in and would die on the same day.
-					// Both are re-issued here with the same token values
-					// (only the expiry moves), so a browser that is still
+					// Extending the database row is only half of "extended on
+					// use": the browser's hearth_session cookie was set once,
+					// at sign-in, with a fixed Expires, and would still
+					// discard it on that schedule no matter how actively the
+					// session was used -- Extend above changed the row, not
+					// the cookie. csrf_token has the same fixed-lifetime
+					// problem. Both are re-issued here with the same token
+					// values (only the expiry moves), so a browser still
 					// actively presenting this session never loses it.
 					setSessionCookie(w, deps, cookie.Value, newExpiry)
 					if csrfCookie, err := r.Cookie(csrfCookieName); err == nil {
@@ -181,9 +174,8 @@ func requireSession(deps Deps) func(http.Handler) http.Handler {
 			if record.LastSeenAt == nil || now.Sub(*record.LastSeenAt) >= sessionTouchInterval {
 				if err := deps.Sessions.Touch(ctx, hash, now); err != nil {
 					// Best-effort, exactly like Extend above: a usage
-					// timestamp that could not be written must not turn an
-					// authenticated request into a failure. The next request
-					// tries again.
+					// timestamp that could not be written must not fail an
+					// authenticated request. The next request tries again.
 					slog.Warn("failed to touch session", "error", err)
 				}
 			}
@@ -196,13 +188,12 @@ func requireSession(deps Deps) func(http.Handler) http.Handler {
 			if err != nil {
 				// logAndWriteInternal, not MapDomainError -- see
 				// requirePlatformAdmin's comment in middleware_admin.go for
-				// why a lookup failure must never be allowed to read as
-				// domain.ErrNotFound's 404. The stakes here are larger than
-				// they are there: after this task 404 means "this feature is
+				// why a lookup failure must never read as domain.ErrNotFound's
+				// 404. The stakes are larger here: 404 means "this feature is
 				// hidden" on every authenticated route, not just the admin
-				// subtree, so a flags lookup that ever produced ErrNotFound
-				// through MapDomainError would tell every caller the whole
-				// product had been switched off.
+				// subtree, so a flags lookup that produced ErrNotFound through
+				// MapDomainError would tell every caller the whole product had
+				// been switched off.
 				logAndWriteInternal(w, r, err)
 				return
 			}
@@ -210,11 +201,11 @@ func requireSession(deps Deps) func(http.Handler) http.Handler {
 			scope := Scope{UserID: record.UserID, HouseholdID: record.HouseholdID, Membership: membership, Flags: flags, AuthVia: authViaSession}
 			// The admin grant is put on the context from the same session
 			// record the scope is built from, so the two can never disagree
-			// about which session is speaking. It is carried separately
-			// rather than folded into Scope because it is not part of the
-			// caller's household identity: every downstream consumer of
-			// Scope (requireCapability, requireOwner, every handler) would
-			// otherwise gain a field that means nothing to it.
+			// about which session is speaking. It stays out of Scope
+			// because it isn't part of the caller's household identity --
+			// every downstream consumer of Scope (requireCapability,
+			// requireOwner, every handler) would otherwise gain a field
+			// that means nothing to it.
 			ctx = withAdminGrant(context.WithValue(ctx, scopeKey{}, scope), record.AdminGrantExpiresAt)
 			ctx = withSessionHash(ctx, hash)
 			next.ServeHTTP(w, r.WithContext(ctx))

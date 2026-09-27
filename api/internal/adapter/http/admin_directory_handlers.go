@@ -151,14 +151,14 @@ func channelString(c usecase.MemberChannel) (string, error) {
 
 // handleAdminHousehold is the drill-in. A householdID that is not a UUID is
 // refused here, before the service is called: fail closed on a value we did
-// not construct. The 404 does not depend on this guard --
+// not construct. The 404 doesn't strictly depend on this guard --
 // postgres/convert.go's uuid() degrades an unparseable id to the zero UUID,
-// whose SELECT matches no row and becomes domain.ErrNotFound anyway. But
-// that leniency is also what leaves the flag override *writes* answering 500
-// for this input (ADMIN_SURFACE_HANDOVER.md, "Known, deferred"): which way a
-// malformed id degrades is a property of a helper two layers down, not of
-// this route. Refusing here also skips one SQL round-trip for input that
-// can never match.
+// which matches no row and becomes domain.ErrNotFound anyway -- but that
+// same leniency is what leaves the flag override *writes* answering 500 for
+// this input instead (ADMIN_SURFACE_HANDOVER.md, "Known, deferred"): which
+// way a malformed id degrades is a property of a helper two layers down,
+// not of this route. Refusing here also skips a SQL round-trip that could
+// never match.
 func handleAdminHousehold(deps Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		id := chi.URLParam(r, "householdID")

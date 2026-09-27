@@ -24,7 +24,8 @@ type accessTokenDTO struct {
 	LastUsedAt *time.Time `json:"lastUsedAt"`
 }
 
-// accessChatDTO has no chat id on purpose (spec decision 9).
+// accessChatDTO has no chat id: it's a Telegram identifier the panel never
+// shows, so it never leaves the server.
 type accessChatDTO struct {
 	MemberID     string    `json:"memberId"`
 	MemberName   string    `json:"memberName"`
