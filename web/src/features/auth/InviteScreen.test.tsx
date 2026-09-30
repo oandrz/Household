@@ -189,6 +189,38 @@ describe("InviteScreen", () => {
     ).toBeInTheDocument();
   });
 
+  it("does not warn about signing out when there is no invite to accept", async () => {
+    stubFetchRoutes({
+      [`GET ${PREVIEW_URL}`]: {
+        status: 404,
+        body: { error: { code: "NOT_FOUND", message: "That could not be found." } },
+      },
+      [`GET ${ME_URL}`]: { status: 200, body: signedInAsSomeoneElse },
+    });
+    renderInvite();
+
+    await screen.findByText(/We couldn't find that invite/);
+    expect(
+      screen.queryByText(/Accepting this invite will sign them out/),
+    ).not.toBeInTheDocument();
+  });
+
+  it("gives an unusable invite a heading and a way back into Hearth", async () => {
+    stubFetchRoutes({
+      [`GET ${PREVIEW_URL}`]: {
+        status: 404,
+        body: { error: { code: "NOT_FOUND", message: "That could not be found." } },
+      },
+      [`GET ${ME_URL}`]: NO_SESSION,
+    });
+    renderInvite();
+
+    expect(
+      await screen.findByRole("heading", { name: "That invite won’t work." }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Go to Hearth" })).toHaveAttribute("href", "/");
+  });
+
   it("renders an expired message on a 410 preview", async () => {
     stubFetchRoutes({
       [`GET ${PREVIEW_URL}`]: {
