@@ -73,7 +73,7 @@ export function OverviewPage() {
   return (
     <PageContainer>
       <div className="flex items-center justify-between">
-        <h1 className="font-serif text-2xl">{OVERVIEW_COPY.title}</h1>
+        <h1 className="text-[23px] font-semibold tracking-[-0.02em] text-ink">{OVERVIEW_COPY.title}</h1>
         {isOwner && hasMoney && <QuickAddMenu accounts={accounts.data?.accounts ?? []} />}
       </div>
 
