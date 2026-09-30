@@ -188,13 +188,27 @@ arrives from a database column or a request needs a `default` that refuses.
 test mutation-checked, `docs/FEATURE_TRACKER.md` and `docs/LEARNING.md` updated.
 The full checklist is at the end of `docs/LEARNING.md`.
 
-**Test the product in a real browser before calling it done.** Browser
-automation tools (Claude in Chrome / Playwright MCP) are available in every
-session — drive the running app at http://localhost:5173 yourself: click the
-flow the change touches, watch the numbers actually move, and only then claim
-it works. Tests passing is not that claim (see `verifying-in-the-real-environment`
-skill). The product owner asked for this explicitly on 2026-07-30 after a
+**Test the product in a real browser before calling it done.** Use gstack's
+`/browse` skill (see the gstack section below) to drive the running app at
+http://localhost:5173 yourself: click the flow the change touches, watch the
+numbers actually move, and only then claim it works. Tests passing is not that
+claim (see `verifying-in-the-real-environment` skill). The product owner asked for this explicitly on 2026-07-30 after a
 feature verified "15 of 15" still surprised them in first-run use.
+
+## gstack
+
+Use the `/browse` skill from gstack for all web browsing. Never use
+`mcp__claude-in-chrome__*` tools. gstack is installed per person, not in this
+repository — see https://github.com/garrytan/gstack for setup.
+
+Available gstack skills:
+/office-hours, /plan-ceo-review, /plan-eng-review, /plan-design-review,
+/design-consultation, /design-shotgun, /design-html, /review, /deslop-shared-libs,
+/test-audit, /ship, /land-and-deploy, /canary, /benchmark, /browse, /connect-chrome,
+/qa, /qa-only, /design-review, /scrape, /setup-browser-cookies, /setup-deploy,
+/setup-gbrain, /retro, /investigate, /document-release, /document-generate, /codex,
+/cso, /autoplan, /plan-devex-review, /devex-review, /careful, /freeze, /guard,
+/unfreeze, /gstack-upgrade, /learn.
 
 ## Agent skills
 
