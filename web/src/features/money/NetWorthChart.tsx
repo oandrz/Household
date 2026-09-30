@@ -59,70 +59,71 @@ export function NetWorthChart({ points }: { points: TrendPoint[] }) {
 
   return (
     <div className="mt-4">
-      <svg
-        viewBox={`0 0 ${WIDTH} ${HEIGHT}`}
-        // role="img" + aria-label: bars have nothing for a screen reader to
-        // announce on their own, and the label names the range and how much of
-        // it carries a figure rather than merely saying "chart".
-        role="img"
-        aria-label={FINANCES_COPY.trendChartLabel(
-          monthTickLabel(points[0].month),
-          monthTickLabel(points[points.length - 1].month),
-          known.length,
-        )}
-        className="w-full text-accent"
-      >
-        {points.map((point, index) => {
-          if (point.netWorthMinor === null) return null;
-          const y = PAD_TOP + ((max - point.netWorthMinor) / span) * PLOT_HEIGHT;
-          return (
-            <rect
-              key={point.month}
-              data-testid="net-worth-bar"
-              data-month={point.month}
-              data-complete={point.complete}
-              x={PAD_X + index * (barWidth + BAR_GAP)}
-              y={Math.min(y, baselineY)}
-              width={barWidth}
-              // A month that is exactly zero still gets a visible sliver, so
-              // "we knew, and it was nothing" does not look like a gap.
-              height={Math.max(1, Math.abs(baselineY - y))}
-              rx={2}
-              fill="currentColor"
-              // The newest point is always complete: networth_trend.go clamps
-              // trackedFrom down to the current month and only ever computes a
-              // trend when at least one account counts toward net worth, so
-              // months[11] cannot be missing (backend invariant, proven by
-              // TestAnAccountOpenedNextMonthByClockSkewIsInTheNewestBar). Full
-              // opacity here can therefore never contradict the "lighter bars
-              // are incomplete" note below.
-              opacity={
-                index === points.length - 1 ? NEWEST : point.complete ? COMPLETE : INCOMPLETE
-              }
-            />
-          );
-        })}
-        {/* points.length is a runtime fact, not a compile-time one -- trendSchema
-            (schemas.ts) is a plain array with no length check, so a truncated
-            or malformed response that still parses must not crash on
-            points[11]. Filtering keeps whichever of the four design
-            positions actually exist and degrades to fewer ticks instead;
-            MoodChart.tsx's `index % 3 === 0` is the same kind of
-            length-safety for its own axis. */}
-        {TICKS.filter((index) => index < points.length).map((index) => (
-          <text
-            key={points[index].month}
-            x={PAD_X + index * (barWidth + BAR_GAP) + barWidth / 2}
-            y={HEIGHT - 8}
-            textAnchor="middle"
-            fontSize={9}
-            fill="currentColor"
-            className="text-muted"
-          >
-            {monthTickLabel(points[index].month)}
-          </text>
-        ))}
-      </svg>
+      <div className="relative">
+        <svg
+          viewBox={`0 0 ${WIDTH} ${HEIGHT}`}
+          // role="img" + aria-label: bars have nothing for a screen reader to
+          // announce on their own, and the label names the range and how much of
+          // it carries a figure rather than merely saying "chart".
+          role="img"
+          aria-label={FINANCES_COPY.trendChartLabel(
+            monthTickLabel(points[0].month),
+            monthTickLabel(points[points.length - 1].month),
+            known.length,
+          )}
+          className="w-full text-accent"
+        >
+          {points.map((point, index) => {
+            if (point.netWorthMinor === null) return null;
+            const y = PAD_TOP + ((max - point.netWorthMinor) / span) * PLOT_HEIGHT;
+            return (
+              <rect
+                key={point.month}
+                data-testid="net-worth-bar"
+                data-month={point.month}
+                data-complete={point.complete}
+                x={PAD_X + index * (barWidth + BAR_GAP)}
+                y={Math.min(y, baselineY)}
+                width={barWidth}
+                // A month that is exactly zero still gets a visible sliver, so
+                // "we knew, and it was nothing" does not look like a gap.
+                height={Math.max(1, Math.abs(baselineY - y))}
+                rx={2}
+                fill="currentColor"
+                // The newest point is always complete: networth_trend.go clamps
+                // trackedFrom down to the current month and only ever computes a
+                // trend when at least one account counts toward net worth, so
+                // months[11] cannot be missing (backend invariant, proven by
+                // TestAnAccountOpenedNextMonthByClockSkewIsInTheNewestBar). Full
+                // opacity here can therefore never contradict the "lighter bars
+                // are incomplete" note below.
+                opacity={
+                  index === points.length - 1 ? NEWEST : point.complete ? COMPLETE : INCOMPLETE
+                }
+              />
+            );
+          })}
+        </svg>
+          {/* points.length is a runtime fact, not a compile-time one -- trendSchema
+              (schemas.ts) is a plain array with no length check, so a truncated
+              or malformed response that still parses must not crash on
+              points[11]. Filtering keeps whichever of the four design
+              positions actually exist and degrades to fewer ticks instead;
+              MoodChart.tsx's `index % 3 === 0` is the same kind of
+              length-safety for its own axis. */}
+          {/* HTML, not SVG <text>: the SVG scales with the card, so a 9-unit
+              label rendered at about 19px on a wide screen, bigger than the
+              page's own body text. Placed by the same x, as a percentage. */}
+          {TICKS.filter((index) => index < points.length).map((index) => (
+            <span
+              key={points[index].month}
+              className="absolute bottom-0 -translate-x-1/2 whitespace-nowrap text-[11px] text-muted"
+              style={{ left: `${((PAD_X + index * (barWidth + BAR_GAP) + barWidth / 2) / WIDTH) * 100}%` }}
+            >
+              {monthTickLabel(points[index].month)}
+            </span>
+          ))}
+      </div>
       {hasIncomplete && (
         <p data-testid="net-worth-chart-note" className="mt-2 text-[11.5px] text-muted">
           {firstComplete
