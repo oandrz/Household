@@ -184,6 +184,11 @@ func (s *AccountService) validate(ctx context.Context, a *domain.Account) error 
 	if a.Type.IsLiability() && a.OpeningBalance.Amount < 0 {
 		return domain.ErrLiabilityBalanceNegative
 	}
+	// The opening balance is the first term of the account's balance sum, and
+	// an asset's may be negative, so the limit applies on both sides of zero.
+	if err := domain.CheckAmountWithinLimit(a.OpeningBalance.Amount); err != nil {
+		return err
+	}
 
 	if a.OwnerMembershipID != "" {
 		ok, err := s.d.Accounts.MembershipBelongsToHousehold(ctx, a.HouseholdID, a.OwnerMembershipID)

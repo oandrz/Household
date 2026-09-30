@@ -226,6 +226,11 @@ func (s *TransactionService) validate(ctx context.Context, t *domain.Transaction
 	if t.Amount.Amount <= 0 {
 		return domain.ErrTransactionAmountNotPositive
 	}
+	// Balances are sums of these amounts, so one absurd figure would make
+	// every read of the account fail (see domain.MaxAmountMinor).
+	if err := domain.CheckAmountWithinLimit(t.Amount.Amount); err != nil {
+		return err
+	}
 
 	// The account combination the kind requires mirrors accounts_match_kind.
 	// One sentinel for every wrong shape: separate errors for "not yours" vs
@@ -315,6 +320,10 @@ func (s *TransactionService) validateReceivedAmount(t *domain.Transaction, fromC
 	}
 	if t.ReceivedAmount.Amount <= 0 {
 		return domain.ErrTransactionAmountNotPositive
+	}
+	// The receiving account's balance sums this figure, not Amount.
+	if err := domain.CheckAmountWithinLimit(t.ReceivedAmount.Amount); err != nil {
+		return err
 	}
 	t.ReceivedAmount.Currency = toCurrency
 	return nil

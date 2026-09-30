@@ -455,6 +455,9 @@ func (s *BillService) Create(ctx context.Context, in NewBill, today time.Time) (
 	if in.AmountMinor <= 0 {
 		return BillView{}, domain.ErrBillAmountNotPositive
 	}
+	if err := domain.CheckAmountWithinLimit(in.AmountMinor); err != nil {
+		return BillView{}, err
+	}
 	cadence, err := domain.ParseCadence(string(in.Cadence))
 	if err != nil {
 		return BillView{}, err
@@ -550,6 +553,9 @@ func (s *BillService) Update(ctx context.Context, householdID, billID string, pa
 	if patch.AmountMinor != nil {
 		if *patch.AmountMinor <= 0 {
 			return BillView{}, domain.ErrBillAmountNotPositive
+		}
+		if err := domain.CheckAmountWithinLimit(*patch.AmountMinor); err != nil {
+			return BillView{}, err
 		}
 		b.Amount.Amount = *patch.AmountMinor
 	}
@@ -665,6 +671,11 @@ func (s *BillService) SetArchived(ctx context.Context, householdID, billID strin
 func (s *BillService) MarkPaid(ctx context.Context, in MarkPayment) (BillPaymentView, error) {
 	if in.AmountMinor != nil && *in.AmountMinor <= 0 {
 		return BillPaymentView{}, domain.ErrBillAmountNotPositive
+	}
+	if in.AmountMinor != nil {
+		if err := domain.CheckAmountWithinLimit(*in.AmountMinor); err != nil {
+			return BillPaymentView{}, err
+		}
 	}
 	rec, err := s.deps.Bills.Get(ctx, in.HouseholdID, in.BillID)
 	if err != nil {

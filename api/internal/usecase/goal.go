@@ -319,6 +319,14 @@ func (s *GoalService) Create(ctx context.Context, in NewGoal, createdOn time.Tim
 	if in.PlannedMonthlyMinor < 0 {
 		return domain.Goal{}, domain.ErrGoalPlannedMonthlyNegative
 	}
+	// StartingBalanceMinor has no sign rule (a goal may start in deficit), so
+	// this is the only check it gets: it becomes a stored contribution, and
+	// contributions are summed.
+	for _, minor := range []int64{in.TargetMinor, in.PlannedMonthlyMinor, in.StartingBalanceMinor} {
+		if err := domain.CheckAmountWithinLimit(minor); err != nil {
+			return domain.Goal{}, err
+		}
+	}
 
 	// domain.NewMoney validates the currency through domain.ParseCurrency,
 	// the single reference for what a valid code is -- an unknown currency
@@ -379,11 +387,17 @@ func (s *GoalService) Update(ctx context.Context, householdID, goalID string, pa
 		if *patch.TargetMinor <= 0 {
 			return domain.Goal{}, domain.ErrGoalTargetNotPositive
 		}
+		if err := domain.CheckAmountWithinLimit(*patch.TargetMinor); err != nil {
+			return domain.Goal{}, err
+		}
 		g.Target.Amount = *patch.TargetMinor
 	}
 	if patch.PlannedMonthlyMinor != nil {
 		if *patch.PlannedMonthlyMinor < 0 {
 			return domain.Goal{}, domain.ErrGoalPlannedMonthlyNegative
+		}
+		if err := domain.CheckAmountWithinLimit(*patch.PlannedMonthlyMinor); err != nil {
+			return domain.Goal{}, err
 		}
 		g.PlannedMonthly.Amount = *patch.PlannedMonthlyMinor
 	}
@@ -430,6 +444,11 @@ func (s *GoalService) SetArchived(ctx context.Context, householdID, goalID strin
 func (s *GoalService) AddContribution(ctx context.Context, in NewContribution) (domain.GoalContribution, error) {
 	if in.AmountMinor == 0 {
 		return domain.GoalContribution{}, domain.ErrContributionAmountZero
+	}
+	// A contribution may be negative (money taken back out), and a goal's
+	// total is the sum of them, so the limit applies on both sides of zero.
+	if err := domain.CheckAmountWithinLimit(in.AmountMinor); err != nil {
+		return domain.GoalContribution{}, err
 	}
 
 	rec, err := s.d.Goals.Get(ctx, in.HouseholdID, in.GoalID)

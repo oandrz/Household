@@ -451,6 +451,11 @@ func (s *BudgetService) Save(ctx context.Context, householdID string, month time
 	if expectedIncomeMinor != nil && *expectedIncomeMinor < 0 {
 		return domain.Budget{}, domain.ErrBudgetIncomeNegative
 	}
+	if expectedIncomeMinor != nil {
+		if err := domain.CheckAmountWithinLimit(*expectedIncomeMinor); err != nil {
+			return domain.Budget{}, err
+		}
+	}
 
 	seen := make(map[string]bool, len(lines))
 	for _, line := range lines {
@@ -460,6 +465,9 @@ func (s *BudgetService) Save(ctx context.Context, householdID string, month time
 		seen[line.CategoryID] = true
 		if line.CapMinor < 0 {
 			return domain.Budget{}, domain.ErrBudgetCapNegative
+		}
+		if err := domain.CheckAmountWithinLimit(line.CapMinor); err != nil {
+			return domain.Budget{}, err
 		}
 	}
 
