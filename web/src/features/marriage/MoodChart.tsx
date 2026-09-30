@@ -78,52 +78,52 @@ export function MoodChart({ points }: { points: MoodPoint[] }) {
   );
 
   return (
-    <svg
-      viewBox={`0 0 ${WIDTH} ${HEIGHT}`}
-      // role="img" + aria-label: a line drawing has nothing else for a
-      // screen reader to announce -- the label names the range and how many
-      // months actually carry a mood, not merely that a chart exists.
-      role="img"
-      aria-label={ariaLabel}
-      className="w-full text-accent"
-    >
-      {runs.map((run) => (
-        <polyline
-          key={run[0].index}
-          points={run.map((point) => `${xFor(point.index, points.length)},${yFor(point.mood)}`).join(" ")}
-          fill="none"
-          stroke="currentColor"
-          strokeWidth={2}
-        />
-      ))}
-      {points.map((point, index) =>
-        point.mood === null ? null : (
-          <circle
-            key={`dot-${point.month}`}
-            cx={xFor(index, points.length)}
-            cy={yFor(point.mood)}
-            r={3}
-            fill="currentColor"
+    <div className="relative">
+      <svg
+        viewBox={`0 0 ${WIDTH} ${HEIGHT}`}
+        // role="img" + aria-label: a line drawing has nothing else for a
+        // screen reader to announce -- the label names the range and how many
+        // months actually carry a mood, not merely that a chart exists.
+        role="img"
+        aria-label={ariaLabel}
+        className="w-full text-accent"
+      >
+        {runs.map((run) => (
+          <polyline
+            key={run[0].index}
+            points={run.map((point) => `${xFor(point.index, points.length)},${yFor(point.mood)}`).join(" ")}
+            fill="none"
+            stroke="currentColor"
+            strokeWidth={2}
           />
-        ),
-      )}
+        ))}
+        {points.map((point, index) =>
+          point.mood === null ? null : (
+            <circle
+              key={`dot-${point.month}`}
+              cx={xFor(index, points.length)}
+              cy={yFor(point.mood)}
+              r={3}
+              fill="currentColor"
+            />
+          ),
+        )}
+      </svg>
       {points.map((point, index) =>
         // Every third month only -- twelve full labels would overlap at
-        // 320px (the brief's own constraint).
+        // 320px (the brief's own constraint). HTML, not SVG <text>: the SVG
+        // scales with its card, so a 9-unit label came out at whatever size
+        // the card happened to be. Placed by the same x, as a percentage.
         index % 3 === 0 ? (
-          <text
+          <span
             key={`label-${point.month}`}
-            x={xFor(index, points.length)}
-            y={HEIGHT - 8}
-            textAnchor="middle"
-            fontSize={9}
-            fill="currentColor"
-            className="text-muted"
+            className="absolute bottom-0 -translate-x-1/2 whitespace-nowrap text-[11px] text-muted"
+            style={{ left: `${(xFor(index, points.length) / WIDTH) * 100}%` }}
           >
             {monthShortLabel(point.month)}
-          </text>
+          </span>
         ) : null,
       )}
-    </svg>
+    </div>
   );
 }
