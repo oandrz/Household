@@ -96,13 +96,13 @@ export function PortfolioPage() {
           a beat after the page does -- it is either shown with the figures it
           qualifies, or not at all. */}
       {holdings.isSuccess && holdings.data.notInNetWorth ? (
-        <p className="mt-5 rounded-xl border border-hairline bg-surface px-4 py-3 text-[12.5px] leading-snug text-muted" data-testid="not-in-net-worth">
+        <p className="rounded-xl border border-hairline bg-surface px-4 py-3 text-[12.5px] leading-snug text-muted" data-testid="not-in-net-worth">
           Holdings are not counted in your net worth yet. The figures here stand
           on their own.
         </p>
       ) : null}
 
-      <div className="mt-5 flex items-center gap-1.5 text-[11px] text-muted">
+      <div className="flex items-center gap-1.5 text-[11px] text-muted">
         <ToggleSwitch
           label={SHOW_ARCHIVED}
           checked={includeArchived}
@@ -111,28 +111,28 @@ export function PortfolioPage() {
         {SHOW_ARCHIVED}
       </div>
 
-      {holdings.isPending ? <p className="mt-5 text-xs text-muted">Loading your holdings…</p> : null}
+      {holdings.isPending ? <p className="text-xs text-muted">Loading your holdings…</p> : null}
       {holdings.isError ? (
-        <p className="mt-5 text-xs text-danger" role="alert">
+        <p className="text-xs text-danger" role="alert">
           Your holdings could not be loaded. Try again in a moment.
         </p>
       ) : null}
 
       {holdings.isSuccess && rows.length === 0 ? (
-        <div className="mt-5 rounded-xl border border-hairline bg-card p-[22px]">
+        <div className="rounded-xl border border-hairline bg-card p-[22px]">
           <h2 className="text-[15px] font-semibold text-ink">Nothing here yet</h2>
           <p className="mt-1.5 text-[13px] text-muted">
             Add a holding for each thing you own — a stock, gold, anything with a
             price — then record what you paid and what it is worth today.
           </p>
-          <button type="button" className="min-h-11 rounded-lg bg-accent px-3.5 py-2 text-[13px] font-semibold text-white sm:min-h-0" onClick={() => setModalHolding("new")}>
+          <button type="button" className="mt-4 min-h-11 rounded-lg bg-accent px-3.5 py-2 text-[13px] font-semibold text-white sm:min-h-0" onClick={() => setModalHolding("new")}>
             Add your first holding
           </button>
         </div>
       ) : null}
 
       {rows.length > 0 ? (
-        <ul className="mt-5 flex flex-col gap-3">
+        <ul className="flex flex-col gap-3">
           {rows.map((holding) => (
             <HoldingRow
               key={holding.id}
