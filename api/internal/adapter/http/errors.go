@@ -271,13 +271,24 @@ var domainErrorResponses = []domainErrorResponse{
 		message:   "That feature flag does not exist in this build.",
 	},
 	{
-		// Reaching the HTTP layer means a calculation is wrong, not a bad
-		// request -- nothing on this API surface accepts a caller-supplied
-		// amount that could overflow. Handled like the default branch
-		// (logged, generic 500); it has its own case only so the log names
-		// the cause.
+		// Arithmetic on stored figures did not fit in an int64. It is not a
+		// bad request: every amount a caller sends is refused past
+		// domain.MaxAmountMinor first (the AMOUNT_TOO_LARGE row below), so
+		// one request cannot cause this. What still can: tens of thousands
+		// of rows at that ceiling in one sum, or a row stored before the
+		// ceiling existed. Handled like the default branch (logged, generic
+		// 500); it has its own case only so the log names the cause.
 		sentinels: []error{domain.ErrAmountOverflow},
 		internal:  true,
+	},
+	{
+		// One row for every amount field on every money route, the way
+		// NEGATIVE_AMOUNT is: the message has to read correctly under any of
+		// them, so it names no field and no currency.
+		sentinels: []error{domain.ErrAmountTooLarge},
+		status:    http.StatusUnprocessableEntity,
+		code:      "AMOUNT_TOO_LARGE",
+		message:   "That amount is larger than Hearth can record. Check it for extra digits.",
 	},
 	{
 		// A Money zero value reached arithmetic: a bug here, never input.

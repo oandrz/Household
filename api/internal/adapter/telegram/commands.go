@@ -481,6 +481,12 @@ func explain(err error) string {
 	if errorsIs(err, domain.ErrInvalidAmount) {
 		return "That amount could not be read. Use the account's currency, e.g. 84.50 (no more decimals than the currency has)."
 	}
+	// An amount ParseAmount could read but TransactionService refuses as past
+	// domain.MaxAmountMinor. Without this it would fall through to "could not
+	// be saved. Try again", and trying again can never work.
+	if errorsIs(err, domain.ErrAmountTooLarge) {
+		return "That amount is larger than Hearth can record. Check it for extra digits."
+	}
 	if errorsIs(err, domain.ErrCategoryKindMismatch) {
 		return "That category is for the other kind of transaction."
 	}
