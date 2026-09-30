@@ -392,7 +392,7 @@ export function BillsPage() {
                 // did not, which left it reading as loose text on the canvas
                 // rather than as one of the page's panels. The fill stays
                 // `bg-callout` rather than becoming `bg-card`: this is the one
-                // panel on the page that is good news, and both lines inside it
+                // panel on the page that is good news, and both halves of its line
                 // are `text-accent`/`text-accent-dark`, which the app only ever
                 // puts on the callout tint (InviteScreen.tsx:155,
                 // TransactionsPage.tsx:480) and never on a card. So the border
@@ -402,8 +402,8 @@ export function BillsPage() {
                   data-testid="bills-all-caught-up"
                   className="rounded-xl border border-callout-border bg-callout px-5 py-[18px]"
                 >
-                  <p className="text-[13px] font-semibold text-accent">{BILL_COPY.allCaughtUpHeadline}</p>
-                  <p className="mt-1.5 text-[12px] leading-relaxed text-accent-dark">
+                  <p className="text-[12.5px] leading-relaxed text-accent-dark">
+                    <span className="font-semibold text-accent">{BILL_COPY.allCaughtUpHeadline}</span>{" "}
                     {BILL_COPY.allCaughtUpBody(
                       currentMonthName(),
                       summary.nextDue
