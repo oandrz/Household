@@ -84,9 +84,22 @@ function InvitePreviewError({ error }: { error: unknown }) {
     }
   }
   return (
-    <p role="alert" className="text-[13px] leading-relaxed text-muted">
-      {message}
-    </p>
+    <div className="text-center">
+      <h1 className="mb-1 mt-0.5 font-serif text-[27px] font-medium tracking-[-0.015em]">
+        That invite won’t work.
+      </h1>
+      <p role="alert" className="mb-5 text-[13px] leading-relaxed text-muted">
+        {message}
+      </p>
+      {/* "/" lands a signed-in visitor on Overview and anyone else on sign-in,
+          so one link is the right way out for both. */}
+      <a
+        href="/"
+        className="block w-full rounded-[9px] bg-accent py-3 text-center text-[13.5px] font-semibold text-white"
+      >
+        Go to Hearth
+      </a>
+    </div>
   );
 }
 
@@ -239,7 +252,9 @@ export function InviteScreen({ token }: { token: string }) {
 
   return (
     <AuthShell>
-      {me.isSuccess && (
+      {/* Only beside an invite that can actually be accepted: over a dead
+          link it warns about an action the page cannot take. */}
+      {me.isSuccess && preview.isSuccess && (
         <ExistingSessionWarning displayName={me.data.user.displayName} />
       )}
       {preview.isPending && (
