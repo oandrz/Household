@@ -125,7 +125,7 @@ describe("CurrencyPanel", () => {
     renderPanel();
 
     await screen.findByDisplayValue("SGD");
-    fireEvent.click(screen.getByRole("switch", { name: /show secondary currency/i }));
+    fireEvent.click(screen.getByRole("switch", { name: "Show IDR equivalents" }));
 
     await waitFor(() => {
       const call = fetchMock.mock.calls.find(
@@ -146,7 +146,7 @@ describe("CurrencyPanel", () => {
     renderPanel();
 
     await screen.findByText("SGD (S$)");
-    expect(screen.getByRole("switch", { name: /show secondary currency/i })).toBeDisabled();
+    expect(screen.getByRole("switch", { name: "Show IDR equivalents" })).toBeDisabled();
   });
 
   it("lets an owner edit the primary currency and issues a matching PATCH", async () => {

@@ -152,7 +152,9 @@ export function CurrencyPanel() {
                   showSecondaryCurrency: !household.data.showSecondaryCurrency,
                 })
               }
-              label="Show secondary currency equivalents"
+              // The visible label's exact words: someone using voice control
+              // says what they see, and a different spoken name never matches.
+              label={`Show ${household.data.secondaryCurrency} equivalents`}
             />
           </div>
 
