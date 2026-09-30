@@ -9,6 +9,10 @@
 // Built as a real <button role="switch"> (not the design's plain styled
 // <div>) so it is keyboard-operable and has a queryable checked state for
 // tests -- `getByRole("switch", { name, checked })`.
+//
+// The ::before layer is the phone touch target: an invisible 44px-tall box
+// centred on the 23px pill, so a thumb can hit it without the pill growing.
+// Off from `sm` up, matching every other control's `min-h-11 sm:min-h-0`.
 export function ToggleSwitch({
   checked,
   onChange,
@@ -28,7 +32,7 @@ export function ToggleSwitch({
       aria-label={label}
       disabled={disabled}
       onClick={onChange}
-      className={`flex h-[23px] w-10 flex-none items-center rounded-full p-0.5 transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${
+      className={`relative flex h-[23px] w-10 flex-none items-center rounded-full p-0.5 transition-colors before:absolute before:inset-x-0 before:top-1/2 before:h-11 before:-translate-y-1/2 before:content-[''] sm:before:hidden disabled:cursor-not-allowed disabled:opacity-60 ${
         checked ? "justify-end bg-accent" : "justify-start bg-toggle-off"
       }`}
     >
