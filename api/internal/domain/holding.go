@@ -110,6 +110,9 @@ func (e HoldingEvent) Validate(holdingCurrency, primaryCurrency string) error {
 	if e.Amount.Amount < 0 {
 		return fmt.Errorf("%w: an event amount cannot be negative, got %d", ErrNegativeAmount, e.Amount.Amount)
 	}
+	if err := CheckAmountWithinLimit(e.Amount.Amount); err != nil {
+		return err
+	}
 
 	return validatePrimaryAmount(e.PrimaryAmount, holdingCurrency, primaryCurrency)
 }
@@ -137,7 +140,7 @@ func validatePrimaryAmount(primary *Money, holdingCurrency, primaryCurrency stri
 	if primary.Amount < 0 {
 		return fmt.Errorf("%w: a primary amount cannot be negative, got %d", ErrNegativeAmount, primary.Amount)
 	}
-	return nil
+	return CheckAmountWithinLimit(primary.Amount)
 }
 
 // Valuation is what one unit of a holding was worth on a given day -- the
@@ -163,6 +166,9 @@ func (v Valuation) Validate(holdingCurrency, primaryCurrency string) error {
 	}
 	if v.UnitPrice.Amount < 0 {
 		return fmt.Errorf("%w: a unit price cannot be negative, got %d", ErrNegativeAmount, v.UnitPrice.Amount)
+	}
+	if err := CheckAmountWithinLimit(v.UnitPrice.Amount); err != nil {
+		return err
 	}
 	return validatePrimaryAmount(v.PrimaryUnitPrice, holdingCurrency, primaryCurrency)
 }

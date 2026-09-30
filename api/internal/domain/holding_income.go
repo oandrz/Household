@@ -73,6 +73,9 @@ func (i HoldingIncome) Validate(holdingCurrency, primaryCurrency string) error {
 	if i.Amount.Amount <= 0 {
 		return fmt.Errorf("%w: got %d", ErrHoldingIncomeAmountNotPositive, i.Amount.Amount)
 	}
+	if err := CheckAmountWithinLimit(i.Amount.Amount); err != nil {
+		return err
+	}
 	return validatePrimaryAmount(i.PrimaryAmount, holdingCurrency, primaryCurrency)
 }
 

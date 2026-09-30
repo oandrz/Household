@@ -647,3 +647,45 @@ func TestTheFoldRefusesAPrimaryAmountInSomeOtherCurrency(t *testing.T) {
 		t.Fatal("a primary amount in IDR must not fold into an SGD pool")
 	}
 }
+
+// Every figure a holding row carries is added up somewhere (cost, realised
+// profit, market value), so each one gets the ceiling every other amount in
+// the product has. One minor unit past it is refused; the ceiling itself is
+// a real, if absurd, figure and is accepted.
+func TestEventRefusesAnAmountPastTheCeiling(t *testing.T) {
+	if err := buy(t, 1, 10, domain.MaxAmountMinor).Validate("SGD", "SGD"); err != nil {
+		t.Fatalf("amount at the ceiling: %v", err)
+	}
+	if err := buy(t, 1, 10, domain.MaxAmountMinor+1).Validate("SGD", "SGD"); !errors.Is(err, domain.ErrAmountTooLarge) {
+		t.Fatalf("amount past the ceiling: error = %v, want ErrAmountTooLarge", err)
+	}
+}
+
+func TestEventRefusesAPrimaryAmountPastTheCeiling(t *testing.T) {
+	if err := buyUSD(t, 1, 10, 250, domain.MaxAmountMinor).Validate("USD", "SGD"); err != nil {
+		t.Fatalf("primary amount at the ceiling: %v", err)
+	}
+	if err := buyUSD(t, 1, 10, 250, domain.MaxAmountMinor+1).Validate("USD", "SGD"); !errors.Is(err, domain.ErrAmountTooLarge) {
+		t.Fatalf("primary amount past the ceiling: error = %v, want ErrAmountTooLarge", err)
+	}
+}
+
+func TestValuationRefusesAUnitPricePastTheCeiling(t *testing.T) {
+	if err := valuation(t, 1, domain.MaxAmountMinor).Validate("SGD", "SGD"); err != nil {
+		t.Fatalf("unit price at the ceiling: %v", err)
+	}
+	if err := valuation(t, 1, domain.MaxAmountMinor+1).Validate("SGD", "SGD"); !errors.Is(err, domain.ErrAmountTooLarge) {
+		t.Fatalf("unit price past the ceiling: error = %v, want ErrAmountTooLarge", err)
+	}
+}
+
+// The primary-currency unit price goes through the same rule an event's
+// primary amount does, so it is checked here once for the valuation's side.
+func TestValuationRefusesAPrimaryUnitPricePastTheCeiling(t *testing.T) {
+	v := domain.Valuation{UnitPrice: money(t, 250, "USD"), AsOf: on(1)}
+	tooLarge := money(t, domain.MaxAmountMinor+1, "SGD")
+	v.PrimaryUnitPrice = &tooLarge
+	if err := v.Validate("USD", "SGD"); !errors.Is(err, domain.ErrAmountTooLarge) {
+		t.Fatalf("primary unit price past the ceiling: error = %v, want ErrAmountTooLarge", err)
+	}
+}

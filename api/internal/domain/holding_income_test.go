@@ -111,3 +111,15 @@ func TestIncomeInPrimaryPrefersTheRecordedAmount(t *testing.T) {
 		t.Errorf("InPrimary() = %v, want the native amount %v", got, same.Amount)
 	}
 }
+
+// Income and fees are summed per period, so a row gets the same ceiling every
+// other amount in the product has.
+func TestIncomeRefusesAnAmountPastTheCeiling(t *testing.T) {
+	if err := income(t, domain.IncomeReceived, domain.MaxAmountMinor, "SGD").Validate("SGD", "SGD"); err != nil {
+		t.Fatalf("amount at the ceiling: %v", err)
+	}
+	tooLarge := income(t, domain.IncomeReceived, domain.MaxAmountMinor+1, "SGD")
+	if err := tooLarge.Validate("SGD", "SGD"); !errors.Is(err, domain.ErrAmountTooLarge) {
+		t.Fatalf("amount past the ceiling: error = %v, want ErrAmountTooLarge", err)
+	}
+}

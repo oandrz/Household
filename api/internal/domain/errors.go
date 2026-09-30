@@ -49,6 +49,12 @@ var (
 	// (AccountType.SignedNetWorthAmount). It is always refused, never
 	// wrapped around silently.
 	ErrAmountOverflow = errors.New("amount overflows a signed 64-bit integer")
+	// ErrAmountTooLarge is CheckAmountWithinLimit's refusal: an amount a
+	// person supplied is further from zero than MaxAmountMinor. It is the
+	// caller's mistake (a 422), unlike ErrAmountOverflow above, which means
+	// arithmetic on figures already stored went wrong (a 500). This refusal
+	// at the door is what keeps that one from being reachable by a typo.
+	ErrAmountTooLarge = errors.New("amount is larger than Hearth records")
 	// ErrNoRate: there is no rate between two currencies. An FXRateProvider
 	// returns it, wrapped, for a pair it doesn't cover. It's the ONLY
 	// conversion failure a screen may answer by leaving an amount out of a
