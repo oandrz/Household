@@ -146,8 +146,10 @@ export const BILL_COPY = {
   // function for both flags rather than four separate copy strings, since
   // the sentence's shape (three clauses joined by " · ") is itself part of
   // what a tone sweep would want to change in one place.
+  // A bill with no category has an empty categoryName; joining only the parts
+  // that exist keeps the line from opening with a bare " · ".
   rowSubtitle: (categoryName: string, autopay: boolean, accountName: string) =>
-    `${categoryName} · ${autopay ? "autopay" : "manual"} · ${accountName}`,
+    [categoryName, autopay ? "autopay" : "manual", accountName].filter(Boolean).join(" · "),
   // A payment (billPaymentSchema) carries no categoryName or accountName --
   // it is not an oversight in the design's own mockup ("Education · manual"
   // has no account either), it is what the DTO actually has.
