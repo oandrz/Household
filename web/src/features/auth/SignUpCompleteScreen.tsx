@@ -70,7 +70,7 @@ function SignUpTokenError({ error }: { error: unknown }) {
         </div>
         <div className="w-full max-w-[428px] rounded-2xl border border-hairline bg-card px-8 pb-[26px] pt-[30px] text-center shadow-[var(--shadow-auth-card)]">
           <h1 className="mb-1 mt-0.5 font-serif text-[27px] font-medium tracking-[-0.015em]">
-            That link won't work.
+            That link won’t work.
           </h1>
           <p role="alert" className="mb-5 text-[13px] leading-relaxed text-muted">
             {message}
