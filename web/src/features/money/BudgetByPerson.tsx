@@ -32,6 +32,12 @@ export function BudgetByPerson({
   const totalMinor = people.reduce((sum, person) => sum + person.spentMinor, 0);
   const hasUnattributed = people.some((person) => person.membershipId === "");
 
+  // Without this the card renders its title over nothing, which reads as a
+  // failed load rather than a quiet month.
+  if (people.length === 0) {
+    return <p className="text-[12.5px] leading-relaxed text-muted">{BUDGET_COPY.byPersonEmpty}</p>;
+  }
+
   return (
     <div className="flex flex-col gap-3.5">
       {people.map((person) => {

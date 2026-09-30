@@ -44,6 +44,7 @@ export const BUDGET_COPY = {
   overMarker: "· over",
 
   spendingByPerson: "Spending by person",
+  byPersonEmpty: "No spending logged this month yet. Each person's share shows here once there is.",
   // The row for `membershipId: ""` -- spend the server could not attach to
   // any member, either a hand-entered transaction saved without a payer or
   // (once Bills ships) a bill with no "Paid by". Copy for it lives here, not
