@@ -124,7 +124,7 @@ export function RetrosPage() {
               own padding gives it. */}
           <span
             data-testid="retros-privacy-badge"
-            className="inline-flex items-center rounded-lg border border-hairline bg-card px-3.5 py-2 text-[13px] text-muted"
+            className="inline-flex items-center rounded-full bg-badge-limited-bg px-3 py-1 text-[12px] font-medium text-label"
           >
             {RETRO_COPY.privacyBadge}
           </span>

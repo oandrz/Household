@@ -172,10 +172,10 @@ export function AgreementsPage() {
         <div className="flex flex-wrap items-center gap-2">
           {/* Not a button -- nothing on it opens anything (the design's own
               static badge), so the 44px floor for interactive controls does not
-              apply. RetrosPage.tsx:124-129's classes verbatim. */}
+              apply. RetrosPage.tsx's badge classes verbatim. */}
           <span
             data-testid="agreements-privacy-badge"
-            className="inline-flex items-center rounded-lg border border-hairline bg-card px-3.5 py-2 text-[13px] text-muted"
+            className="inline-flex items-center rounded-full bg-badge-limited-bg px-3 py-1 text-[12px] font-medium text-label"
           >
             {AGREEMENT_COPY.privacyBadge}
           </span>
