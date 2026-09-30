@@ -34,6 +34,10 @@ const INSTRUMENT_LABEL: Record<Holding["instrument"], string> = {
   other: "Other",
 };
 
+// Both the switch's accessible name and the text beside it, so a sighted user
+// and a screen reader are told the same thing.
+const SHOW_ARCHIVED = "Show archived";
+
 export function PortfolioPage() {
   const [includeArchived, setIncludeArchived] = useState(false);
   const holdings = useHoldings({ includeArchived });
@@ -100,10 +104,11 @@ export function PortfolioPage() {
 
       <div className="mt-5 flex items-center gap-1.5 text-[11px] text-muted">
         <ToggleSwitch
-          label="Show archived"
+          label={SHOW_ARCHIVED}
           checked={includeArchived}
           onChange={() => setIncludeArchived((on) => !on)}
         />
+        {SHOW_ARCHIVED}
       </div>
 
       {holdings.isPending ? <p className="mt-5 text-xs text-muted">Loading your holdings…</p> : null}
