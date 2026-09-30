@@ -339,6 +339,26 @@ fix in the same branch *created* the sibling.
   one canonical site — the `.tabular` comment in `web/src/index.css` — rather
   than being restated at each of the eight call sites that follow it.
 
+  **Then the written rule itself was wrong in one clause (design review,
+  2026-10-01).** It listed "a row of stat cards" as a place tabular figures
+  belong. Stat cards sit side by side, so their digits never stack, and every
+  one rendered "S$300 . 00" on Budget and Bills; so did goal figures inside a
+  sentence, which the rule already excluded. The design file uses
+  proportional figures in all of these. Symptom: gaps around the comma and
+  point, visible only in a screenshot. What catches it: read the rule back
+  against a screenshot of each place it names, not just against the code.
+
+- **Chart axis labels drawn as SVG `<text>` scale with the chart.**
+  `NetWorthChart` has a 320-unit viewBox stretched to about 680px, so its
+  9-unit labels rendered at about 19px, bigger than the body text; the same
+  chart on a phone, or `MoodChart` in a narrow card, rendered them at about
+  9px. Fixed by moving the labels to absolutely positioned HTML spans at the
+  same x as a percentage. Searching `<text` found the sibling in `MoodChart`
+  (fixed) and a third in `PeriodReturnChart` (not fixed: it only renders with
+  holdings, so it could not be checked in a browser). What catches it:
+  `getComputedStyle` cannot see SVG scaling, so measure the rendered
+  label's `getBoundingClientRect().height` at two widths.
+
 **When you fix something, grep for its shape before you close it.** The question
 that finds these is not "is this fixed?" but "where else does this pattern
 appear?" `Truncate` is now that grep for date-and-location bugs specifically —
@@ -5837,6 +5857,35 @@ route with a missing guard has no second line of defence.
   (pattern 18 above traces the same refetch-into-an-open-modal path and is
   where the actual write-safety analysis lives) — recorded here so the
   select's own visual drift does not get rediscovered as if it were new.
+
+- **Design review of every page (2026-10-01): defects only a screenshot
+  shows.** Every test was green for each of these:
+  - **A warning shown over a dead link.** `InviteScreen` rendered "Accepting
+    this invite will sign them out" whenever someone was signed in, including
+    over "We couldn't find that invite", where there is nothing to accept.
+    The warning's condition checked the session and never the invite.
+    Regression test in `InviteScreen.test.tsx`.
+  - **Copy promising a feature that does not exist.** The budget empty
+    state said Hearth tracks spending "automatically from your linked
+    accounts". There is no bank linking; `FEATURE_TRACKER.md` records why it cannot
+    be built. Search UI copy for the name of any feature marked unbuildable.
+  - **A stretched sidebar.** The shell grid is `min-h-dvh`, so the desktop
+    `<nav>` grew with a long page and carried Settings, Admin and Sign out
+    below the fold on Settings. Fixed with `lg:sticky lg:top-0 lg:h-dvh
+    lg:self-start`.
+  - **Doubled spacing.** `PageContainer` already gives its children a 20px
+    gap; Portfolio's children each added `mt-5` too, making 40px gaps on
+    that page only.
+  - **A toggle with no visible label.** Portfolio's "Show archived" switch
+    had an accessible name, so screen-reader tests passed, but a sighted
+    user saw a bare switch.
+  - **An accessible name that disagreed with the visible label.** The
+    currency switch showed "Show IDR equivalents" and announced "Show
+    secondary currency equivalents". Voice-control users say what they see,
+    so the name must contain the visible words (WCAG 2.5.3).
+
+  What catches this class: a screenshot of every route at 375, 768 and
+  1440px, read by a person, not only asserted on by a test.
 
 ### Tooling and infrastructure
 
