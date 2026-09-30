@@ -124,9 +124,7 @@ export function MonthlyContributionsCard({
                 style={{ background: SEGMENT_COLORS[index % SEGMENT_COLORS.length] }}
               />
               {goal.name} ·{" "}
-              <span className="tabular">
-                {formatMoney(goal.plannedMonthlyMinor, goal.currency, symbolFor(goal.currency))}
-              </span>
+              {formatMoney(goal.plannedMonthlyMinor, goal.currency, symbolFor(goal.currency))}
             </span>
           ))}
         </div>

@@ -100,11 +100,12 @@ body {
 }
 
 /* Tabular figures. NOT on body: a heading containing a year should stay
-   proportional. Belongs where figures stack or repeat and the eye travels
-   between them -- a ledger column, a grid of categories, a row of stat
-   cards. It does NOT belong on a lone display figure or a figure embedded
-   in a prose sentence, where fixed digit widths only pad the punctuation
-   out. See formatMoney.ts, which already spends a comment on using U+2212
+   proportional. Belongs only where figures stack in a column and the eye
+   travels down it -- a ledger column, a grid of categories. It does NOT
+   belong on a stat card (cards sit side by side, so their digits never line
+   up), a lone display figure, or a figure inside a sentence. In Schibsted
+   Grotesk, tabular-nums also widens "." and "," to a digit's width, so
+   anywhere nothing stacks it only renders "S$300 . 00". See formatMoney.ts, which already spends a comment on using U+2212
    MINUS rather than a hyphen "because every negative figure in this app is
    in a column of numbers" -- that reasoning is what decides which side of
    this rule a given figure falls on. */

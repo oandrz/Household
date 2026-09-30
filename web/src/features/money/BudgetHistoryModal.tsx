@@ -193,12 +193,12 @@ export function BudgetHistoryModal({
             <SummaryCard
               label={BUDGET_COPY.historyAvgSpend}
               value={avgSpendMinor === null ? BUDGET_COPY.noValue : formatMoney(avgSpendMinor, currency, symbol)}
-              valueClassName="text-ink tabular"
+              valueClassName="text-ink"
             />
             <SummaryCard
               label={BUDGET_COPY.historyAvgSaved}
               value={avgSavedMinor === null ? BUDGET_COPY.noValue : formatMoney(avgSavedMinor, currency, symbol)}
-              valueClassName="text-accent tabular"
+              valueClassName="text-accent"
             />
             <SummaryCard
               label={BUDGET_COPY.historyMonthsUnderBudget}
