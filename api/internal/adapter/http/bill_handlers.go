@@ -188,7 +188,7 @@ func handleListBills(deps Deps) http.HandlerFunc {
 		scope, _ := RequestScope(r)
 		includeArchived := r.URL.Query().Get("include_archived") == "true"
 
-		view, err := deps.Bills.List(r.Context(), scope.HouseholdID, includeArchived, deps.Clock.Now())
+		view, err := deps.Bills.List(r.Context(), scope.HouseholdID, includeArchived, scope.Today)
 		if err != nil {
 			MapDomainError(w, r, err)
 			return
@@ -209,7 +209,7 @@ func handleCreateBill(deps Deps) http.HandlerFunc {
 		if !decodeJSONBody(w, r, &req) {
 			return
 		}
-		today := deps.Clock.Now()
+		today := scope.Today
 
 		nextDue, ok := parseBillDueDate(w, req.NextDue)
 		if !ok {
@@ -251,7 +251,7 @@ func handleUpdateBill(deps Deps) http.HandlerFunc {
 			return
 		}
 		id := chi.URLParam(r, "id")
-		today := deps.Clock.Now()
+		today := scope.Today
 
 		patch := usecase.BillPatch{
 			Name:               req.Name,
@@ -310,8 +310,9 @@ func setBillArchived(deps Deps, archived bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		scope, _ := RequestScope(r)
 		id := chi.URLParam(r, "id")
-		today := deps.Clock.Now()
-		view, err := deps.Bills.SetArchived(r.Context(), scope.HouseholdID, id, archived, today)
+		// Two times, two jobs: the stamp is an instant, and the day the
+		// returned row is judged against is the household's.
+		view, err := deps.Bills.SetArchived(r.Context(), scope.HouseholdID, id, archived, deps.Clock.Now(), scope.Today)
 		if err != nil {
 			MapDomainError(w, r, err)
 			return
@@ -336,7 +337,7 @@ func handleMarkBillPaid(deps Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		scope, _ := RequestScope(r)
 		id := chi.URLParam(r, "id")
-		today := deps.Clock.Now()
+		today := scope.Today
 
 		var req payBillRequest
 		if !decodeJSONBody(w, r, &req) {

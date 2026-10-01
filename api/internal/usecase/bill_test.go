@@ -1240,27 +1240,52 @@ func TestSetArchivedReturnsAViewWithNoSecondGet(t *testing.T) {
 	repo.add(bill("Old gym", "2026-07-01", 8000))
 	svc := newBillService(t, repo)
 
-	at := day("2026-08-09")
-	view, err := svc.SetArchived(context.Background(), "h1", "bill-1", true, at)
+	today := day("2026-08-09")
+	view, err := svc.SetArchived(context.Background(), "h1", "bill-1", true, today, today)
 	if err != nil {
 		t.Fatalf("SetArchived: %v", err)
 	}
 	if !view.Bill.IsArchived() {
 		t.Fatal("bill not archived")
 	}
-	// Overdue relative to `at`, computed by SetArchived itself with no second
-	// Get -- BillRepository.SetArchived's own doc comment is why one is not
-	// needed.
+	// Overdue relative to today, computed by SetArchived itself with no
+	// second Get -- BillRepository.SetArchived's own doc comment is why one
+	// is not needed.
 	if !view.Overdue {
-		t.Error("overdue = false, want true (due 2026-07-01, archived at 2026-08-09)")
+		t.Error("overdue = false, want true (due 2026-07-01, archived on 2026-08-09)")
 	}
 
-	restored, err := svc.SetArchived(context.Background(), "h1", "bill-1", false, at)
+	restored, err := svc.SetArchived(context.Background(), "h1", "bill-1", false, today, today)
 	if err != nil {
 		t.Fatalf("SetArchived (restore): %v", err)
 	}
 	if restored.Bill.IsArchived() {
 		t.Fatal("bill still archived after restore")
+	}
+}
+
+// Archiving needs two different times and used to be handed one. The stamp
+// is an instant; "today", for the returned row's Overdue, is the household's
+// calendar day. At 23:00 UTC on 30 September those are different days for a
+// household in Singapore, where it is already 1 October: a bill due on the
+// 30th is overdue there, though the instant alone says it is still the 30th.
+func TestSetArchivedStampsTheInstantAndJudgesOverdueByTheHouseholdsDay(t *testing.T) {
+	repo := &fakeBillRepo{}
+	repo.add(bill("Old gym", "2026-09-30", 8000))
+	svc := newBillService(t, repo)
+
+	at := time.Date(2026, 9, 30, 23, 0, 0, 0, time.UTC)
+	householdToday := day("2026-10-01")
+
+	view, err := svc.SetArchived(context.Background(), "h1", "bill-1", true, at, householdToday)
+	if err != nil {
+		t.Fatalf("SetArchived: %v", err)
+	}
+	if view.Bill.ArchivedAt == nil || !view.Bill.ArchivedAt.Equal(at) {
+		t.Errorf("archived at %v, want the instant %s", view.Bill.ArchivedAt, at)
+	}
+	if !view.Overdue {
+		t.Error("overdue = false, want true: due 30 September, and it is 1 October for the household")
 	}
 }
 

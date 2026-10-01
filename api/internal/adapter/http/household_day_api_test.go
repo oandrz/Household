@@ -189,3 +189,99 @@ func TestTheLedgerOpensOnTheHouseholdsMonth(t *testing.T) {
 		}
 	})
 }
+
+// QA ISSUE-004. On the 1st of the month in Singapore a bill paid today was
+// missing from "paid this month", and its Undo with it, and the summary read
+// "Nothing due this month" above a bill due that very day. Both figures are
+// scoped to a month, and the month is the household's.
+func TestBillsThisMonthIsTheHouseholdsMonth(t *testing.T) {
+	clk, utcMonth := monthEndClock()
+	env := newTestEnvWithClock(t, clk)
+	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
+	env.setTimezone(t, session, csrf, "Asia/Singapore")
+
+	householdToday := utcMonth.AddDate(0, 1, 0).Format("2006-01-02") // the 1st, in Singapore
+	account := env.mustCreateAccountID(t, session, csrf)
+	bill := env.mustCreateBill(t, session, csrf, map[string]any{
+		"name": "Internet", "amountMinor": 45_000, "cadence": "monthly",
+		"nextDue": householdToday, "payFromAccountId": account,
+	}).Bill
+
+	list := func(t *testing.T) billsListResponseBody {
+		t.Helper()
+		rec := env.authedGet(t, "/api/v1/bills", session)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("GET /bills: status = %d, body = %s", rec.Code, rec.Body.String())
+		}
+		return decodeBillsList(t, rec)
+	}
+
+	t.Run("a bill due today counts as due this month and is not overdue", func(t *testing.T) {
+		got := list(t)
+		if got.Summary.DueThisMonthMinor != 45_000 {
+			t.Errorf("dueThisMonthMinor = %d, want 45000", got.Summary.DueThisMonthMinor)
+		}
+		if len(got.Bills) != 1 || got.Bills[0].Overdue {
+			t.Errorf("bills = %+v, want the one bill, due today and not overdue", got.Bills)
+		}
+	})
+
+	payment := env.mustPayBill(t, session, csrf, bill.ID, map[string]any{"paidOn": householdToday}).Payment
+
+	t.Run("a bill paid today is listed under paid this month, where its Undo is", func(t *testing.T) {
+		got := list(t)
+		if len(got.PaidThisMonth) != 1 || got.PaidThisMonth[0].ID != payment.ID {
+			t.Fatalf("paidThisMonth = %+v, want the payment %s", got.PaidThisMonth, payment.ID)
+		}
+		if got.Summary.PaidSoFarMinor != 45_000 || got.Summary.DueThisMonthMinor != 45_000 {
+			t.Errorf("summary = %+v, want 45000 paid of 45000 due", got.Summary)
+		}
+	})
+
+	// The control: on UTC the server is still in the month before, where
+	// nothing was due and nothing was paid.
+	t.Run("on UTC the same household is still in the month before", func(t *testing.T) {
+		env.setTimezone(t, session, csrf, "UTC")
+		got := list(t)
+		if len(got.PaidThisMonth) != 0 || got.Summary.PaidSoFarMinor != 0 || got.Summary.DueThisMonthMinor != 0 {
+			t.Errorf("paidThisMonth = %+v, summary = %+v, want an empty month", got.PaidThisMonth, got.Summary)
+		}
+	})
+}
+
+// Archiving a bill takes an instant for the stamp and a day for the row it
+// answers with. The handler must not hand the service one value for both.
+func TestArchivingABillStampsTheInstantAndJudgesOverdueByTheHouseholdsDay(t *testing.T) {
+	clk, utcDay := eveningClock()
+	env := newTestEnvWithClock(t, clk)
+	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
+	env.setTimezone(t, session, csrf, "Asia/Singapore")
+
+	account := env.mustCreateAccountID(t, session, csrf)
+	// Due on the server's today, which is the household's yesterday.
+	bill := env.mustCreateBill(t, session, csrf, map[string]any{
+		"name": "Old gym", "amountMinor": 8_000, "cadence": "monthly",
+		"nextDue": utcDay.Format("2006-01-02"), "payFromAccountId": account,
+	}).Bill
+
+	rec := env.authed(t, http.MethodPost, "/api/v1/bills/"+bill.ID+"/archive", nil, session, csrf)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("archive: status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	got := decodeBill(t, rec).Bill
+	if !got.Overdue {
+		t.Error("overdue = false, want true: the bill was due yesterday by the household's calendar")
+	}
+	if got.ArchivedAt == nil {
+		t.Fatal("archivedAt is null on an archived bill")
+	}
+	// Compared as instants: the wire carries an offset, and which offset the
+	// database driver hands back is not what this test is about.
+	stamped, err := time.Parse(time.RFC3339, *got.ArchivedAt)
+	if err != nil {
+		t.Fatalf("archivedAt %q is not RFC 3339: %v", *got.ArchivedAt, err)
+	}
+	if !stamped.Equal(clk.Now()) {
+		t.Errorf("archivedAt = %s, want the instant %s", *got.ArchivedAt, clk.Now().Format(time.RFC3339))
+	}
+}

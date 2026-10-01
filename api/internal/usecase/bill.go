@@ -160,8 +160,8 @@ func NewBillService(deps BillDeps) *BillService {
 // carrying Overdue/DueSoon), the paid-this-month list and the page summary,
 // in four repository calls regardless of how many bills or payments exist.
 // today is always a parameter -- see BillDeps' own comment -- so every
-// figure is deterministic in tests and driven by the clock port in
-// production.
+// figure is deterministic in tests. In production it is the household's
+// calendar day, so "this month" is the household's month.
 //
 // ExcludedNoRate counts once per BILL, even one that would otherwise touch
 // two totals, plus once per PAYMENT not already counted that way -- a
@@ -632,18 +632,22 @@ func (s *BillService) Update(ctx context.Context, householdID, billID string, pa
 	return s.toView(updated, today), nil
 }
 
-// SetArchived archives or restores a bill, stamping ArchivedAt with at --
-// the same caller-supplied convention AccountRepository.SetArchived and
-// GoalRepository.SetArchived use. BillRepository.SetArchived already
-// returns the full record, so no second Get is needed. at also doubles as
-// "today" for the returned view's Overdue/DueSoon, since BillDeps carries
-// no Clock.
-func (s *BillService) SetArchived(ctx context.Context, householdID, billID string, archived bool, at time.Time) (BillView, error) {
+// SetArchived archives or restores a bill. BillRepository.SetArchived
+// already returns the full record, so no second Get is needed.
+//
+// It takes two times because it does two jobs. at is the instant stamped
+// into ArchivedAt, the same caller-supplied convention
+// AccountRepository.SetArchived and GoalRepository.SetArchived use. today is
+// the household's calendar day, which decides Overdue and DueSoon on the
+// returned view. Don't pass one value for both: late in the UTC day the
+// instant is still yesterday for a household east of Greenwich, and the row
+// would come back with yesterday's Overdue.
+func (s *BillService) SetArchived(ctx context.Context, householdID, billID string, archived bool, at, today time.Time) (BillView, error) {
 	rec, err := s.deps.Bills.SetArchived(ctx, householdID, billID, archived, at)
 	if err != nil {
 		return BillView{}, err
 	}
-	return s.toView(rec, at), nil
+	return s.toView(rec, today), nil
 }
 
 // MarkPaid writes the payment, the expense and the advanced due date,
