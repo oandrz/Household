@@ -53,6 +53,18 @@ export function CurrencyPanel() {
     setCurrencyInput(household.data.primaryCurrency);
   }
 
+  // The second currency, or null when the household has none worth offering.
+  // Sign-up stores the primary currency as the second one too, because no
+  // control chooses a second currency yet. Offering "Show SGD equivalents"
+  // beside an SGD primary currency is a switch that can show nothing, so that
+  // case is treated as no second currency rather than as a choice.
+  const secondCurrency =
+    household.data &&
+    household.data.secondaryCurrency !== "" &&
+    household.data.secondaryCurrency !== household.data.primaryCurrency
+      ? household.data.secondaryCurrency
+      : null;
+
   const trimmedCurrencyInput = currencyInput.trim().toUpperCase();
   const canSaveCurrency =
     isOwner &&
@@ -136,28 +148,33 @@ export function CurrencyPanel() {
             )}
           </div>
 
-          <div className="flex items-center justify-between">
-            <div>
-              <div className="text-ink">
-                Show {household.data.secondaryCurrency} equivalents
-              </div>
-              <div className="mt-0.5 text-[11.5px] text-muted">
-                Shown alongside the primary currency
-              </div>
+          {secondCurrency === null ? (
+            <div className="flex items-center justify-between">
+              <span className="text-ink">Second currency</span>
+              <span className="text-muted">None set</span>
             </div>
-            <ToggleSwitch
-              checked={household.data.showSecondaryCurrency}
-              disabled={!isOwner || updateHousehold.isPending}
-              onChange={() =>
-                updateHousehold.mutate({
-                  showSecondaryCurrency: !household.data.showSecondaryCurrency,
-                })
-              }
-              // The visible label's exact words: someone using voice control
-              // says what they see, and a different spoken name never matches.
-              label={`Show ${household.data.secondaryCurrency} equivalents`}
-            />
-          </div>
+          ) : (
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="text-ink">Show {secondCurrency} equivalents</div>
+                <div className="mt-0.5 text-[11.5px] text-muted">
+                  Shown alongside the primary currency
+                </div>
+              </div>
+              <ToggleSwitch
+                checked={household.data.showSecondaryCurrency}
+                disabled={!isOwner || updateHousehold.isPending}
+                onChange={() =>
+                  updateHousehold.mutate({
+                    showSecondaryCurrency: !household.data.showSecondaryCurrency,
+                  })
+                }
+                // The visible label's exact words: someone using voice control
+                // says what they see, and a different spoken name never matches.
+                label={`Show ${secondCurrency} equivalents`}
+              />
+            </div>
+          )}
 
           <div className="flex items-center justify-between">
             <span className="text-ink">FX rate</span>

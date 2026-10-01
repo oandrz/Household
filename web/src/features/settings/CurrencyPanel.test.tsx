@@ -150,6 +150,42 @@ describe("CurrencyPanel", () => {
     expect(screen.getByRole("switch", { name: "Show IDR equivalents" })).toBeDisabled();
   });
 
+  // Self-serve sign-up stores the primary currency as the second one too,
+  // because nothing lets a household choose a second currency yet.
+  it("offers no equivalents switch when the second currency is the primary one", async () => {
+    stubFetchRoutes({
+      [`GET ${ME_URL}`]: { status: 200, body: meFixture("owner") },
+      [`GET ${HOUSEHOLD_URL}`]: {
+        status: 200,
+        body: householdFixture({ primaryCurrency: "SGD", secondaryCurrency: "SGD", showSecondaryCurrency: false }),
+      },
+      [`GET ${CURRENCIES_URL}`]: { status: 200, body: currenciesFixture() },
+    });
+    renderPanel();
+
+    await screen.findByDisplayValue("SGD");
+    expect(screen.queryByText(/equivalents/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("switch", { name: /equivalents/ })).not.toBeInTheDocument();
+    expect(screen.getByText("Second currency")).toBeInTheDocument();
+    expect(screen.getByText("None set")).toBeInTheDocument();
+  });
+
+  it("offers no equivalents switch when no second currency is stored at all", async () => {
+    stubFetchRoutes({
+      [`GET ${ME_URL}`]: { status: 200, body: meFixture("owner") },
+      [`GET ${HOUSEHOLD_URL}`]: {
+        status: 200,
+        body: householdFixture({ primaryCurrency: "SGD", secondaryCurrency: "" }),
+      },
+      [`GET ${CURRENCIES_URL}`]: { status: 200, body: currenciesFixture() },
+    });
+    renderPanel();
+
+    await screen.findByDisplayValue("SGD");
+    expect(screen.queryByRole("switch", { name: /equivalents/ })).not.toBeInTheDocument();
+    expect(screen.getByText("None set")).toBeInTheDocument();
+  });
+
   it("lets an owner edit the primary currency and issues a matching PATCH", async () => {
     const fetchMock = stubFetchRoutes({
       [`GET ${ME_URL}`]: { status: 200, body: meFixture("owner") },
