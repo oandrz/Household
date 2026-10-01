@@ -364,7 +364,7 @@ func newTestEnvWith(t *testing.T, clk usecase.Clock, outbox usecase.MailOutbox) 
 	// cmd/api/main.go's own wiring comment gives: Vision needs one
 	// percentage from Goals and the narrow port is what keeps it from
 	// depending on GoalRepository's whole surface.
-	visionSvc := usecase.NewVisionService(postgres.NewVisionRepo(db), goalRepo, clk)
+	visionSvc := usecase.NewVisionService(postgres.NewVisionRepo(db), goalRepo)
 	agreementSvc := usecase.NewAgreementService(postgres.NewAgreementRepo(db), memberships)
 
 	platformAdminRepo := postgres.NewPlatformAdminRepo(db)

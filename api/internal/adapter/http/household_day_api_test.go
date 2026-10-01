@@ -66,6 +66,17 @@ func quarterEndClock() (clk *movableClock, utcQuarterStart time.Time) {
 	return &movableClock{now: anchor}, quarterStart
 }
 
+// yearEndClock is eveningClock on 31 December: 23:00 UTC, when it is already
+// New Year's morning in Singapore. utcYear is the server's year.
+func yearEndClock() (clk *movableClock, utcYear int) {
+	now := time.Now().UTC()
+	anchor := time.Date(now.Year(), time.December, 31, 23, 0, 0, 0, time.UTC)
+	if anchor.Before(now) {
+		anchor = anchor.AddDate(1, 0, 0)
+	}
+	return &movableClock{now: anchor}, anchor.Year()
+}
+
 // setTimezone moves the household to another zone through the API, the way
 // an owner does it in Settings.
 func (env *testEnv) setTimezone(t *testing.T, session, csrf *http.Cookie, zone string) {
@@ -686,6 +697,36 @@ func TestAnOpeningBalanceMayBeDatedTheHouseholdsTodayAndNoLater(t *testing.T) {
 			map[string]any{"nickname": "DBS Multiplier", "openingBalanceAsOf": singaporeToday}, session, csrf)
 		if rec.Code != http.StatusOK {
 			t.Fatalf("status = %d, want 200 (body = %s)", rec.Code, rec.Body.String())
+		}
+	})
+}
+
+// The Vision page opens on "this year" when the request names none, and the
+// year is the household's. On New Year's morning in Singapore the server's
+// own clock still reads the old year.
+func TestTheVisionOpensOnTheHouseholdsYear(t *testing.T) {
+	clk, utcYear := yearEndClock()
+	env := newTestEnvWithClock(t, clk)
+	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
+
+	defaultYear := func(t *testing.T) int {
+		t.Helper()
+		rec := env.authedGet(t, "/api/v1/marriage/vision", session)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("GET vision: status = %d, body = %s", rec.Code, rec.Body.String())
+		}
+		return decodeVision(t, rec).Vision.Year
+	}
+
+	t.Run("on UTC it is the server's year", func(t *testing.T) {
+		if got := defaultYear(t); got != utcYear {
+			t.Errorf("year = %d, want %d", got, utcYear)
+		}
+	})
+	t.Run("on Singapore it is the year that has begun there", func(t *testing.T) {
+		env.setTimezone(t, session, csrf, "Asia/Singapore")
+		if got := defaultYear(t); got != utcYear+1 {
+			t.Errorf("year = %d, want %d", got, utcYear+1)
 		}
 	})
 }

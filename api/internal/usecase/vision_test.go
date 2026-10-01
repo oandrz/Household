@@ -11,8 +11,7 @@ import (
 )
 
 func TestVisionGetReturnsAnEmptyVisionForAYearNeverSet(t *testing.T) {
-	svc := usecase.NewVisionService(newVisionRepoDouble(), newGoalProgressDouble(),
-		&fixedClock{now: time.Date(2026, 8, 28, 0, 0, 0, 0, time.UTC)})
+	svc := usecase.NewVisionService(newVisionRepoDouble(), newGoalProgressDouble())
 
 	got, err := svc.Get(context.Background(), "h1", 2026)
 	if err != nil {
@@ -44,7 +43,7 @@ func TestVisionGetResolvesALinkedMeasure(t *testing.T) {
 	goals := newGoalProgressDouble()
 	goals.progress["g1"] = usecase.GoalProgress{GoalID: "g1", Name: "Emergency fund", Percent: 62}
 	goals.progress["g2"] = usecase.GoalProgress{GoalID: "g2", Name: "Vacation fund", Percent: 100}
-	svc := usecase.NewVisionService(repo, goals, &fixedClock{now: time.Date(2026, 8, 28, 0, 0, 0, 0, time.UTC)})
+	svc := usecase.NewVisionService(repo, goals)
 
 	got, err := svc.Get(context.Background(), "h1", 2026)
 	if err != nil {
@@ -75,8 +74,7 @@ func TestVisionGetRendersNoFigureWhenTheLinkedGoalIsGone(t *testing.T) {
 			{Label: "Old target", Kind: domain.MeasureBroken},
 		}}},
 	})
-	svc := usecase.NewVisionService(repo, newGoalProgressDouble(),
-		&fixedClock{now: time.Date(2026, 8, 28, 0, 0, 0, 0, time.UTC)})
+	svc := usecase.NewVisionService(repo, newGoalProgressDouble())
 
 	got, err := svc.Get(context.Background(), "h1", 2026)
 	if err != nil {
@@ -104,8 +102,7 @@ func TestVisionGetMarksATypedMeasureMetAtTarget(t *testing.T) {
 			{Label: "Phone-free dinners / week", Kind: domain.MeasureTyped, Current: 3, Target: 5},
 		}}},
 	})
-	svc := usecase.NewVisionService(repo, newGoalProgressDouble(),
-		&fixedClock{now: time.Date(2026, 8, 28, 0, 0, 0, 0, time.UTC)})
+	svc := usecase.NewVisionService(repo, newGoalProgressDouble())
 
 	got, _ := svc.Get(context.Background(), "h1", 2026)
 	if !got.Pillars[0].Measures[0].Met {
@@ -116,15 +113,16 @@ func TestVisionGetMarksATypedMeasureMetAtTarget(t *testing.T) {
 	}
 }
 
-// CurrentYear is a real deliverable, feeding the handler's default year --
-// not just plumbing. An untested delegation to the clock is exactly the
-// kind of change a later refactor could silently break.
-func TestVisionServiceCurrentYearUsesTheClock(t *testing.T) {
-	svc := usecase.NewVisionService(newVisionRepoDouble(), newGoalProgressDouble(),
-		&fixedClock{now: time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC)})
+// CurrentYear is the year the Vision page opens on when a request names
+// none. It is the year of the household's calendar day, which the caller
+// passes in: on New Year's morning in Singapore that is already next year,
+// while the server's own clock still reads the old one.
+func TestVisionServiceCurrentYearIsTheYearOfTheHouseholdsDay(t *testing.T) {
+	svc := usecase.NewVisionService(newVisionRepoDouble(), newGoalProgressDouble())
 
-	if got := svc.CurrentYear(); got != 2027 {
-		t.Fatalf("want the clock's own year, got %d", got)
+	householdToday := time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC)
+	if got := svc.CurrentYear(householdToday); got != 2027 {
+		t.Fatalf("CurrentYear = %d, want 2027, the year of the day it was given", got)
 	}
 }
 
@@ -132,8 +130,7 @@ func TestVisionServiceCurrentYearUsesTheClock(t *testing.T) {
 
 func TestVisionSaveValidatesBeforeTouchingTheRepository(t *testing.T) {
 	repo := newVisionRepoDouble()
-	svc := usecase.NewVisionService(repo, newGoalProgressDouble(),
-		&fixedClock{now: time.Date(2026, 8, 28, 0, 0, 0, 0, time.UTC)})
+	svc := usecase.NewVisionService(repo, newGoalProgressDouble())
 
 	_, err := svc.Save(context.Background(), "h1", 2026, domain.Vision{Theme: "   "})
 	if !errors.Is(err, domain.ErrVisionThemeRequired) {
@@ -154,8 +151,7 @@ func TestVisionSaveOverwritesHouseholdAndYearFromTheRoute(t *testing.T) {
 	// mutation that lets the body's values through has somewhere real to
 	// wrongly land, not just an ErrNotFound that fails for the wrong reason.
 	repo.seed(domain.Vision{HouseholdID: "someone-else", Year: 1999, Theme: "Their theme", Version: 2})
-	svc := usecase.NewVisionService(repo, newGoalProgressDouble(),
-		&fixedClock{now: time.Date(2026, 8, 28, 0, 0, 0, 0, time.UTC)})
+	svc := usecase.NewVisionService(repo, newGoalProgressDouble())
 
 	// A body claiming a different household and year. The route's values win:
 	// a request body must never be able to write into someone else's
@@ -181,8 +177,7 @@ func TestVisionSaveReturnsTheComposedViewWithTheNewVersion(t *testing.T) {
 	repo.seed(domain.Vision{HouseholdID: "h1", Year: 2026, Theme: "Old theme", Version: 4})
 	goals := newGoalProgressDouble()
 	goals.progress["g1"] = usecase.GoalProgress{GoalID: "g1", Name: "Emergency fund", Percent: 62}
-	svc := usecase.NewVisionService(repo, goals,
-		&fixedClock{now: time.Date(2026, 8, 28, 0, 0, 0, 0, time.UTC)})
+	svc := usecase.NewVisionService(repo, goals)
 
 	got, err := svc.Save(context.Background(), "h1", 2026, domain.Vision{
 		Theme:   "Slow down together",
@@ -215,8 +210,7 @@ func TestVisionSaveReturnsTheComposedViewWithTheNewVersion(t *testing.T) {
 // update against a row that does not exist.
 func TestVisionSaveCreatesTheFirstVisionForAYear(t *testing.T) {
 	repo := newVisionRepoDouble()
-	svc := usecase.NewVisionService(repo, newGoalProgressDouble(),
-		&fixedClock{now: time.Date(2026, 8, 28, 0, 0, 0, 0, time.UTC)})
+	svc := usecase.NewVisionService(repo, newGoalProgressDouble())
 
 	got, err := svc.Save(context.Background(), "h1", 2026, domain.Vision{Theme: "Slow down together", Version: 0})
 	if err != nil {
@@ -230,8 +224,7 @@ func TestVisionSaveCreatesTheFirstVisionForAYear(t *testing.T) {
 func TestVisionSavePassesAConflictThrough(t *testing.T) {
 	repo := newVisionRepoDouble()
 	repo.seed(domain.Vision{HouseholdID: "h1", Year: 2026, Theme: "Old theme", Version: 3})
-	svc := usecase.NewVisionService(repo, newGoalProgressDouble(),
-		&fixedClock{now: time.Date(2026, 8, 28, 0, 0, 0, 0, time.UTC)})
+	svc := usecase.NewVisionService(repo, newGoalProgressDouble())
 
 	_, err := svc.Save(context.Background(), "h1", 2026, domain.Vision{Theme: "T", Version: 1})
 	if !errors.Is(err, domain.ErrVisionChanged) {

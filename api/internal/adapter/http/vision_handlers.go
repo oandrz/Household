@@ -122,7 +122,7 @@ func writeInvalidYear(w http.ResponseWriter) {
 func handleGetVision(deps Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		scope, _ := RequestScope(r)
-		year := deps.Visions.CurrentYear()
+		year := deps.Visions.CurrentYear(scope.Today)
 		if raw := r.URL.Query().Get("year"); raw != "" {
 			parsed, ok := parseVisionYear(raw)
 			if !ok {

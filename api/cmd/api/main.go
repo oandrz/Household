@@ -301,7 +301,7 @@ func run() error {
 	// goalRepo doubles as the GoalProgressReader: Vision needs one
 	// percentage from Goals and the narrow port is what keeps it from
 	// depending on GoalRepository's whole surface.
-	visionSvc := usecase.NewVisionService(visionRepo, goalRepo, sysClock)
+	visionSvc := usecase.NewVisionService(visionRepo, goalRepo)
 	agreementSvc := usecase.NewAgreementService(agreementRepo, memberships)
 	adminSvc := usecase.NewAdminService(usecase.AdminDeps{
 		Admins: platformAdminRepo,

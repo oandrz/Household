@@ -3,6 +3,7 @@ package usecase
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/andreasoentoro/hearth/api/internal/domain"
 )
@@ -47,18 +48,18 @@ type VisionView struct {
 type VisionService struct {
 	visions VisionRepository
 	goals   GoalProgressReader
-	clock   Clock
 }
 
-func NewVisionService(visions VisionRepository, goals GoalProgressReader, clock Clock) *VisionService {
-	return &VisionService{visions: visions, goals: goals, clock: clock}
+func NewVisionService(visions VisionRepository, goals GoalProgressReader) *VisionService {
+	return &VisionService{visions: visions, goals: goals}
 }
 
-// CurrentYear is the default the handler uses when a request names no year.
-// It lives here, not in the handler, so nothing in the HTTP layer computes
-// a year of its own.
-func (s *VisionService) CurrentYear() int {
-	return s.clock.Now().Year()
+// CurrentYear is the default the handler uses when a request names no year:
+// the year of the household's calendar day, which the caller passes in. It
+// lives here, not in the handler, so nothing in the HTTP layer decides what
+// "this year" means.
+func (s *VisionService) CurrentYear(today time.Time) int {
+	return today.Year()
 }
 
 // Get returns the composed Vision screen for one household-year.
