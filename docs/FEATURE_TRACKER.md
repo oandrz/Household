@@ -1425,6 +1425,11 @@ a real aggregator could later fill.
 | Add transaction (modal) | ✅ |
 | Export CSV | ⬜ |
 
+**On a phone the ledger's filters fold behind a "Filters" button** that shows
+how many are on (design review, 2026-10-01). Stacked full-width, the five of
+them filled the first screen and pushed every transaction below it. From the
+`sm` width up nothing changes: the button is gone and the filters always show.
+
 **Full ledger with filters and Add transaction share one modal, add and edit
 alike** — the same `TransactionModal` Task 15 built, opened blank for a new
 row (its own test: blank fields, POSTs on save) and opened populated for an

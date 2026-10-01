@@ -354,8 +354,9 @@ fix in the same branch *created* the sibling.
   chart on a phone, or `MoodChart` in a narrow card, rendered them at about
   9px. Fixed by moving the labels to absolutely positioned HTML spans at the
   same x as a percentage. Searching `<text` found the sibling in `MoodChart`
-  (fixed) and a third in `PeriodReturnChart` (not fixed: it only renders with
-  holdings, so it could not be checked in a browser). What catches it:
+  (fixed) and a third in `PeriodReturnChart` (fixed second, proven by a test
+  that fails on the old markup: it only renders with holdings, so it was not
+  seen in a browser). What catches it:
   `getComputedStyle` cannot see SVG scaling, so measure the rendered
   label's `getBoundingClientRect().height` at two widths.
 
@@ -5883,6 +5884,29 @@ route with a missing guard has no second line of defence.
     currency switch showed "Show IDR equivalents" and announced "Show
     secondary currency equivalents". Voice-control users say what they see,
     so the name must contain the visible words (WCAG 2.5.3).
+
+  - **Words beside a control that do nothing when clicked.** All 17
+    toggles had their words as plain text beside a `<button role="switch">`.
+    Only the 23px pill responded. Fixed by making each wrapper a `<label>`
+    (a button is a labelable element, so the label activates it) rather
+    than by plumbing ids. Inner `<div>`s became block `<span>`s, because a
+    label may only hold inline-level content.
+  - **A heading that claimed more than the code knew.** The first fix gave
+    every failed invite lookup the heading "That invite won’t work.",
+    including a plain network failure, where nothing is known about the
+    invite. The heading now comes from the same switch as the message.
+  - **A phone layout that was correct and still wrong.** The Transactions
+    filters stack full-width below `sm`, a measured decision that stops a
+    long account name overflowing at 320px. Five of them filled the first
+    screen and pushed every transaction below the fold. Fixed without
+    undoing that decision: they fold behind a "Filters (n)" button, hidden
+    with a class so they keep their values.
+
+  **Two findings were withdrawn after reading the design file.** "Cards
+  use three corner radii" and "🔒 is an emoji used as an icon" both describe
+  the design itself (8, 10 and 12px radii; the emoji in its own copy). A
+  review finding is a hypothesis until it is checked against the design it
+  claims the code departs from.
 
   What catches this class: a screenshot of every route at 375, 768 and
   1440px, read by a person, not only asserted on by a test.
