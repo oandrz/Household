@@ -242,8 +242,9 @@ export function BudgetPage() {
               // selects are all width-unconstrained text/icons); the width
               // half of the guideline loses to a visible layout break in a
               // chip this narrow. Restores at `sm`, matching every other
-              // control on this row.
-              className="grid h-11 place-items-center text-muted sm:h-auto"
+              // control on this row. The ::before layer widens the tap
+              // area 12px each side instead, which moves no layout.
+              className="relative grid h-11 place-items-center text-muted before:absolute before:-inset-x-3 before:inset-y-0 before:content-[''] sm:h-auto"
             >
               ‹
             </button>
@@ -252,7 +253,7 @@ export function BudgetPage() {
               type="button"
               aria-label="Next month"
               onClick={() => setMonth((current) => shiftMonth(current, 1))}
-              className="grid h-11 place-items-center text-muted sm:h-auto"
+              className="relative grid h-11 place-items-center text-muted before:absolute before:-inset-x-3 before:inset-y-0 before:content-[''] sm:h-auto"
             >
               ›
             </button>

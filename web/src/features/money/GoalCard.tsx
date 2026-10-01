@@ -147,18 +147,13 @@ export function GoalCard({
           )}
         </div>
         <div className="mt-1.5 text-[13px] text-muted">
-          <span className="tabular">{formatMoney(goal.contributedMinor, goal.currency, symbol)}</span> of{" "}
-          <span className="tabular">{formatMoney(goal.targetMinor, goal.currency, symbol)}</span>
-          {/* The date clause is omitted entirely when targetMonth is null
-              (a dateless goal, decision 3) -- not rendered empty. Kept
-              outside both tabular spans above: appended as
-              " · by Dec 2026", it is a prose fragment tacked onto the
-              line, not a value to scan -- index.css's own .tabular
-              comment is the one statement of that exclusion; not
-              restated here. */}
+          {/* A sentence, so no .tabular: see the rule in index.css. */}
+          {formatMoney(goal.contributedMinor, goal.currency, symbol)} of{" "}
+          {formatMoney(goal.targetMinor, goal.currency, symbol)}
+          {/* Omitted entirely for a dateless goal, not rendered empty. */}
           {goal.targetMonth && ` · ${GOAL_COPY.dateClause(targetMonthLabel(goal.targetMonth))}`}
         </div>
-        <div className="tabular mt-2.5 text-[12px] text-muted">
+        <div className="mt-2.5 text-[12px] text-muted">
           {GOAL_COPY.perMonth(formatMoney(goal.plannedMonthlyMinor, goal.currency, symbol))}
         </div>
         {/* "Behind" is never a verdict without its arithmetic (task brief).

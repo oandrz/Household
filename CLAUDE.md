@@ -188,13 +188,27 @@ arrives from a database column or a request needs a `default` that refuses.
 test mutation-checked, `docs/FEATURE_TRACKER.md` and `docs/LEARNING.md` updated.
 The full checklist is at the end of `docs/LEARNING.md`.
 
-**Test the product in a real browser before calling it done.** Browser
-automation tools (Claude in Chrome / Playwright MCP) are available in every
-session — drive the running app at http://localhost:5173 yourself: click the
-flow the change touches, watch the numbers actually move, and only then claim
-it works. Tests passing is not that claim (see `verifying-in-the-real-environment`
-skill). The product owner asked for this explicitly on 2026-07-30 after a
+**Test the product in a real browser before calling it done.** Use gstack's
+`/browse` skill (see the gstack section below) to drive the running app at
+http://localhost:5173 yourself: click the flow the change touches, watch the
+numbers actually move, and only then claim it works. Tests passing is not that
+claim (see `verifying-in-the-real-environment` skill). The product owner asked for this explicitly on 2026-07-30 after a
 feature verified "15 of 15" still surprised them in first-run use.
+
+## gstack
+
+Use the `/browse` skill from gstack for all web browsing. Never use
+`mcp__claude-in-chrome__*` tools. gstack is installed per person, not in this
+repository — see https://github.com/garrytan/gstack for setup.
+
+Available gstack skills:
+/office-hours, /plan-ceo-review, /plan-eng-review, /plan-design-review,
+/design-consultation, /design-shotgun, /design-html, /review, /deslop-shared-libs,
+/test-audit, /ship, /land-and-deploy, /canary, /benchmark, /browse, /connect-chrome,
+/qa, /qa-only, /design-review, /scrape, /setup-browser-cookies, /setup-deploy,
+/setup-gbrain, /retro, /investigate, /document-release, /document-generate, /codex,
+/cso, /autoplan, /plan-devex-review, /devex-review, /careful, /freeze, /guard,
+/unfreeze, /gstack-upgrade, /learn.
 
 ## Agent skills
 
@@ -209,3 +223,22 @@ Default five-role vocabulary; label strings equal role names. See `docs/agents/t
 ### Domain docs
 
 Single-context: `CONTEXT.md` + `docs/adr/` at the repo root. See `docs/agents/domain.md`.
+
+## Skill routing
+
+When the user's request matches an available skill, invoke it via the Skill tool. When in doubt, invoke the skill.
+
+Key routing rules:
+- Product ideas/brainstorming → invoke /office-hours
+- Strategy/scope → invoke /plan-ceo-review
+- Architecture → invoke /plan-eng-review
+- Design system/plan review → invoke /design-consultation or /plan-design-review
+- Full review pipeline → invoke /autoplan
+- Bugs/errors → invoke /investigate
+- QA/testing site behavior → invoke /qa or /qa-only
+- Code review/diff check → invoke /review
+- Visual polish → invoke /design-review
+- Ship/deploy/PR → invoke /ship or /land-and-deploy
+- Save progress → invoke /context-save
+- Resume context → invoke /context-restore
+- Author a backlog-ready spec/issue → invoke /spec

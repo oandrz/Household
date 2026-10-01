@@ -323,7 +323,7 @@ describe("BudgetPage", () => {
     const empty = await screen.findByTestId("budget-empty-state");
     expect(empty).toHaveTextContent("No budget set for July yet");
     expect(empty).toHaveTextContent(
-      "A budget gives every dollar a job. Set a monthly cap per category and Hearth will track spending against it automatically from your linked accounts.",
+      "A budget gives every dollar a job. Set a monthly cap per category and Hearth tracks the spending you log against it.",
     );
     expect(screen.getByTestId("budget-create-blank")).toHaveTextContent("Create your first budget");
     expect(screen.getByTestId("budget-start-from-template")).toHaveTextContent("Start from a template");

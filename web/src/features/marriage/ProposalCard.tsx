@@ -105,9 +105,11 @@ export function ProposalCard({ proposal, targetNumber, onAgree, onPark, onWithdr
       className="rounded-xl border border-callout-border bg-callout px-5 py-[18px]"
     >
       <p className="text-[13px] font-semibold text-accent">{title}</p>
+      {/* Date first: the summary ends in a colon that introduces the wording
+          below it, so nothing may follow it on this line. */}
       <p className={`${line} text-ink`}>
+        <span className="text-muted">{agreementDateLabel(proposal.proposedAt)} · </span>
         {proposalSummary(proposal.kind, proposal.proposedByName, proposal.sectionName, targetNumber)}
-        <span className="text-muted"> · {agreementDateLabel(proposal.proposedAt)}</span>
       </p>
       {/* Which of previousBody/body renders is the kind's own shape on the wire
           -- an add carries no previousBody, a remove no body -- so this reads

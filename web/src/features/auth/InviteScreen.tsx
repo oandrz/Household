@@ -26,6 +26,7 @@ import {
 } from "./copy";
 import { invitePreviewSchema, type InvitePreview } from "./schemas";
 import { useAcceptInvite, useMe } from "./useAuth";
+import { BrandMark } from "../../components/BrandMark";
 
 async function fetchInvitePreview(token: string): Promise<InvitePreview> {
   const body = await apiFetch<unknown>(`/api/v1/invites/${encodeURIComponent(token)}`);
@@ -50,7 +51,7 @@ function AuthShell({ children }: { children: ReactNode }) {
           track shrink to the viewport instead. */}
       <div className="w-full min-w-0 flex flex-col items-center gap-[22px]">
         <div className="flex items-center gap-2.5">
-          <div className="h-[30px] w-[30px] rounded-[9px] bg-accent" />
+          <BrandMark size="auth" />
           <div className="text-[17px] font-semibold tracking-[-0.01em]">Hearth</div>
         </div>
         <div className="w-full max-w-[428px] rounded-2xl border border-hairline bg-card px-8 pb-[26px] pt-[30px] shadow-[var(--shadow-auth-card)]">
@@ -61,32 +62,60 @@ function AuthShell({ children }: { children: ReactNode }) {
   );
 }
 
-function InvitePreviewError({ error }: { error: unknown }) {
-  let message =
-    "Something went wrong loading this invite. Please try again.";
+// One card for every way the invite lookup can fail: what happened, why, and
+// one way forward. `heading` says only what is known -- a load that failed
+// has not shown the invite to be dead, so it must not say so.
+function inviteFailure(error: unknown): { heading: string; message: string; action: string } {
   if (error instanceof ApiError) {
     if (error.status === 404) {
-      message =
-        "We couldn't find that invite. Check the link, or ask whoever invited you to send a new one.";
-    } else if (error.status === 410) {
-      message =
-        "This invite has expired. Ask whoever invited you to send a new one.";
-    } else if (error.status === 409) {
-      return (
-        <p role="alert" className="text-[13px] leading-relaxed text-muted">
-          This invite has already been accepted.{" "}
-          <a href="/" className="font-medium text-accent">
-            Sign in
-          </a>{" "}
-          instead.
-        </p>
-      );
+      return {
+        heading: "That invite won’t work.",
+        message:
+          "We couldn’t find that invite. Check the link, or ask whoever invited you to send a new one.",
+        action: "Go to Hearth",
+      };
+    }
+    if (error.status === 410) {
+      return {
+        heading: "That invite won’t work.",
+        message: "This invite has expired. Ask whoever invited you to send a new one.",
+        action: "Go to Hearth",
+      };
+    }
+    if (error.status === 409) {
+      return {
+        heading: "That invite was already used.",
+        message: "This invite has already been accepted.",
+        action: "Sign in",
+      };
     }
   }
+  return {
+    heading: "We couldn’t load that invite.",
+    message: "Something went wrong loading this invite. Please try again.",
+    action: "Go to Hearth",
+  };
+}
+
+function InvitePreviewError({ error }: { error: unknown }) {
+  const failure = inviteFailure(error);
   return (
-    <p role="alert" className="text-[13px] leading-relaxed text-muted">
-      {message}
-    </p>
+    <div className="text-center">
+      <h1 className="mb-1 mt-0.5 font-serif text-[27px] font-medium tracking-[-0.015em]">
+        {failure.heading}
+      </h1>
+      <p role="alert" className="mb-5 text-[13px] leading-relaxed text-muted">
+        {failure.message}
+      </p>
+      {/* "/" lands a signed-in visitor on Overview and anyone else on sign-in,
+          so one link is the right way out for every case. */}
+      <a
+        href="/"
+        className="block w-full rounded-[9px] bg-accent py-3 text-center text-[13.5px] font-semibold text-white"
+      >
+        {failure.action}
+      </a>
+    </div>
   );
 }
 
@@ -239,7 +268,9 @@ export function InviteScreen({ token }: { token: string }) {
 
   return (
     <AuthShell>
-      {me.isSuccess && (
+      {/* Only beside an invite that can actually be accepted: over a dead
+          link it warns about an action the page cannot take. */}
+      {me.isSuccess && preview.isSuccess && (
         <ExistingSessionWarning displayName={me.data.user.displayName} />
       )}
       {preview.isPending && (

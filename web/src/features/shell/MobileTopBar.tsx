@@ -13,12 +13,13 @@
 // The sidebar's ⌘K chip is deliberately absent: it opens nothing (no command
 // palette exists), and on 375px it would cost width that a product name and a
 // 44px touch target both need.
+import { BrandMark } from "../../components/BrandMark";
 import { MenuIcon } from "../../components/icons";
 
 export function MobileTopBar({ onOpenNav }: { onOpenNav: () => void }) {
   return (
     <header className="sticky top-0 z-30 flex items-center gap-2.5 border-b border-hairline bg-card px-4 py-2.5 lg:hidden">
-      <div className="h-7 w-7 rounded-lg bg-accent" />
+      <BrandMark size="shell" />
       <div className="text-[15px] font-semibold tracking-[-0.01em]">Hearth</div>
       <button
         type="button"

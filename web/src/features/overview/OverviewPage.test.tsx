@@ -366,7 +366,7 @@ describe("OverviewPage", () => {
     expect(screen.getByText("next: Bali · Dec 2026")).toBeInTheDocument();
     // Proof the two marriage surfaces actually mount together on the real
     // page, not merely in each component's own isolated test file.
-    expect(await screen.findByTestId("vision-card")).toHaveTextContent('"Slow down together"');
+    expect(await screen.findByTestId("vision-card")).toHaveTextContent('“Slow down together”');
     expect(screen.getByTestId("vision-checkin-strip")).toHaveTextContent("Slow down together");
     // VisionCard.tsx and NextRetroCard.tsx each own an independent
     // useVision(currentVisionYear()) call, but both read the identical

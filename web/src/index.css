@@ -41,6 +41,20 @@
   --color-avatar-3: #a97c2f;
   --color-avatar-4: #7c4d6e;
 
+  /* Chart series colours. The first series of either chart is --color-accent.
+     contribution-2..4 are the design's own three lighter greens for the
+     Monthly contributions bar. holding-2..6 colour the portfolio report's
+     bars, one per holding; the design does not draw that chart, so these are
+     distinct hues chosen to be told apart, not brand colours. */
+  --color-contribution-2: #5b8f7c;
+  --color-contribution-3: #8fb5a5;
+  --color-contribution-4: #c4d8cf;
+  --color-holding-2: oklch(59.6% 0.145 163.225);
+  --color-holding-3: oklch(66.6% 0.179 58.318);
+  --color-holding-4: oklch(58.8% 0.158 241.966);
+  --color-holding-5: oklch(64.5% 0.246 16.439);
+  --color-holding-6: oklch(54.1% 0.281 293.009);
+
   --font-sans: "Schibsted Grotesk", system-ui, sans-serif;
   --font-serif: "Newsreader", Georgia, serif;
   /* --font-alt (Karla) and --font-mono (IBM Plex Mono) were defined here and
@@ -50,9 +64,7 @@
      tabular figures already in hand; it should not be taken by picking up a
      token that happened to be lying here. */
 
-  --radius-card: 8px;
-  --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.06);
-  /* The auth screens' floating card, a heavier shadow than --shadow-card. */
+  /* The auth screens' floating card. */
   --shadow-auth-card: 0 12px 40px rgba(28, 27, 24, 0.07);
 
   /* The focus ring. Chrome's default is rgb(0, 95, 204) at 0.8px -- an
@@ -100,11 +112,13 @@ body {
 }
 
 /* Tabular figures. NOT on body: a heading containing a year should stay
-   proportional. Belongs where figures stack or repeat and the eye travels
-   between them -- a ledger column, a grid of categories, a row of stat
-   cards. It does NOT belong on a lone display figure or a figure embedded
-   in a prose sentence, where fixed digit widths only pad the punctuation
-   out. See formatMoney.ts, which already spends a comment on using U+2212
+   proportional. Belongs only where figures stack in a column and the eye
+   travels down it -- a ledger column, a grid of categories. It does NOT
+   belong on a stat card (cards sit side by side, so their digits never line
+   up), a lone display figure, or a figure inside a sentence. In Schibsted
+   Grotesk, tabular-nums also widens "." and "," to a digit's width, so
+   anywhere nothing stacks it only renders "S$300 . 00". See formatMoney.ts,
+   which already spends a comment on using U+2212
    MINUS rather than a hyphen "because every negative figure in this app is
    in a column of numbers" -- that reasoning is what decides which side of
    this rule a given figure falls on. */

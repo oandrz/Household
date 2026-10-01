@@ -60,7 +60,7 @@ export function BillStatCards({
         testId="bills-stat-due-this-month"
         label={BILL_COPY.statDueThisMonth}
         value={formatMoney(dueThisMonthMinor, currency, symbol)}
-        valueClassName="text-ink tabular"
+        valueClassName="text-ink"
         // State 2's own contract: a zero here explains itself rather than
         // sitting as a bare "S$0.00" -- not gated to any named "state," just
         // to the figure actually being zero, the same as the card beside it.
@@ -70,7 +70,7 @@ export function BillStatCards({
         testId="bills-stat-paid-so-far"
         label={BILL_COPY.statPaidSoFar}
         value={formatMoney(paidSoFarMinor, currency, symbol)}
-        valueClassName="text-accent tabular"
+        valueClassName="text-accent"
         subtitle={paidSoFarMinor === 0 ? BILL_COPY.paidSoFarZero : undefined}
       />
       {nextDue && (

@@ -146,8 +146,10 @@ export const BILL_COPY = {
   // function for both flags rather than four separate copy strings, since
   // the sentence's shape (three clauses joined by " · ") is itself part of
   // what a tone sweep would want to change in one place.
+  // A bill with no category has an empty categoryName; joining only the parts
+  // that exist keeps the line from opening with a bare " · ".
   rowSubtitle: (categoryName: string, autopay: boolean, accountName: string) =>
-    `${categoryName} · ${autopay ? "autopay" : "manual"} · ${accountName}`,
+    [categoryName, autopay ? "autopay" : "manual", accountName].filter(Boolean).join(" · "),
   // A payment (billPaymentSchema) carries no categoryName or accountName --
   // it is not an oversight in the design's own mockup ("Education · manual"
   // has no account either), it is what the DTO actually has.
@@ -160,12 +162,10 @@ export const BILL_COPY = {
   overdueManual: (dateLabel: string) => `Overdue since ${dateLabel}`,
 
   allCaughtUpHeadline: "All caught up",
-  // The leading "— " and the lowercase "everything" both match the task
-  // brief's own quoted sentence verbatim ("All caught up — everything due
-  // in August is paid. Next bill: school fees, 15 Sep.") -- rendered as a
-  // second element below the bold headline (the design's own two-part "All
-  // bills covered" panel shape), with the dash carried into this string so
-  // the two still read as one sentence split across a line break.
+  // The leading "— " and the lowercase "everything" continue the headline:
+  // BillsPage renders both on ONE line ("All caught up — everything due in
+  // August is paid."). Don't put this on its own line under the headline:
+  // it then reads as a paragraph that opens with a stray dash.
   //
   // nextBillClause is composed separately and passed in already-built
   // (rather than this function taking the raw billName/date pair itself) so

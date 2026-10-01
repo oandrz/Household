@@ -28,6 +28,7 @@
 // hook's comment in useAuth.ts for why.
 import { useRef } from "react";
 import { useConsumeMagicLink, useMe } from "./useAuth";
+import { BrandMark } from "../../components/BrandMark";
 
 // The same warning, in the same words, as InviteScreen's: a shared device
 // with someone already signed in is exactly the situation login CSRF relies
@@ -72,7 +73,7 @@ export function MagicLinkConsumeScreen({ token }: { token: string }) {
           track shrink to the viewport instead. */}
       <div className="w-full min-w-0 flex flex-col items-center gap-[22px]">
         <div className="flex items-center gap-2.5">
-          <div className="h-[30px] w-[30px] rounded-[9px] bg-accent" />
+          <BrandMark size="auth" />
           <div className="text-[17px] font-semibold tracking-[-0.01em]">Hearth</div>
         </div>
 

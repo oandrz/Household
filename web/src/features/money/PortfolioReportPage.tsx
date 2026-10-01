@@ -79,12 +79,12 @@ export function PortfolioReportPage() {
 
       <p
         data-testid="report-not-in-net-worth"
-        className="mt-5 rounded-xl border border-hairline bg-surface px-4 py-3 text-[12.5px] leading-snug text-muted"
+        className="rounded-xl border border-hairline bg-surface px-4 py-3 text-[12.5px] leading-snug text-muted"
       >
         {HOLDING_REPORT_COPY.notInNetWorth}
       </p>
 
-      <div role="group" aria-label="Period length" className="mt-5 flex gap-1.5">
+      <div role="group" aria-label="Period length" className="flex gap-1.5">
         {KINDS.map((option) => (
           <button
             key={option}
@@ -102,15 +102,15 @@ export function PortfolioReportPage() {
         ))}
       </div>
 
-      {report.isPending ? <p className="mt-5 text-xs text-muted">Working out the figures…</p> : null}
+      {report.isPending ? <p className="text-xs text-muted">Working out the figures…</p> : null}
       {report.isError ? (
-        <p className="mt-5 text-xs text-danger" role="alert">
+        <p className="text-xs text-danger" role="alert">
           The report could not be loaded. Try again in a moment.
         </p>
       ) : null}
 
       {report.isSuccess && holdings.length === 0 ? (
-        <div className="mt-5 rounded-xl border border-hairline bg-card p-[22px]">
+        <div className="rounded-xl border border-hairline bg-card p-[22px]">
           <h2 className="text-[15px] font-semibold text-ink">Nothing to report yet</h2>
           <p className="mt-1.5 text-[13px] text-muted">{HOLDING_REPORT_COPY.empty}</p>
         </div>
@@ -118,7 +118,7 @@ export function PortfolioReportPage() {
 
       {report.isSuccess && holdings.length > 0 ? (
         <>
-          <section className="mt-5 rounded-xl border border-hairline bg-card p-[22px]">
+          <section className="rounded-xl border border-hairline bg-card p-[22px]">
             <h2 className="text-[15px] font-semibold text-ink">
               {HOLDING_REPORT_COPY.periodKinds[kind]} by {kind === "year" ? "year" : "period"}
             </h2>
@@ -129,7 +129,7 @@ export function PortfolioReportPage() {
             />
           </section>
 
-          <div className="mt-5 flex flex-col gap-3">
+          <div className="flex flex-col gap-3">
             {holdings.map((holding) => (
               <HoldingReportCard
                 key={holding.id}

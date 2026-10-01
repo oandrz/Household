@@ -14,6 +14,7 @@
 import { Link, useMatchRoute, useNavigate } from "@tanstack/react-router";
 import type { Me, Space } from "../auth/schemas";
 import { useSignOut } from "../auth/useAuth";
+import { BrandMark } from "../../components/BrandMark";
 import { PowerIcon } from "../../components/icons";
 
 // One entry per built page of each space, in the design's order. A space
@@ -169,8 +170,10 @@ export function Sidebar({ me }: { me: Me }) {
     // `display: contents` (see NavDrawer), so this <nav> is a direct grid
     // child there instead and stretches to the row's height regardless --
     // flex-1 has no effect on a grid item and does not change the desktop
-    // column.
-    <nav className="flex flex-1 flex-col gap-0.5 overflow-y-auto border-r border-hairline bg-card px-4 py-[22px]">
+    // column. lg:sticky + lg:h-dvh + lg:self-start pin that column to the
+    // viewport: stretched to the row instead, it grows with a long page and
+    // carries Settings, Admin and Sign out off the bottom of the screen.
+    <nav className="flex flex-1 flex-col gap-0.5 overflow-y-auto border-r border-hairline bg-card px-4 py-[22px] lg:sticky lg:top-0 lg:h-dvh lg:self-start">
       {/* The design's sidebar has no separate top bar; this brand row (logo
           square, "Hearth") is the only header it draws, so AppShell's
           "header" is this.
@@ -181,7 +184,7 @@ export function Sidebar({ me }: { me: Me }) {
           the day a palette does -- so do not re-add it from the design
           file. */}
       <div className="flex items-center gap-2.5 px-2.5 pb-[18px]">
-        <div className="h-7 w-7 rounded-lg bg-accent" />
+        <BrandMark size="shell" />
         <div className="text-[15px] font-semibold tracking-[-0.01em]">
           Hearth
         </div>

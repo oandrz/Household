@@ -24,7 +24,7 @@ export const VISION_COPY = {
   // design's own `"Slow down together"` (dc.html) -- as real text, not a CSS
   // ::before/::after, so the mark is present in what a screen reader gets,
   // not only in what a sighted reader sees painted around it.
-  themeQuote: (theme: string) => `"${theme}"`,
+  themeQuote: (theme: string) => `“${theme}”`,
 
   pillarLabel: (n: number) => `Pillar ${n}`,
 

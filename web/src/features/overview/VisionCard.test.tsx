@@ -81,7 +81,7 @@ describe("VisionCard", () => {
     );
 
     const card = await screen.findByTestId("vision-card");
-    expect(card).toHaveTextContent('"Slow down together"');
+    expect(card).toHaveTextContent('“Slow down together”');
 
     const lines = screen.getAllByTestId("vision-overview-line");
     expect(lines).toHaveLength(2);
@@ -165,7 +165,7 @@ describe("VisionCard", () => {
     renderCard(visionFixture({ pillars: [] }));
 
     const card = await screen.findByTestId("vision-card");
-    expect(card).toHaveTextContent('"Slow down together"');
+    expect(card).toHaveTextContent('“Slow down together”');
     expect(screen.queryByTestId("vision-overview-line")).not.toBeInTheDocument();
   });
 

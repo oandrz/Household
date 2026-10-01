@@ -44,6 +44,7 @@ export const BUDGET_COPY = {
   overMarker: "· over",
 
   spendingByPerson: "Spending by person",
+  byPersonEmpty: "No spending logged this month yet. Each person's share shows here once there is.",
   // The row for `membershipId: ""` -- spend the server could not attach to
   // any member, either a hand-entered transaction saved without a payer or
   // (once Bills ships) a bill with no "Paid by". Copy for it lives here, not
@@ -78,7 +79,7 @@ export const BUDGET_COPY = {
   // this is the design's real copy, word for word.
   emptyHeadline: (month: string) => `No budget set for ${month} yet`,
   emptyBody:
-    "A budget gives every dollar a job. Set a monthly cap per category and Hearth will track spending against it automatically from your linked accounts.",
+    "A budget gives every dollar a job. Set a monthly cap per category and Hearth tracks the spending you log against it.",
   createFirstBudget: "Create your first budget",
   startFromTemplate: "Start from a template",
 

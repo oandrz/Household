@@ -232,6 +232,8 @@ function TransactionRow({
 export function TransactionsPage() {
   const [filters, setFilters] = useState<TransactionFilterValues>(EMPTY_TRANSACTION_FILTERS);
   const [addOpen, setAddOpen] = useState(false);
+  // Phones only: at `sm` and up the filters are always shown and this is unused.
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
 
   // Rows loaded via "Load older transactions", beyond the page's own
@@ -341,6 +343,9 @@ export function TransactionsPage() {
     filters.accountId !== "" ||
     filters.categoryId !== "" ||
     filters.paidBy !== "";
+  const activeFilterCount = [filters.kind, filters.accountId, filters.categoryId, filters.paidBy].filter(
+    (value) => value !== "",
+  ).length;
   const showingAllMonths = filters.month === "";
   // What the Month control shows. An unchosen month displays the one the
   // server just answered for rather than staying blank: a blank
@@ -470,13 +475,29 @@ export function TransactionsPage() {
       </div>
 
       <div className="flex flex-wrap items-end gap-3">
-        <TransactionFilters
-          values={filterValues}
-          onChange={setFilters}
-          accounts={accounts}
-          categories={categories}
-          members={members}
-        />
+        {/* Five filters stack to full width on a phone, which filled the first
+            screen and pushed every transaction below it. Below `sm` they fold
+            behind this button; from `sm` up the button is gone and the panel
+            always shows. Hidden with a class, not unmounted, so the filters
+            keep their values while folded. */}
+        <button
+          type="button"
+          aria-expanded={filtersOpen}
+          aria-controls="txn-filters-panel"
+          onClick={() => setFiltersOpen((open) => !open)}
+          className="min-h-11 rounded-lg border border-hairline bg-card px-3 py-2.5 text-[12.5px] font-semibold text-label sm:hidden"
+        >
+          {TRANSACTIONS_COPY.filtersToggle(activeFilterCount)}
+        </button>
+        <div id="txn-filters-panel" className={`w-full sm:block sm:w-auto ${filtersOpen ? "" : "hidden"}`}>
+          <TransactionFilters
+            values={filterValues}
+            onChange={setFilters}
+            accounts={accounts}
+            categories={categories}
+            members={members}
+          />
+        </div>
         <div className="ml-auto pb-1.5 text-[12.5px] text-muted">
           {spendLabel}{" "}
           <b className="text-ink">
