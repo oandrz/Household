@@ -49,7 +49,7 @@ function TokenRow({ token, isMine }: { token: AccessToken; isMine: boolean }) {
             type="button"
             onClick={() => action.ask()}
             disabled={action.isPending()}
-            className="min-h-11 shrink-0 rounded-lg border border-hairline px-3 py-1.5 text-[11px] font-semibold text-danger disabled:cursor-not-allowed disabled:opacity-60 lg:min-h-0"
+            className="min-h-11 shrink-0 rounded-lg border border-hairline px-3 py-1.5 text-[11px] font-semibold text-danger disabled:cursor-not-allowed disabled:opacity-60 sm:min-h-0"
           >
             Revoke
           </button>
@@ -60,14 +60,14 @@ function TokenRow({ token, isMine }: { token: AccessToken; isMine: boolean }) {
               type="button"
               onClick={() => void action.confirm(() => revoke.mutateAsync(token.id))}
               disabled={action.isPending()}
-              className="min-h-11 rounded-lg bg-danger px-3 py-1.5 text-[11px] font-semibold text-white disabled:opacity-60 lg:min-h-0"
+              className="min-h-11 rounded-lg bg-danger px-3 py-1.5 text-[11px] font-semibold text-white disabled:opacity-60 sm:min-h-0"
             >
               Yes, revoke
             </button>
             <button
               type="button"
               onClick={() => action.cancel()}
-              className="min-h-11 rounded-lg border border-hairline px-3 py-1.5 text-[11px] font-semibold text-label lg:min-h-0"
+              className="min-h-11 rounded-lg border border-hairline px-3 py-1.5 text-[11px] font-semibold text-label sm:min-h-0"
             >
               Keep
             </button>

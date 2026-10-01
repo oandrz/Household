@@ -133,7 +133,7 @@ export function HoldingIncomePanel({
           </label>
           <button
             type="submit"
-            className="min-h-11 rounded-lg bg-accent px-3.5 py-2 text-[13px] font-semibold text-white lg:min-h-0"
+            className="min-h-11 rounded-lg bg-accent px-3.5 py-2 text-[13px] font-semibold text-white sm:min-h-0"
             disabled={recordIncome.isPending}
           >
             {recordIncome.isPending ? "Saving…" : "Record"}
@@ -180,7 +180,7 @@ export function HoldingIncomePanel({
                     // flag, not deleteIncome.isPending: one mutation serves
                     // every row, so its flag would grey every row at once.
                     disabled={rowRemoval.isPending(row.id)}
-                    className="min-h-11 rounded-lg bg-danger px-3.5 py-2 text-[13px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60 lg:min-h-0"
+                    className="min-h-11 rounded-lg bg-danger px-3.5 py-2 text-[13px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60 sm:min-h-0"
                     onClick={() =>
                       // useConfirmAction closes the confirmation either way:
                       // a confirmation left open after the answer arrived is
@@ -207,7 +207,7 @@ export function HoldingIncomePanel({
                   </button>
                   <button
                     type="button"
-                    className="min-h-11 rounded-lg border border-hairline bg-card px-3.5 py-2 text-[13px] font-semibold text-ink lg:min-h-0"
+                    className="min-h-11 rounded-lg border border-hairline bg-card px-3.5 py-2 text-[13px] font-semibold text-ink sm:min-h-0"
                     onClick={rowRemoval.cancel}
                   >
                     Keep
@@ -216,7 +216,7 @@ export function HoldingIncomePanel({
               ) : (
                 <button
                   type="button"
-                  className="min-h-11 rounded-lg border border-hairline bg-card px-3.5 py-2 text-[13px] font-semibold text-ink lg:min-h-0"
+                  className="min-h-11 rounded-lg border border-hairline bg-card px-3.5 py-2 text-[13px] font-semibold text-ink sm:min-h-0"
                   onClick={() => rowRemoval.ask(row.id)}
                 >
                   Remove

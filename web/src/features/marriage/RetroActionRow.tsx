@@ -46,11 +46,11 @@ export function RetroActionRow({
             genuinely interactive control here -- native `<label for>`
             click-delegation gives the 18x18px checkbox a 44px-tall tappable
             strip without visually enlarging the glyph itself, dropping to
-            the design's own tighter spacing at lg and up (min-h-11/
-            lg:min-h-0, the same pattern every other control on this screen
+            the design's own tighter spacing at sm and up (min-h-11/
+            sm:min-h-0, the same pattern every other control on this screen
             uses). See task-12-report.md for why the glyph stays 18px rather
             than growing to 44px outright. */}
-        <label htmlFor={checkboxId} className="flex min-h-11 cursor-pointer items-center gap-2.5 lg:min-h-0">
+        <label htmlFor={checkboxId} className="flex min-h-11 cursor-pointer items-center gap-2.5 sm:min-h-0">
           <input
             id={checkboxId}
             type="checkbox"

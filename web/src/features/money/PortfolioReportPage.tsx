@@ -71,7 +71,7 @@ export function PortfolioReportPage() {
         </div>
         <Link
           to="/money/portfolio"
-          className="min-h-11 rounded-lg border border-hairline px-3.5 py-2 text-[13px] font-semibold text-ink lg:min-h-0"
+          className="min-h-11 rounded-lg border border-hairline px-3.5 py-2 text-[13px] font-semibold text-ink sm:min-h-0"
         >
           Back to portfolio
         </Link>
@@ -93,8 +93,8 @@ export function PortfolioReportPage() {
             onClick={() => setKind(option)}
             className={
               kind === option
-                ? "min-h-11 rounded-lg bg-accent px-3.5 py-2 text-[13px] font-semibold text-white lg:min-h-0"
-                : "min-h-11 rounded-lg border border-hairline px-3.5 py-2 text-[13px] font-semibold text-ink lg:min-h-0"
+                ? "min-h-11 rounded-lg bg-accent px-3.5 py-2 text-[13px] font-semibold text-white sm:min-h-0"
+                : "min-h-11 rounded-lg border border-hairline px-3.5 py-2 text-[13px] font-semibold text-ink sm:min-h-0"
             }
           >
             {HOLDING_REPORT_COPY.periodKinds[option]}

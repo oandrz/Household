@@ -99,7 +99,7 @@ export function VisionPage() {
           type="button"
           data-testid="vision-edit"
           onClick={onEdit}
-          className="min-h-11 rounded-lg bg-accent px-3.5 py-2 text-[13px] font-semibold text-white lg:min-h-0"
+          className="min-h-11 rounded-lg bg-accent px-3.5 py-2 text-[13px] font-semibold text-white sm:min-h-0"
         >
           {VISION_COPY.editVision}
         </button>
@@ -118,7 +118,7 @@ export function VisionPage() {
               type="button"
               data-testid="vision-empty-cta"
               onClick={onEdit}
-              className="min-h-11 rounded-lg bg-accent px-5 py-2.5 text-[13px] font-semibold text-white lg:min-h-0"
+              className="min-h-11 rounded-lg bg-accent px-5 py-2.5 text-[13px] font-semibold text-white sm:min-h-0"
             >
               {VISION_COPY.emptyCta}
             </button>

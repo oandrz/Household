@@ -161,10 +161,10 @@ function PaymentRow({
             <button
               type="button"
               onClick={onCancelUndo}
-              // min-h-11/lg:min-h-0: py-2.5 alone measured short of the 44px
+              // min-h-11/sm:min-h-0: py-2.5 alone measured short of the 44px
               // floor at this text size -- TransactionFilters.tsx's own
               // SELECT_CLASS comment has the measured numbers.
-              className="min-h-11 flex-1 rounded-lg border border-hairline py-2.5 text-center text-[12.5px] font-semibold text-label transition-colors duration-[var(--transition-state)] hover:bg-canvas active:bg-toggle-off lg:min-h-0 lg:py-1.5"
+              className="min-h-11 flex-1 rounded-lg border border-hairline py-2.5 text-center text-[12.5px] font-semibold text-label transition-colors duration-[var(--transition-state)] hover:bg-canvas active:bg-toggle-off sm:min-h-0 sm:py-1.5"
             >
               {BILL_COPY.cancelAction}
             </button>
@@ -172,7 +172,7 @@ function PaymentRow({
               type="button"
               disabled={undoing}
               onClick={onConfirmUndo}
-              className="min-h-11 flex-1 rounded-lg bg-danger py-2.5 text-center text-[12.5px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60 lg:min-h-0 lg:py-1.5"
+              className="min-h-11 flex-1 rounded-lg bg-danger py-2.5 text-center text-[12.5px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60 sm:min-h-0 sm:py-1.5"
             >
               {BILL_COPY.undoConfirmAction}
             </button>

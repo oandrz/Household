@@ -132,7 +132,7 @@ export function RetroModal({
                     // each of these five tiles at 320px: this is the
                     // tightest row in the whole feature and the floor may
                     // not clear on both axes there.
-                    className={`flex min-h-11 flex-1 cursor-pointer flex-col items-center justify-center gap-1 rounded-[10px] border py-2 text-[18px] lg:min-h-0 ${
+                    className={`flex min-h-11 flex-1 cursor-pointer flex-col items-center justify-center gap-1 rounded-[10px] border py-2 text-[18px] sm:min-h-0 ${
                       selected ? "border-accent bg-callout" : "border-hairline"
                     }`}
                   >

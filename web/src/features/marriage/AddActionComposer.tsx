@@ -123,7 +123,7 @@ export function AddActionComposer({
         }}
         placeholder={RETRO_COPY.addActionPlaceholder}
         disabled={disabled}
-        className="min-h-11 rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13px] lg:min-h-0"
+        className="min-h-11 rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13px] sm:min-h-0"
       />
       <div className="flex flex-wrap items-center gap-2">
         {owners.map((owner) => {
@@ -142,15 +142,15 @@ export function AddActionComposer({
               // measured or named as an exception -- the only
               // `sm:h-[Npx]` on an interactive element anywhere in
               // features/marriage, features/money or components.
-              // `min-h-11 ... lg:min-h-0` is the house pattern every
+              // `min-h-11 ... sm:min-h-0` is the house pattern every
               // other control here uses (RetroActionRow.tsx's own
               // checkbox label, every button in the retro modal): it
               // removes the floor rather than clamping below it, so
-              // padding decides the size at `lg` the same way it
+              // padding decides the size at `sm` the same way it
               // does everywhere else. `aspect-square` keeps this
               // circular at both sizes without a second, separate
               // width utility to keep in sync with the height one.
-              className={`flex aspect-square min-h-11 flex-none items-center justify-center rounded-full border p-1.5 text-[13px] font-semibold disabled:cursor-not-allowed disabled:opacity-60 lg:min-h-0 ${
+              className={`flex aspect-square min-h-11 flex-none items-center justify-center rounded-full border p-1.5 text-[13px] font-semibold disabled:cursor-not-allowed disabled:opacity-60 sm:min-h-0 ${
                 selected ? "border-accent bg-callout text-accent" : "border-hairline text-label"
               }`}
             >
@@ -162,7 +162,7 @@ export function AddActionComposer({
           type="button"
           disabled={disabled || isAddingAction || newActionBody.trim() === ""}
           onClick={() => void handleAddAction()}
-          className="min-h-11 ml-auto flex-none rounded-lg bg-accent px-4 text-[12px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60 lg:min-h-0 lg:py-1.5"
+          className="min-h-11 ml-auto flex-none rounded-lg bg-accent px-4 text-[12px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60 sm:min-h-0 sm:py-1.5"
         >
           {RETRO_COPY.addAction}
         </button>

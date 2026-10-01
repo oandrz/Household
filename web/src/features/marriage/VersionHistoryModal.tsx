@@ -120,7 +120,7 @@ export function VersionHistoryModal({
                             sectionId: entry.sectionId,
                           })
                         }
-                        className="min-h-11 flex-none rounded-lg border border-hairline px-3 text-[12px] font-semibold text-accent lg:min-h-0 lg:py-1.5"
+                        className="min-h-11 flex-none rounded-lg border border-hairline px-3 text-[12px] font-semibold text-accent sm:min-h-0 sm:py-1.5"
                       >
                         {AGREEMENT_COPY.historyRestore}
                       </button>
@@ -137,7 +137,7 @@ export function VersionHistoryModal({
             <button
               type="button"
               onClick={() => setExpanded(true)}
-              className="min-h-11 self-start text-[12.5px] font-semibold text-accent lg:min-h-0"
+              className="min-h-11 self-start text-[12.5px] font-semibold text-accent sm:min-h-0"
             >
               {AGREEMENT_COPY.historyShowOlder(lowest, highest)}
             </button>

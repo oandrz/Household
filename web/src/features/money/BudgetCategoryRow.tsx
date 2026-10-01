@@ -32,7 +32,7 @@ export function BudgetCategoryRow({
           type="text"
           value={row.name}
           onChange={(event) => onRename(event.target.value)}
-          // min-h-11/lg:min-h-0: the row's own ✕ button (below) is
+          // min-h-11/sm:min-h-0: the row's own ✕ button (below) is
           // already h-11 on a phone, so this doesn't change the
           // row's height -- it aligns the name and cap fields with a
           // target that was already 44px instead of floating short
@@ -50,7 +50,7 @@ export function BudgetCategoryRow({
           // own box -- invisible to a check of
           // `document.documentElement`, since a native <dialog>
           // paints in the top layer, outside normal document flow.
-          className="min-h-11 rounded-lg border border-hairline bg-card px-3 py-2 text-[13px] lg:min-h-0"
+          className="min-h-11 rounded-lg border border-hairline bg-card px-3 py-2 text-[13px] sm:min-h-0"
         />
         {(row.archived || row.queuedArchive) && (
           <span className="text-[11px] text-muted">
@@ -68,13 +68,13 @@ export function BudgetCategoryRow({
           inputMode="decimal"
           value={row.capInput}
           onChange={(event) => onCapChange(event.target.value)}
-          className="min-h-11 rounded-lg border border-hairline bg-card px-3 py-2 text-[13px] lg:min-h-0"
+          className="min-h-11 rounded-lg border border-hairline bg-card px-3 py-2 text-[13px] sm:min-h-0"
         />
       </div>
       <button
         type="button"
         onClick={onToggleArchive}
-        className="min-h-11 text-[11.5px] font-semibold text-label lg:min-h-0"
+        className="min-h-11 text-[11.5px] font-semibold text-label sm:min-h-0"
       >
         {row.queuedArchive ? "Unarchive" : BUDGET_COPY.archiveRow}
       </button>
@@ -82,9 +82,10 @@ export function BudgetCategoryRow({
         type="button"
         aria-label={BUDGET_COPY.removeRow}
         onClick={onRemove}
-        // 44px floor on phones and tablets, restoring at `lg`: same
-        // reasoning as Modal.tsx's close button.
-        className="grid h-11 w-11 flex-none place-items-center rounded-lg bg-canvas text-[12px] text-label lg:h-7 lg:w-7"
+        // 44px floor on phones, restoring at `sm`: same reasoning as
+        // Modal.tsx's close button -- this modal isn't tied to the
+        // shell's `lg` nav switch.
+        className="grid h-11 w-11 flex-none place-items-center rounded-lg bg-canvas text-[12px] text-label sm:h-7 sm:w-7"
       >
         <CloseIcon />
       </button>

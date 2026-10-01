@@ -123,7 +123,7 @@ export function AgreementsToDiscuss() {
                 type="button"
                 onClick={() => handleAgree(p.id)}
                 disabled={p.targetChanged || agreeingId === p.id}
-                className="min-h-11 rounded-lg bg-accent px-3.5 py-2 text-[13px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60 lg:min-h-0"
+                className="min-h-11 rounded-lg bg-accent px-3.5 py-2 text-[13px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60 sm:min-h-0"
               >
                 {AGREEMENT_COPY.agree}
               </button>

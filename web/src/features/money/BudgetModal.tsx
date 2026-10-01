@@ -330,7 +330,7 @@ function BudgetModalForm({
                 <button
                   type="button"
                   onClick={() => addCategoryByName(name)}
-                  className="min-h-11 text-[12.5px] font-semibold text-accent lg:min-h-0"
+                  className="min-h-11 text-[12.5px] font-semibold text-accent sm:min-h-0"
                 >
                   {BUDGET_COPY.addCategory}
                 </button>
@@ -387,7 +387,7 @@ function BudgetModalForm({
               <button
                 type="button"
                 onClick={handleAddNewCategory}
-                className="min-h-11 rounded-lg border border-hairline px-3.5 py-2.5 text-[13px] font-semibold text-label lg:min-h-0"
+                className="min-h-11 rounded-lg border border-hairline px-3.5 py-2.5 text-[13px] font-semibold text-label sm:min-h-0"
               >
                 {BUDGET_COPY.addCategory}
               </button>

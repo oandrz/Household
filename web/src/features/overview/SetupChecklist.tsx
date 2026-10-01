@@ -23,9 +23,9 @@ function monthName(): string {
   return new Date().toLocaleString(undefined, { month: "long" });
 }
 
-// inline-flex items-center min-h-11 lg:min-h-0: BudgetCard.tsx's own comment
+// inline-flex items-center min-h-11 sm:min-h-0: BudgetCard.tsx's own comment
 // on this identical pattern has the reason.
-const GO_LINK = "inline-flex min-h-11 items-center text-[12.5px] font-semibold text-accent lg:min-h-0";
+const GO_LINK = "inline-flex min-h-11 items-center text-[12.5px] font-semibold text-accent sm:min-h-0";
 
 export function SetupChecklist({
   hasAccount,

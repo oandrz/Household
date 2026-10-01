@@ -106,7 +106,7 @@ export function TelegramConnection() {
                 type="button"
                 onClick={() => disconnectAction.ask()}
                 disabled={disconnectAction.isPending()}
-                className="min-h-11 rounded-lg border border-hairline px-3 py-1.5 text-[11px] font-semibold text-danger disabled:cursor-not-allowed disabled:opacity-60 lg:min-h-0"
+                className="min-h-11 rounded-lg border border-hairline px-3 py-1.5 text-[11px] font-semibold text-danger disabled:cursor-not-allowed disabled:opacity-60 sm:min-h-0"
               >
                 Disconnect
               </button>
@@ -122,14 +122,14 @@ export function TelegramConnection() {
                   type="button"
                   onClick={() => void disconnectAction.confirm(() => disconnect.mutateAsync())}
                   disabled={disconnectAction.isPending()}
-                  className="min-h-11 rounded-lg bg-danger px-3 py-1.5 text-[11px] font-semibold text-white disabled:opacity-60 lg:min-h-0"
+                  className="min-h-11 rounded-lg bg-danger px-3 py-1.5 text-[11px] font-semibold text-white disabled:opacity-60 sm:min-h-0"
                 >
                   Yes, disconnect
                 </button>
                 <button
                   type="button"
                   onClick={() => disconnectAction.cancel()}
-                  className="min-h-11 rounded-lg border border-hairline px-3 py-1.5 text-[11px] font-semibold text-label lg:min-h-0"
+                  className="min-h-11 rounded-lg border border-hairline px-3 py-1.5 text-[11px] font-semibold text-label sm:min-h-0"
                 >
                   Keep
                 </button>
@@ -180,7 +180,7 @@ export function TelegramConnection() {
                   type="button"
                   onClick={handleConfirm}
                   disabled={confirmLink.isPending}
-                  className="min-h-11 rounded-lg bg-accent px-3 py-1.5 text-[11px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60 lg:min-h-0"
+                  className="min-h-11 rounded-lg bg-accent px-3 py-1.5 text-[11px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60 sm:min-h-0"
                 >
                   Confirm
                 </button>
@@ -202,7 +202,7 @@ export function TelegramConnection() {
                 <button
                   type="button"
                   onClick={handleStartOver}
-                  className="min-h-11 rounded-lg border border-hairline px-3 py-1.5 text-[11px] font-semibold text-label lg:min-h-0"
+                  className="min-h-11 rounded-lg border border-hairline px-3 py-1.5 text-[11px] font-semibold text-label sm:min-h-0"
                 >
                   Start over
                 </button>
@@ -217,7 +217,7 @@ export function TelegramConnection() {
                 <button
                   type="button"
                   onClick={handleStartOver}
-                  className="min-h-11 rounded-lg border border-hairline px-3 py-1.5 text-[11px] font-semibold text-label lg:min-h-0"
+                  className="min-h-11 rounded-lg border border-hairline px-3 py-1.5 text-[11px] font-semibold text-label sm:min-h-0"
                 >
                   Start over
                 </button>
@@ -238,7 +238,7 @@ export function TelegramConnection() {
                 <button
                   type="button"
                   onClick={handleStartOver}
-                  className="min-h-11 rounded-lg border border-hairline px-3 py-1.5 text-[11px] font-semibold text-label lg:min-h-0"
+                  className="min-h-11 rounded-lg border border-hairline px-3 py-1.5 text-[11px] font-semibold text-label sm:min-h-0"
                 >
                   Start over
                 </button>
@@ -258,7 +258,7 @@ export function TelegramConnection() {
               type="button"
               onClick={handleConnect}
               disabled={startLink.isPending}
-              className="min-h-11 rounded-lg border border-hairline px-3 py-1.5 text-[11px] font-semibold text-label disabled:cursor-not-allowed disabled:opacity-60 lg:min-h-0"
+              className="min-h-11 rounded-lg border border-hairline px-3 py-1.5 text-[11px] font-semibold text-label disabled:cursor-not-allowed disabled:opacity-60 sm:min-h-0"
             >
               Connect Telegram
             </button>

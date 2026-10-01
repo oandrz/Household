@@ -61,7 +61,7 @@ export function DiscardDraftControl({
             <button
               type="button"
               onClick={discard.cancel}
-              className="min-h-11 flex-1 rounded-lg border border-hairline py-2 text-center text-[13px] font-semibold text-label lg:min-h-0"
+              className="min-h-11 flex-1 rounded-lg border border-hairline py-2 text-center text-[13px] font-semibold text-label sm:min-h-0"
             >
               {RETRO_COPY.discardDraftCancelAction}
             </button>
@@ -69,7 +69,7 @@ export function DiscardDraftControl({
               type="button"
               disabled={discard.isPending() || disabled}
               onClick={() => void handleDiscardDraft()}
-              className="min-h-11 flex-1 rounded-lg bg-danger py-2 text-center text-[13px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60 lg:min-h-0"
+              className="min-h-11 flex-1 rounded-lg bg-danger py-2 text-center text-[13px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60 sm:min-h-0"
             >
               {RETRO_COPY.discardDraftConfirmAction}
             </button>
@@ -80,7 +80,7 @@ export function DiscardDraftControl({
           type="button"
           disabled={disabled}
           onClick={() => discard.ask()}
-          className="min-h-11 text-[13px] font-semibold text-danger disabled:cursor-not-allowed disabled:opacity-60 lg:min-h-0"
+          className="min-h-11 text-[13px] font-semibold text-danger disabled:cursor-not-allowed disabled:opacity-60 sm:min-h-0"
         >
           {RETRO_COPY.discardDraftTrigger}
         </button>

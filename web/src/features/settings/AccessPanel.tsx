@@ -42,7 +42,7 @@ export function AccessPanel() {
         <button
           type="button"
           onClick={() => setCreating(true)}
-          className="min-h-11 rounded-lg border border-hairline px-3 py-1.5 text-[11px] font-semibold text-label lg:min-h-0"
+          className="min-h-11 rounded-lg border border-hairline px-3 py-1.5 text-[11px] font-semibold text-label sm:min-h-0"
         >
           New token
         </button>
@@ -80,10 +80,10 @@ export function AccessPanel() {
               document.getElementById("members")?.scrollIntoView({ behavior: "smooth" });
               document.getElementById("members-heading")?.focus({ preventScroll: true });
             }}
-            // min-h-11/lg:min-h-0: same padding-less-button gap
+            // min-h-11/sm:min-h-0: same padding-less-button gap
             // MembersPanel's "+ Invite" button comments on -- no padding to
             // reach the 44px floor without this.
-            className="min-h-11 font-semibold text-accent lg:min-h-0"
+            className="min-h-11 font-semibold text-accent sm:min-h-0"
           >
             {pointer}
           </button>

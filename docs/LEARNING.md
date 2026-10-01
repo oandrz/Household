@@ -360,22 +360,6 @@ fix in the same branch *created* the sibling.
   `getComputedStyle` cannot see SVG scaling, so measure the rendered
   label's `getBoundingClientRect().height` at two widths.
 
-- **One breakpoint was doing two jobs, and only one of them was right
-  (2026-10-01).** Every control carried `min-h-11 sm:min-h-0`: 44px on a
-  phone, compact from 640px. Layout also changes at `sm`, so the two looked
-  like one decision, and comments called 640px "the pointer breakpoint". But
-  640 to 1023px is tablet width: still tapped, and the shell still shows its
-  phone drawer there (`lg`). At 768px, 12 of 13 controls on Transactions and
-  31 of 32 on Settings were under 44px. The pattern was at 189 places in 61
-  files, all correct on a phone and on a desktop, which are the only two
-  widths anyone opened. Fixed by moving only the size resets to `lg`
-  (`sm:w-auto` and other layout classes stay), stating the rule once in
-  `components/fieldClasses.ts`, and adding `src/touchTargetRule.test.ts`,
-  which reads the source and names any line that takes the floor away at
-  `sm`. What catches it: measure control heights at a width between the
-  breakpoints, not only at the two ends. Screenshots at 375, 1024 and 1440px
-  were byte-identical before and after; only 768px moved.
-
 **When you fix something, grep for its shape before you close it.** The question
 that finds these is not "is this fixed?" but "where else does this pattern
 appear?" `Truncate` is now that grep for date-and-location bugs specifically —

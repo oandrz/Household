@@ -229,7 +229,7 @@ export function ProposeAgreementModal({
             {MODES.map((option) => (
               <label
                 key={option.value}
-                className={`flex min-h-11 flex-1 cursor-pointer items-center justify-center gap-1.5 rounded-[10px] border py-2 text-[12.5px] lg:min-h-0 ${
+                className={`flex min-h-11 flex-1 cursor-pointer items-center justify-center gap-1.5 rounded-[10px] border py-2 text-[12.5px] sm:min-h-0 ${
                   mode === option.value ? "border-accent bg-callout" : "border-hairline"
                 }`}
               >
@@ -258,7 +258,7 @@ export function ProposeAgreementModal({
               <button
                 type="button"
                 onClick={onOpenNewSection}
-                className="min-h-11 text-xs font-semibold text-accent lg:min-h-0"
+                className="min-h-11 text-xs font-semibold text-accent sm:min-h-0"
               >
                 {AGREEMENT_COPY.newSectionLink}
               </button>

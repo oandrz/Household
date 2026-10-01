@@ -45,7 +45,7 @@ export function PillarEditor({
             type="text"
             value={pillar.name}
             onChange={(event) => onChange({ ...pillar, name: event.target.value })}
-            className="min-h-11 rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13px] lg:min-h-0"
+            className="min-h-11 rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13px] sm:min-h-0"
           />
         </div>
         <button
@@ -53,7 +53,7 @@ export function PillarEditor({
           data-testid="vision-modal-remove-pillar"
           aria-label={VISION_COPY.removePillar(pillar.name)}
           onClick={onRemove}
-          className="mt-[22px] flex h-11 w-11 flex-none items-center justify-center text-[15px] text-danger lg:h-7 lg:w-7"
+          className="mt-[22px] flex h-11 w-11 flex-none items-center justify-center text-[15px] text-danger sm:h-7 sm:w-7"
         >
           <CloseIcon />
         </button>

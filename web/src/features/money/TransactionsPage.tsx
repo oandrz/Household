@@ -438,7 +438,7 @@ export function TransactionsPage() {
               size falls short of the 44px floor on a phone). */}
           <Link
             to="/money"
-            className="mb-1 inline-flex min-h-11 items-center text-xs font-semibold text-accent lg:min-h-0"
+            className="mb-1 inline-flex min-h-11 items-center text-xs font-semibold text-accent sm:min-h-0"
           >
             {TRANSACTIONS_COPY.backToFinances}
           </Link>
@@ -456,7 +456,7 @@ export function TransactionsPage() {
             type="button"
             disabled={accounts.length === 0}
             onClick={() => setAddOpen(true)}
-            className="min-h-11 rounded-lg bg-accent px-3.5 py-2 text-[13px] font-semibold text-white transition-colors duration-[var(--transition-state)] enabled:hover:bg-accent-dark enabled:active:bg-accent-dark disabled:cursor-not-allowed disabled:opacity-60 lg:min-h-0"
+            className="min-h-11 rounded-lg bg-accent px-3.5 py-2 text-[13px] font-semibold text-white transition-colors duration-[var(--transition-state)] enabled:hover:bg-accent-dark enabled:active:bg-accent-dark disabled:cursor-not-allowed disabled:opacity-60 sm:min-h-0"
           >
             {TRANSACTIONS_COPY.add}
           </button>
@@ -520,10 +520,10 @@ export function TransactionsPage() {
               <button
                 type="button"
                 onClick={() => setFilters(EMPTY_TRANSACTION_FILTERS)}
-                // min-h-11/lg:min-h-0: py-2.5 alone measured short of the
+                // min-h-11/sm:min-h-0: py-2.5 alone measured short of the
                 // 44px floor at this text size -- TransactionFilters.tsx's
                 // own SELECT_CLASS comment has the measured numbers.
-                className="min-h-11 rounded-lg border border-hairline px-3 py-2.5 text-xs font-semibold text-accent transition-colors duration-[var(--transition-state)] hover:bg-canvas active:bg-toggle-off lg:min-h-0 lg:py-1.5"
+                className="min-h-11 rounded-lg border border-hairline px-3 py-2.5 text-xs font-semibold text-accent transition-colors duration-[var(--transition-state)] hover:bg-canvas active:bg-toggle-off sm:min-h-0 sm:py-1.5"
               >
                 {TRANSACTIONS_COPY.noMatchesAction}
               </button>
@@ -540,7 +540,7 @@ export function TransactionsPage() {
                   in the header's hint beside the disabled button. */}
               <Link
                 to="/money"
-                className="inline-flex min-h-11 items-center rounded-lg bg-accent px-3.5 py-2 text-[13px] font-semibold text-white transition-colors duration-[var(--transition-state)] hover:bg-accent-dark active:bg-accent-dark lg:min-h-0"
+                className="inline-flex min-h-11 items-center rounded-lg bg-accent px-3.5 py-2 text-[13px] font-semibold text-white transition-colors duration-[var(--transition-state)] hover:bg-accent-dark active:bg-accent-dark sm:min-h-0"
               >
                 {TRANSACTIONS_COPY.noAccountsAction}
               </Link>
@@ -559,7 +559,7 @@ export function TransactionsPage() {
               <button
                 type="button"
                 onClick={() => setFilters({ ...filterValues, month: "" })}
-                className="min-h-11 rounded-lg border border-hairline px-3 py-2.5 text-xs font-semibold text-accent transition-colors duration-[var(--transition-state)] hover:bg-canvas active:bg-toggle-off lg:min-h-0 lg:py-1.5"
+                className="min-h-11 rounded-lg border border-hairline px-3 py-2.5 text-xs font-semibold text-accent transition-colors duration-[var(--transition-state)] hover:bg-canvas active:bg-toggle-off sm:min-h-0 sm:py-1.5"
               >
                 {TRANSACTIONS_COPY.allMonthsAction}
               </button>

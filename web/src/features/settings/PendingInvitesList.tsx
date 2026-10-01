@@ -57,9 +57,9 @@ function PendingInviteRow({ invite }: { invite: PendingInvite }) {
             onClick={() => action.ask()}
             disabled={action.isPending()}
             aria-label={`Withdraw the invite to ${invite.name}`}
-            // min-h-11/lg:min-h-0: MembersPanel's "+ Invite" comment has the
+            // min-h-11/sm:min-h-0: MembersPanel's "+ Invite" comment has the
             // reason -- an unpadded text button misses the 44px phone floor.
-            className="min-h-11 flex-none text-xs font-semibold text-danger disabled:opacity-50 lg:min-h-0"
+            className="min-h-11 flex-none text-xs font-semibold text-danger disabled:opacity-50 sm:min-h-0"
           >
             Withdraw
           </button>
@@ -80,14 +80,14 @@ function PendingInviteRow({ invite }: { invite: PendingInvite }) {
               type="button"
               onClick={() => void action.confirm(() => withdraw.mutateAsync(invite.id))}
               disabled={action.isPending()}
-              className="min-h-11 rounded-lg bg-danger px-3 py-1.5 text-[11px] font-semibold text-white disabled:opacity-60 lg:min-h-0"
+              className="min-h-11 rounded-lg bg-danger px-3 py-1.5 text-[11px] font-semibold text-white disabled:opacity-60 sm:min-h-0"
             >
               Yes, withdraw
             </button>
             <button
               type="button"
               onClick={() => action.cancel()}
-              className="min-h-11 rounded-lg border border-hairline px-3 py-1.5 text-[11px] font-semibold text-label lg:min-h-0"
+              className="min-h-11 rounded-lg border border-hairline px-3 py-1.5 text-[11px] font-semibold text-label sm:min-h-0"
             >
               Keep
             </button>
