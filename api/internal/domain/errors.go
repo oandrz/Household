@@ -152,8 +152,8 @@ var (
 	// comparison is on the calendar day, never the instant (IsAfterDay).
 	//
 	// ErrOpeningBalanceInFuture is the same rule for an account's opening
-	// balance. It stays its own sentinel because the account form shows it
-	// beside its own field.
+	// balance. It is a separate sentinel only because it answers with a
+	// separate wire code, INVALID_AS_OF, named after the field it refuses.
 	ErrDateInFuture = errors.New("that date is in the future")
 	// ErrHoldingAccountNotInvestment fails closed on the account's type rather
 	// than trusting a screen to have offered only the right accounts. The
