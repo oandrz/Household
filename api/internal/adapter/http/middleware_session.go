@@ -30,6 +30,14 @@ type Scope struct {
 	// defines -- every key present, so a reader never has to interpret an
 	// absence.
 	Flags domain.FlagSet
+	// Today is the household's calendar day when this request arrived, as
+	// that day's midnight stamped UTC (domain.TodayIn). Pass it wherever a
+	// service asks for "today": a default month, a due date, a
+	// not-in-the-future check.
+	//
+	// It is a date, not an instant. A stamp or an expiry (archived_at, a
+	// session's lifetime) still comes from deps.Clock.
+	Today time.Time
 }
 
 // RequestScope reads the Scope requireSession placed on r's context. The
@@ -198,7 +206,16 @@ func requireSession(deps Deps) func(http.Handler) http.Handler {
 				return
 			}
 
-			scope := Scope{UserID: record.UserID, HouseholdID: record.HouseholdID, Membership: membership, Flags: flags, AuthVia: authViaSession}
+			today, err := householdToday(ctx, deps, record.HouseholdID, now)
+			if err != nil {
+				logAndWriteInternal(w, r, err)
+				return
+			}
+
+			scope := Scope{
+				UserID: record.UserID, HouseholdID: record.HouseholdID, Membership: membership,
+				Flags: flags, AuthVia: authViaSession, Today: today,
+			}
 			// The admin grant is put on the context from the same session
 			// record the scope is built from, so the two can never disagree
 			// about which session is speaking. It stays out of Scope
