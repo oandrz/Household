@@ -111,7 +111,7 @@ export function NextRetroCard() {
           {!shown.finished && (
             <Link
               to="/marriage/retros"
-              className="mt-3 inline-flex min-h-11 items-center text-[13px] font-semibold text-accent sm:min-h-0"
+              className="mt-3 inline-flex min-h-11 items-center text-[13px] font-semibold text-accent lg:min-h-0"
             >
               {OVERVIEW_COPY.nextRetroContinue(monthNameOnly(shown.month))}
             </Link>
@@ -120,11 +120,11 @@ export function NextRetroCard() {
       ) : (
         <>
           <p className="mt-1.5 text-[15px] text-ink">{OVERVIEW_COPY.nextRetroNone}</p>
-          {/* inline-flex items-center min-h-11 sm:min-h-0: BudgetCard.tsx's
+          {/* inline-flex items-center min-h-11 lg:min-h-0: BudgetCard.tsx's
               own comment on this identical pattern has the reason. */}
           <Link
             to="/marriage/retros"
-            className="mt-3 inline-flex min-h-11 items-center text-[13px] font-semibold text-accent sm:min-h-0"
+            className="mt-3 inline-flex min-h-11 items-center text-[13px] font-semibold text-accent lg:min-h-0"
           >
             {data.startMonth ? OVERVIEW_COPY.nextRetroStart(monthNameOnly(data.startMonth)) : OVERVIEW_COPY.nextRetroGo}
           </Link>

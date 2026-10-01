@@ -102,13 +102,13 @@ function RetroHistoryRow({
       data-testid={`retro-row-${summary.month}`}
       onClick={() => onSelect(summary.month)}
       aria-pressed={selected}
-      // min-h-11/sm:min-h-0: TransactionFilters.tsx's own SELECT_CLASS
+      // min-h-11/lg:min-h-0: TransactionFilters.tsx's own SELECT_CLASS
       // comment has the measured reason py-2 alone falls 5px short of the
       // 44px floor on a phone. These rows are interactive controls now that
       // they carry onSelect -- Task 10's stand-in correctly noted no floor
       // applied to a row nothing could be clicked into yet; that is no
       // longer true once this component replaces it.
-      className={`min-h-11 w-full rounded-lg border px-3 py-2 text-left text-[13.5px] transition-colors duration-[var(--transition-state)] sm:min-h-0 ${hoverBackground} ${background} ${border}`}
+      className={`min-h-11 w-full rounded-lg border px-3 py-2 text-left text-[13.5px] transition-colors duration-[var(--transition-state)] lg:min-h-0 ${hoverBackground} ${background} ${border}`}
     >
       <div className="font-semibold text-ink">{monthYearLabel(summary.month)}</div>
       {summary.finished ? (
@@ -170,7 +170,7 @@ export function RetroHistoryList({ summaries, onSelect, selectedMonth }: RetroHi
               }
               // Same 44px reasoning as the row buttons above -- this is the
               // brief's own named example of a control the floor applies to.
-              className="min-h-11 rounded-lg px-3 py-2 text-left text-[12.5px] font-semibold text-accent transition-colors duration-[var(--transition-state)] hover:bg-canvas active:bg-toggle-off sm:min-h-0"
+              className="min-h-11 rounded-lg px-3 py-2 text-left text-[12.5px] font-semibold text-accent transition-colors duration-[var(--transition-state)] hover:bg-canvas active:bg-toggle-off lg:min-h-0"
             >
               {RETRO_COPY.showOlderYear(group.year, group.rows.length)}
             </button>

@@ -64,14 +64,14 @@ export function InviteLinkShare({ link }: { link: string }) {
         <button
           type="button"
           onClick={() => void handleCopy()}
-          className="min-h-11 flex-1 rounded-lg border border-hairline px-3 py-1.5 text-[12px] font-semibold text-label sm:min-h-0"
+          className="min-h-11 flex-1 rounded-lg border border-hairline px-3 py-1.5 text-[12px] font-semibold text-label lg:min-h-0"
         >
           {copied ? "Copied" : "Copy"}
         </button>
         <button
           type="button"
           onClick={handleShare}
-          className="min-h-11 flex-1 rounded-lg border border-hairline px-3 py-1.5 text-[12px] font-semibold text-label sm:min-h-0"
+          className="min-h-11 flex-1 rounded-lg border border-hairline px-3 py-1.5 text-[12px] font-semibold text-label lg:min-h-0"
         >
           Share to Telegram
         </button>

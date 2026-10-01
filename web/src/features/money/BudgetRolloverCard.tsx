@@ -239,10 +239,10 @@ export function BudgetRolloverCard({
             data-testid="budget-rollover-select"
             value={selectedGoalId}
             onChange={(event) => setSelectedGoalId(event.target.value)}
-            // min-h-11/sm:min-h-0: TransactionFilters.tsx's own
+            // min-h-11/lg:min-h-0: TransactionFilters.tsx's own
             // SELECT_CLASS comment has the measured reason py-2 alone
             // falls short of the 44px floor on a phone.
-            className="min-h-11 rounded-lg border border-hairline bg-card px-3 py-2 text-[12.5px] sm:min-h-0"
+            className="min-h-11 rounded-lg border border-hairline bg-card px-3 py-2 text-[12.5px] lg:min-h-0"
           >
             <option value="">{BUDGET_COPY.chooseAGoal}</option>
             {eligibleGoals.map((g) => (
@@ -265,10 +265,10 @@ export function BudgetRolloverCard({
                 setSelectedGoalId("");
                 setError(null);
               }}
-              // min-h-11/sm:min-h-0: py-2.5 alone measured short of the 44px
+              // min-h-11/lg:min-h-0: py-2.5 alone measured short of the 44px
               // floor at this text size -- TransactionFilters.tsx's own
               // SELECT_CLASS comment has the measured numbers.
-              className="min-h-11 flex-1 rounded-lg border border-hairline py-2.5 text-center text-[12px] font-semibold text-label sm:min-h-0 sm:py-1.5"
+              className="min-h-11 flex-1 rounded-lg border border-hairline py-2.5 text-center text-[12px] font-semibold text-label lg:min-h-0 lg:py-1.5"
             >
               {BUDGET_COPY.cancel}
             </button>
@@ -277,7 +277,7 @@ export function BudgetRolloverCard({
               data-testid="budget-rollover-confirm"
               disabled={!selectedGoalId || submitting}
               onClick={handleMove}
-              className="min-h-11 flex-1 rounded-lg bg-accent py-2.5 text-center text-[12px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60 sm:min-h-0 sm:py-1.5"
+              className="min-h-11 flex-1 rounded-lg bg-accent py-2.5 text-center text-[12px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60 lg:min-h-0 lg:py-1.5"
             >
               {BUDGET_COPY.moveIntoGoal}
             </button>

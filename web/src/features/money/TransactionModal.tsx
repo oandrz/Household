@@ -359,13 +359,13 @@ export function TransactionModal({
               type="button"
               aria-pressed={kind === k}
               onClick={() => handleKindChange(k)}
-              // min-h-11/sm:min-h-0: TransactionFilters.tsx's own
+              // min-h-11/lg:min-h-0: TransactionFilters.tsx's own
               // SELECT_CLASS comment has the measured reason py-2 alone
               // falls short of the 44px floor on a phone.
               className={
                 kind === k
-                  ? "min-h-11 flex-1 rounded-lg bg-accent py-2 text-center text-[13px] font-semibold text-white sm:min-h-0"
-                  : "min-h-11 flex-1 rounded-lg border border-hairline py-2 text-center text-[13px] font-semibold text-label sm:min-h-0"
+                  ? "min-h-11 flex-1 rounded-lg bg-accent py-2 text-center text-[13px] font-semibold text-white lg:min-h-0"
+                  : "min-h-11 flex-1 rounded-lg border border-hairline py-2 text-center text-[13px] font-semibold text-label lg:min-h-0"
               }
             >
               {KIND_LABELS[k]}
@@ -552,7 +552,7 @@ export function TransactionModal({
                   <button
                     type="button"
                     onClick={deletion.cancel}
-                    className="min-h-11 flex-1 rounded-lg border border-hairline py-2 text-center text-[13px] font-semibold text-label sm:min-h-0"
+                    className="min-h-11 flex-1 rounded-lg border border-hairline py-2 text-center text-[13px] font-semibold text-label lg:min-h-0"
                   >
                     {TRANSACTIONS_COPY.deleteCancelAction}
                   </button>
@@ -560,7 +560,7 @@ export function TransactionModal({
                     type="button"
                     disabled={deletion.isPending()}
                     onClick={handleDelete}
-                    className="min-h-11 flex-1 rounded-lg bg-danger py-2 text-center text-[13px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60 sm:min-h-0"
+                    className="min-h-11 flex-1 rounded-lg bg-danger py-2 text-center text-[13px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60 lg:min-h-0"
                   >
                     {TRANSACTIONS_COPY.deleteConfirmAction}
                   </button>
@@ -570,7 +570,7 @@ export function TransactionModal({
               <button
                 type="button"
                 onClick={() => deletion.ask()}
-                className="min-h-11 text-[13px] font-semibold text-danger sm:min-h-0"
+                className="min-h-11 text-[13px] font-semibold text-danger lg:min-h-0"
               >
                 {TRANSACTIONS_COPY.deleteTransaction}
               </button>

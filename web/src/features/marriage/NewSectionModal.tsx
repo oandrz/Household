@@ -97,7 +97,7 @@ export function NewSectionModal({
                 key={suggestion}
                 type="button"
                 onClick={() => setName(suggestion)}
-                className="min-h-11 rounded-full border border-hairline px-3.5 text-[12.5px] text-label sm:min-h-0 sm:py-1.5"
+                className="min-h-11 rounded-full border border-hairline px-3.5 text-[12.5px] text-label lg:min-h-0 lg:py-1.5"
               >
                 {suggestion}
               </button>
