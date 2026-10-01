@@ -717,6 +717,20 @@ separate clock reads), and the frontend ages a price against
 `todayIn(household zone)`. See the last bullet of pattern 1's list, and
 [ADR 12](adr/0012-one-calendar-per-household.md).
 
+**Two small ones from the 2026-10-01 QA run, both found by searching for
+the shape rather than the page.** The admin households list said "1 members"
+on a phone (ISSUE-010) while the household's own detail page, one click away,
+had the singular right in an inline ternary. The rule existed; it existed
+once, inline, where the second caller could not reach it. It is now
+`memberCountLabel` in `directoryCopy.ts` and both pages call it. And the
+Retros empty state showed a literal " -- " (ISSUE-011): this codebase writes a
+dash that way in comments, and the habit had reached four strings a person
+reads. Reading the copy files found two. **Building the frontend and
+searching the shipped JavaScript found all three in the bundle** (comments are
+gone from a build, so every hit is real), and a search of Go string literals
+found the fourth in the sign-up email. For "is this string shown to anyone",
+search what ships, not the source.
+
 ### 2. A test that cannot fail protects nothing
 
 - A sidebar ordering test supplied spaces **already in ascending order**, so a
@@ -3060,6 +3074,21 @@ proper nouns in rendered strings before calling a feature built from a
 worked example done; a name that reads naturally in a mockup is a household
 inventing itself as a person the moment it renders for someone else's family.
 
+**A third instance, 2026-10-01 (QA ISSUE-007), with the same marker.** The
+Spaces card labelled Money "Parents". The design's mockup says "Parents"
+because in the design's household no child has Money. `spaceAudienceLabel`
+returned that word for any space that required a capability, and its comment
+said so in as many words: it reads "Parents" "only because every
+capability-gated builtin space in this household happens to be parent-held
+today". The Members card on the same page has had a working Money switch per
+child since the day it was built, so the two cards could contradict each other
+side by side, and did. Fixed the way `limitedMembersLine` was: the label is
+worked out from the member list the page already loads ("Parents", "Parents
+and 1 kid", "Parents and 2 kids"), and says nothing until that list has
+arrived. The same function also read an unknown visibility as "Everyone",
+while `domain.VisibleSpaces` treats one as owners-only. **A label that
+restates a server rule has to fail the same way the rule does.**
+
 ### 15. A capability nobody can reach is not shipped, however well it is tested
 
 Goals shipped archive and restore end to end — a migration column, a
@@ -4447,6 +4476,21 @@ the fourth key to the same `Promise.all`
 test in the shape `useAgreementsInvalidation.test.tsx` already established:
 render the read hook and the write hook together, assert a second `GET`
 after the mutation lands (`useUpdateMember.test.tsx`).
+
+**Broke again, 2026-10-01 (QA ISSUE-012), in the same hour the field was
+added.** `GET /household` gained `primaryCurrencyLocked` so that Settings can
+say the currency is locked before Save. The first holding is what locks it,
+and a holding is created on the Portfolio page by `useHoldings`, whose
+`invalidateHoldings` knew nothing about `["household"]`. So: open Settings
+(field offered), add an account and a holding, return to Settings by the
+sidebar. The field was still offered, the server said `locked=true`, and the
+whole trip took eight seconds, well inside the thirty-second `staleTime`. The
+unit tests for the panel were green, because each one hands the panel a
+fixture that is already in its final state. Found by walking that exact
+sequence in a browser; fixed by one more key in `invalidateHoldings`; pinned
+in `useHoldings.test.tsx`. **A fourth clause: when a response gains a field,
+ask which writes change that field, and whether each of them knows this key
+exists.** The field and its invalidation are one change, not two.
 
 ### 24. A delete scoped to the parent's parent, and a scope check thrown away
 
@@ -6264,6 +6308,38 @@ route with a missing guard has no second line of defence.
   elements". They now name the button exactly. That is tightening a query,
   not loosening an assertion, and it is the right fix; a regex was the
   loose part.
+
+- **Free text cannot be put inside a sentence (QA ISSUE-009, 2026-10-01).**
+  A holding's unit is whatever the household typed. `HoldingLotsPanel` wrote
+  "How many {unit}s", "What one {unit} was worth" and "Price per {unit}",
+  which is right for "gram" and reads "gramss", "one grams" and "per grams"
+  for "grams". The Add holding form's own hint suggested the plural. English
+  plurals cannot be derived from a string, so the fix is to stop needing
+  one: the unit is shown as a label in brackets, "How many (grams)", like
+  the currency beside it, and the price is "per unit". The test runs the
+  same assertions for "gram" and "grams". Still open, and a product choice:
+  the portfolio card and each entry row print a count followed by the unit
+  as typed, so the default presets read "10 share".
+- **A rule the page can only learn from a refusal is a rule the person
+  learns by failing (QA ISSUE-012, 2026-10-01).** The primary currency
+  cannot change once a household holds investments. The server refused
+  correctly and said why, but Settings offered an enabled field and the
+  reason arrived after Save. The fix was not to copy the rule into the
+  browser. A frontend check on `GET /holdings` would have had to know that
+  archived holdings count too, and would have drifted the first time the
+  rule changed. The server now answers the question on `GET /household`
+  (`primaryCurrencyLocked`), from the same method `Update` refuses on, and
+  the page only shows it. The flag is worked out for an owner alone:
+  nobody else can change the currency, and for a child without Money
+  "locked" would mean "this household holds investments". The frontend
+  schema makes the field required, because a default of `false` is exactly
+  the behaviour being fixed.
+- **Offering a switch between a thing and itself (QA ISSUE-008,
+  2026-10-01).** Self-serve sign-up stores the primary currency as the
+  second currency, since nothing chooses a second one yet. The panel then
+  offered "Show SGD equivalents" beside an SGD primary currency. A value
+  that is stored only because a column needs something in it is not a
+  choice, and the screen must not present it as one.
 
 ### Tooling and infrastructure
 

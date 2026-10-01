@@ -135,11 +135,23 @@ Calendar access sees Family and nothing else.
 **Members** — everyone in the household, their role, and their four access
 switches. Children show their age. Email addresses are visible to owners only.
 
-**Spaces** — the spaces in the sidebar and who each is for.
+**Spaces** — the spaces in the sidebar and who each is for. Money reads
+"Parents" until a child is given the Money switch in **Members**; then it
+counts them: "Parents and 1 kid", "Parents and 2 kids".
 
 **Currency & region** — your primary currency, whether to show a second currency
 alongside it, how the exchange rate is obtained, and your household's **time
 zone**.
+
+The primary currency can be changed until you add your first investment
+holding. From then on it is shown as text with the line "Can't be changed
+while you hold investments": every holding records what it cost in the
+currency you kept books in at the time, and Hearth cannot restate that in
+another one. Archiving the holding does not unlock it.
+
+A household has a second currency only if one was set for it; there is no
+control to choose one yet. Without one, the row reads "Second currency: None
+set" and there is no switch.
 
 The time zone decides which day is "today" for everyone in the household. It
 is set from your browser when you create the household, and an owner can

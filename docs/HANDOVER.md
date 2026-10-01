@@ -54,6 +54,34 @@ in three months or someone new.
 > without complaint, and unknown JSON fields in a request body are ignored
 > rather than refused. Neither is started.
 >
+> **QA ISSUE-007 to ISSUE-012 are fixed on the same branch, also 2026-10-01,
+> also not pushed.** Six small ones from the same QA run: the Spaces card's
+> audience counts the kids who hold Money; a household whose second currency
+> is its primary one is no longer offered an equivalents switch; the holding
+> entries dialog shows the unit as a label; "1 member" on the admin list's
+> phone layout; no literal "--" in copy; and an owner is told the primary
+> currency is locked before Save (`primaryCurrencyLocked` on
+> `GET /household`, owner only). Walked in a real browser on a separate stack
+> at 1280px and 375px.
+>
+> **Found while fixing those, and left for a decision:**
+>
+> - **Is a holding's unit singular or plural?** The presets and the
+>   placeholder are singular ("share", "gram", "unit"); the hint under the
+>   field suggests plurals ("shares, grams, units"); the portfolio card and
+>   each entry row print the count followed by the unit as typed, so a
+>   default holding reads "10 share" and a typed plural reads "1 grams". The
+>   dialog's labels no longer depend on the answer. Recommended: keep the
+>   unit singular, and print the count through a small table for the three
+>   presets ("1 share", "10 shares"), leaving any other unit as typed.
+> - **An account's Type is still refused only after Save** when the account
+>   holds investments (`ACCOUNT_HAS_HOLDINGS`), the same shape ISSUE-012 had.
+>   `AccountModal.tsx`'s Type select is always enabled.
+> - **`PATCH /household` accepts `showSecondaryCurrency: true`** for a
+>   household whose second currency is its primary one. Nothing renders
+>   equivalents anywhere yet, so nothing shows; it wants a rule when the
+>   second-currency chooser is built.
+>
 > **One thing to know when this branch meets `tablet-touch-targets`.**
 > `NextRetroCard.tsx` gained a second link that copies its neighbour's
 > `min-h-11 … sm:min-h-0`. That branch moves the touch-size reset to `lg:`
