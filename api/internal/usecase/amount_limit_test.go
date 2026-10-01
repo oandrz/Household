@@ -92,7 +92,7 @@ func TestAccountCreateRefusesAnOpeningBalancePastTheCeilingOnEitherSide(t *testi
 	for _, balance := range []int64{onePastTheCeiling, -onePastTheCeiling, math.MinInt64} {
 		in := validNewAccount()
 		in.OpeningBalanceMinor = balance
-		if _, err := svc.Create(context.Background(), in); !errors.Is(err, domain.ErrAmountTooLarge) {
+		if _, err := svc.Create(context.Background(), in, accountToday); !errors.Is(err, domain.ErrAmountTooLarge) {
 			t.Fatalf("opening balance %d = %v, want ErrAmountTooLarge", balance, err)
 		}
 	}
@@ -103,13 +103,13 @@ func TestAccountCreateRefusesAnOpeningBalancePastTheCeilingOnEitherSide(t *testi
 
 func TestAccountUpdateRefusesAnOpeningBalancePastTheCeiling(t *testing.T) {
 	svc, _ := newAccountService(t)
-	created, err := svc.Create(context.Background(), validNewAccount())
+	created, err := svc.Create(context.Background(), validNewAccount(), accountToday)
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 
 	tooLarge := onePastTheCeiling
-	_, err = svc.Update(context.Background(), "h-1", created.ID, usecase.AccountUpdate{OpeningBalanceMinor: &tooLarge})
+	_, err = svc.Update(context.Background(), "h-1", created.ID, usecase.AccountUpdate{OpeningBalanceMinor: &tooLarge}, accountToday)
 	if !errors.Is(err, domain.ErrAmountTooLarge) {
 		t.Fatalf("Update = %v, want ErrAmountTooLarge", err)
 	}

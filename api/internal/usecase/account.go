@@ -71,7 +71,10 @@ func (s *AccountService) Get(ctx context.Context, householdID, accountID string)
 	return s.d.Accounts.Get(ctx, householdID, accountID)
 }
 
-func (s *AccountService) Create(ctx context.Context, in NewAccount) (domain.Account, error) {
+// Create adds an account. today is the household's calendar day, passed in by
+// the caller: an opening balance is a recorded fact and may not be dated
+// after it (refuseFutureOpeningBalance).
+func (s *AccountService) Create(ctx context.Context, in NewAccount, today time.Time) (domain.Account, error) {
 	account := domain.Account{
 		HouseholdID:             in.HouseholdID,
 		Nickname:                in.Nickname,
@@ -85,6 +88,9 @@ func (s *AccountService) Create(ctx context.Context, in NewAccount) (domain.Acco
 	if err := s.validate(ctx, &account); err != nil {
 		return domain.Account{}, err
 	}
+	if err := refuseFutureOpeningBalance(account.OpeningBalanceAsOf, today); err != nil {
+		return domain.Account{}, err
+	}
 	return s.d.Accounts.Create(ctx, account)
 }
 
@@ -92,7 +98,12 @@ func (s *AccountService) Create(ctx context.Context, in NewAccount) (domain.Acco
 // *result*, never the fields alone: type "loan" plus a negative balance is
 // illegal together though legal separately, so validating fields alone
 // would let that pair through.
-func (s *AccountService) Update(ctx context.Context, householdID, accountID string, patch AccountUpdate) (domain.Account, error) {
+//
+// The opening date is the one rule checked only when the patch changes it.
+// A stored date can be after today without anyone having typed a future
+// date: the household's zone was moved west after the row was written. A
+// rename of that account must not be refused over a date nobody touched.
+func (s *AccountService) Update(ctx context.Context, householdID, accountID string, patch AccountUpdate, today time.Time) (domain.Account, error) {
 	view, err := s.d.Accounts.Get(ctx, householdID, accountID)
 	if err != nil {
 		return domain.Account{}, err
@@ -127,7 +138,9 @@ func (s *AccountService) Update(ctx context.Context, householdID, accountID stri
 	if patch.OpeningBalanceCurrency != nil {
 		account.OpeningBalance.Currency = *patch.OpeningBalanceCurrency
 	}
+	dateChanged := false
 	if patch.OpeningBalanceAsOf != nil {
+		dateChanged = !sameDay(*patch.OpeningBalanceAsOf, account.OpeningBalanceAsOf)
 		account.OpeningBalanceAsOf = *patch.OpeningBalanceAsOf
 	}
 	if patch.CountTowardNetWorth != nil {
@@ -139,6 +152,11 @@ func (s *AccountService) Update(ctx context.Context, householdID, accountID stri
 
 	if err := s.validate(ctx, &account); err != nil {
 		return domain.Account{}, err
+	}
+	if dateChanged {
+		if err := refuseFutureOpeningBalance(account.OpeningBalanceAsOf, today); err != nil {
+			return domain.Account{}, err
+		}
 	}
 	return s.d.Accounts.Update(ctx, account)
 }
@@ -171,16 +189,6 @@ func (s *AccountService) validate(ctx context.Context, a *domain.Account) error 
 	}
 	a.OpeningBalance.Currency = code
 
-	// A day of tolerance, deliberately: this product stores no household
-	// timezone, so the server cannot know the person's "today", and real
-	// zones span UTC-12 to UTC+14, so one day covers all of them.
-	// Accepting an early balance costs nothing (it's editable); refusing a
-	// genuine "today" would be an unexplainable wall. This catches a typo
-	// like 2062, not the date line.
-	if a.OpeningBalanceAsOf.After(s.d.Clock.Now().AddDate(0, 0, 1)) {
-		return domain.ErrOpeningBalanceInFuture
-	}
-
 	if a.Type.IsLiability() && a.OpeningBalance.Amount < 0 {
 		return domain.ErrLiabilityBalanceNegative
 	}
@@ -200,4 +208,20 @@ func (s *AccountService) validate(ctx context.Context, a *domain.Account) error 
 		}
 	}
 	return nil
+}
+
+// refuseFutureOpeningBalance refuses an opening balance dated after the
+// household's today. today is the household's calendar day
+// (domain.TodayIn), so today itself is always allowed and there is no
+// tolerance past it: the server knows which day it is for this household.
+func refuseFutureOpeningBalance(asOf, today time.Time) error {
+	if domain.IsAfterDay(asOf, today) {
+		return domain.ErrOpeningBalanceInFuture
+	}
+	return nil
+}
+
+// sameDay reports whether two values name the same calendar day.
+func sameDay(a, b time.Time) bool {
+	return !domain.IsAfterDay(a, b) && !domain.IsAfterDay(b, a)
 }

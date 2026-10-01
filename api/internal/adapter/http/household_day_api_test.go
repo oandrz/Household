@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 )
@@ -623,6 +624,68 @@ func TestTheNetWorthTrendEndsOnTheHouseholdsMonth(t *testing.T) {
 		env.setTimezone(t, session, csrf, "Asia/Singapore")
 		if got, want := lastTrendMonth(t), utcMonth.AddDate(0, 1, 0).Format("2006-01"); got != want {
 			t.Errorf("the trend ends on %s, want %s", got, want)
+		}
+	})
+}
+
+// An opening balance is a recorded fact, so it may be dated up to the
+// household's today. There used to be a day of slack past the server's clock,
+// because the server could not know the household's today; it does now, so
+// the slack is gone and tomorrow is refused.
+func TestAnOpeningBalanceMayBeDatedTheHouseholdsTodayAndNoLater(t *testing.T) {
+	clk, utcDay := eveningClock()
+	env := newTestEnvWithClock(t, clk)
+	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
+
+	singaporeToday := utcDay.AddDate(0, 0, 1).Format("2006-01-02")
+	singaporeTomorrow := utcDay.AddDate(0, 0, 2).Format("2006-01-02")
+	create := func(nickname, asOf string) *httptest.ResponseRecorder {
+		return env.authed(t, http.MethodPost, "/api/v1/accounts", map[string]any{
+			"nickname": nickname, "type": "cash",
+			"openingBalanceMinor": 100_000, "openingBalanceCurrency": "SGD",
+			"openingBalanceAsOf": asOf,
+		}, session, csrf)
+	}
+
+	// The control. This is also the request the old slack accepted.
+	t.Run("on UTC the server's tomorrow is refused", func(t *testing.T) {
+		assertErrorResponse(t, create("Too early", singaporeToday), http.StatusUnprocessableEntity, "INVALID_AS_OF")
+	})
+
+	env.setTimezone(t, session, csrf, "Asia/Singapore")
+
+	var accountID string
+	t.Run("on Singapore the same date is today and is accepted", func(t *testing.T) {
+		rec := create("DBS Everyday", singaporeToday)
+		if rec.Code != http.StatusCreated {
+			t.Fatalf("status = %d, want 201 (body = %s)", rec.Code, rec.Body.String())
+		}
+		var body struct {
+			ID string `json:"id"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil || body.ID == "" {
+			t.Fatalf("decode created account: %v (body = %s)", err, rec.Body.String())
+		}
+		accountID = body.ID
+	})
+	t.Run("the household's tomorrow is refused on create", func(t *testing.T) {
+		assertErrorResponse(t, create("Tomorrow", singaporeTomorrow), http.StatusUnprocessableEntity, "INVALID_AS_OF")
+	})
+	t.Run("and on an edit that moves the date there", func(t *testing.T) {
+		rec := env.authed(t, http.MethodPatch, "/api/v1/accounts/"+accountID,
+			map[string]any{"openingBalanceAsOf": singaporeTomorrow}, session, csrf)
+		assertErrorResponse(t, rec, http.StatusUnprocessableEntity, "INVALID_AS_OF")
+	})
+
+	// Back on UTC the stored date is tomorrow, though nobody typed a future
+	// date. The edit form sends the date back with every save, so a rename
+	// must not be refused over it.
+	t.Run("a rename is not refused over a date the edit did not change", func(t *testing.T) {
+		env.setTimezone(t, session, csrf, "UTC")
+		rec := env.authed(t, http.MethodPatch, "/api/v1/accounts/"+accountID,
+			map[string]any{"nickname": "DBS Multiplier", "openingBalanceAsOf": singaporeToday}, session, csrf)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200 (body = %s)", rec.Code, rec.Body.String())
 		}
 	})
 }

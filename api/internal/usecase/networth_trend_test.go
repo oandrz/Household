@@ -115,11 +115,10 @@ func TestAMonthBeforeAnAccountWasTrackedIsAGap(t *testing.T) {
 
 // TestAnAccountOpenedNextMonthByClockSkewIsInTheNewestBar is the tracked-from
 // counterpart of TestTheNewestBarIsTheHeadlineFigure's future-dated
-// movement: AccountService.validate gives OpeningBalanceAsOf a day of slack
-// for timezone reasons (TestCreateAcceptsTodayFromAnyTimezone), which at a
-// month boundary can store an opening date in the month after `current` --
-// e.g. "1 August" entered from Singapore while the server is still on 31
-// July UTC. Summary already counts this account in the headline regardless
+// movement. An opening date can be in the month after `current` without
+// anyone typing a future date: "1 August" entered in Singapore, and the
+// household's zone then moved west to one still on 31 July; or a row stored
+// before households had a zone. Summary already counts this account in the headline regardless
 // of that date -- it counts every non-archived, counted, convertible view --
 // so it must be in the newest bar too, the same reason deltasByAccountMonth
 // clamps a future-dated movement into the current month rather than losing
