@@ -23,9 +23,10 @@ gets rebuilt.
 
 ### 1. Fixing an instance rarely fixes the class
 
-This happened **twenty-four times** — one bullet each below, and the count is
+This happened **twenty-six times** — one bullet each below, and the count is
 the number of bullets, so recount it when you add one (it had already drifted
-by one before the UX-repair round noticed). Almost every time, the fix was
+by one before the UX-repair round noticed, and again on 2026-10-01: the count
+read twenty-four over twenty-five bullets). Almost every time, the fix was
 correct and the sibling kept the bug; two of them are the variant where
 nothing was broken at all until a field's or a product's meaning moved under
 a reader nobody thought to look at, and one is the variant where an earlier
@@ -531,6 +532,34 @@ count stays the number of bullets.)
   prints its name, so adding or renaming one left the cached report short a row
   or labelling one with a dead name. Found by grepping for the shape of the
   first fix, which is checklist step 3, rather than by hitting it: `dacc4c1`.
+- **Overflow was guarded at two places it could happen and left open at the
+  third, and the fix for the third left a fourth (QA ISSUE-001,
+  2026-10-01).** `Money.Add` refuses to wrap, and so does `Rate.Apply` (see
+  "Domain and money" below, where both are recorded as separate defects). The
+  third place is not in Go at all: an account's balance is summed in SQL and
+  cast back with `::bigint` (`queries/account.sql`), and nothing bounded what
+  could be put into that sum. One expense of `9223372036854775807` answered
+  201. After it `GET /accounts` and `GET /transactions` answered 500 with
+  `bigint out of range (SQLSTATE 22003)`, Finances and Transactions showed
+  only "Couldn't load your accounts.", and the row could not be deleted in
+  the app because the page listing it was the page that failed. The same was
+  reachable from the form with two expenses of S$50,000,000,000,000,000.
+  Negative, zero and non-integer amounts were already refused; "is it too
+  big" was never asked, on any of twenty amount fields. Fixed with one rule,
+  `domain.MaxAmountMinor` and `CheckAmountWithinLimit`, called beside every
+  existing sign check, and a 422 `AMOUNT_TOO_LARGE`.
+  **The fourth, found by the sibling hunt and still open:** a holding's
+  market value is quantity times unit price, and both can sit inside the
+  ceiling while their product does not (100,000 units at S$1 trillion each).
+  Probed on a real stack: the price is stored, its own `POST` answers 500,
+  and `GET /holdings` answers 500 from then on. A per-field ceiling cannot
+  close it; it needs a rule across events and valuations, which is a design
+  question, so it is recorded in the tracker row rather than patched.
+  What would have caught the third sooner: asking of every number a caller
+  sends, "what is the largest value this accepts, and what does the code do
+  with it next?" — the lower bound had a test on every field and the upper
+  bound had none. And a read that adds up stored rows should be tried once
+  with the largest row a write will accept.
 
 The **seventh date instance, 2026-09-12 — and the first one a test caught
 before it shipped.** `domain.Period.Contains` needs the calendar day a
@@ -3706,6 +3735,16 @@ default, never checked against it. Fixed with `gcTime: 0` on
 the claim true; the comment now cites that option instead of asserting the
 outcome on its own.
 
+**The overflow row's comment, 2026-10-01 (QA ISSUE-001).** The
+`ErrAmountOverflow` row in `adapter/http/errors.go` explained why it answers
+500 rather than 4xx: "nothing on this API surface accepts a caller-supplied
+amount that could overflow." Every amount field on the API accepted one. The
+sentence read as a reason not to look, and it sat one screen away from the
+`INVALID_AMOUNT` row that checked only the lower bound. A comment that says
+"callers cannot do X" is a claim about every route, and it needs a test that
+tries X; `TestEveryAmountFieldOnTheWireRefusesAFigurePastTheCeiling` is that
+test now, and the comment names the two cases that still reach the row.
+
 ---
 
 ### 17. A requirement the plan drops is invisible to every review that reads the plan
@@ -4411,6 +4450,32 @@ context the check was silently assuming, and require it explicitly.
   member tripped `ErrLastOwner` for an operation that never touched ownership.
 - `Rate.Apply` multiplied without an overflow guard while `Add` refused to wrap.
   Multiplication overflows far sooner.
+- No amount had an upper bound, so one accepted expense overflowed the SQL
+  sum behind every account balance and took a household's money pages down
+  (QA ISSUE-001, 2026-10-01; the full entry is under pattern 1). The rule is
+  now `domain.MaxAmountMinor`. Three things about it that are easy to get
+  wrong:
+  - **A per-amount ceiling is not a guarantee that sums fit.** Nothing limits
+    how many rows there are. It turns "one typo" into "more than 92,233
+    deliberate rows at the ceiling". The comment at the constant says so, and
+    so should anyone describing it.
+  - **The number is tied to the FX table.** 1e14 was chosen partly because
+    1e14 × 12,410 (SGD to IDR, the largest rate) still fits an int64, and 1e15
+    does not. `adapter/fx/static_ceiling_test.go` checks every rate in the
+    table against the ceiling, so a new rate that breaks the promise fails
+    there.
+  - **It does nothing for rows already stored.** A row past the ceiling
+    written before the fix still makes the read fail. The read was left
+    failing on purpose: showing a clamped or partial balance would misstate
+    the household's money, which is the same reason `ErrNoRate` is the only
+    conversion failure a total may skip.
+- The browser has its own, lower limit, and it failed with the wrong words. A
+  JavaScript number is exact only up to 2^53 − 1, so seventeen digits typed
+  into an amount field were sent rounded, or as a number past int64, and the
+  form showed "The request body could not be parsed." Found only by typing
+  twenty digits into the real form during the browser walk; the server-side
+  tests could not see it. `toMinorUnits` now refuses what it cannot hold
+  exactly and `describeAmountError` says the amount is too large.
 - A doc comment promised "an invalid value cannot exist anywhere in the system".
   Go cannot enforce that with exported fields, and the repository layer rebuilds
   these values from database rows.

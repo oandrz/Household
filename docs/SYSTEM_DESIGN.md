@@ -4139,6 +4139,15 @@ Notes that are not obvious from the shapes:
   and wrong in the flattering direction.
 - **Money is `int64` minor units plus an ISO 4217 code** everywhere. `float64`
   never appears in a monetary path.
+- **An amount a person enters has a ceiling, and it lives in code only.**
+  `domain.MaxAmountMinor` (1e14 minor units) is enforced by every service that
+  takes an amount, through `domain.CheckAmountWithinLimit`; more is a 422
+  `AMOUNT_TOO_LARGE`. It exists because balances and totals are sums of
+  stored rows and have to fit in an int64. Unlike the rules in the bullet
+  above, **no database constraint mirrors it**: the `bigint` columns accept
+  any value, so a row written before the ceiling existed, or by hand, can
+  still make a read fail. The reads fail loudly on purpose rather than show
+  a clamped total.
 - **`accounts.owner_membership_id` is nullable and means shared, not unset.**
   There is deliberately no separate `is_shared` boolean — a row that both
   names an owner and claims to be shared would have nothing to resolve that

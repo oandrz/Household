@@ -13,7 +13,15 @@ needed them to exist (see "Where things stand" below).
 | ⬜ | Not started |
 | 🚫 | Out of scope — three different reasons, and **the row always says which**: marked "· not built" by the design itself; cut outright by the product owner (the audit screen, §9 — the code was deleted); or **deferred past the current release** by the product owner, meaning it is expected back later (the Family calendar, §7). A 🚫 is not a promise that something will never exist — it is a statement that it is not this release's work, and the row says what would bring it back |
 
-**Where things stand:** 135 of 154 features built or partly built — and **five of the 154 are 🚫**, so the honest denominator for this release is 149.
+**Where things stand:** 136 of 155 features built or partly built — and **five of the 155 are 🚫**, so the honest denominator for this release is 150.
+
+> **Recounted 2026-10-01 (QA fix, ISSUE-001)**. One row the design does not
+> draw is added to §5's Finances table, 🟡: "A ceiling on every amount a
+> person enters". Money goes 36/4/7/0 → **36/5/7/0**. Recounted by script
+> (State column, split on unescaped pipes only); the script reproduced the
+> previous table exactly (115/20/14/5 = 154) before the row was added, and
+> every other section is unchanged after. Totals **115/21/14/5 = 155**, Built
+> + Partial **136**, denominator **150**.
 
 > **Recounted 2026-09-25 (security hardening)**, after the first "today" fixes
 > from `docs/reviews/2026-09-25-security-review.md`. Three rows the design does
@@ -1098,13 +1106,13 @@ above now states Built + Partial **113** of **134**, denominator **129**.
 | Navigation shell | 7 | 1 | 1 | 0 |
 | Household settings | 14 | 8 | 2 | 0 |
 | Overview (home) | 8 | 2 | 1 | 0 |
-| Money | 36 | 4 | 7 | 0 |
+| Money | 36 | 5 | 7 | 0 |
 | Marriage | 16 | 2 | 2 | 0 |
 | Family | 0 | 0 | 0 | 3 |
 | Household extras | 0 | 0 | 0 | 1 |
 | Platform administration | 7 | 1 | 0 | 1 |
 | Automation | 10 | 0 | 0 | 0 |
-| **Total** | **115** | **20** | **14** | **5** |
+| **Total** | **115** | **21** | **14** | **5** |
 
 ---
 
@@ -1316,6 +1324,7 @@ code *and* a walk confirming it. All five Money features are now walked.
 | Manual account entry | ✅ |
 | Archive and restore | ✅ |
 | Custom account types | ⬜ |
+| A ceiling on every amount a person enters (no mockup) | 🟡 — `domain.MaxAmountMinor` (1e14 minor units: S$1 trillion, Rp 1 trillion) and `domain.CheckAmountWithinLimit`. Every write path refuses more with 422 `AMOUNT_TOO_LARGE`: transactions (amount and amount received), account opening balance, bills (create, edit, mark paid), budget caps and expected income, goals (target, planned monthly, starting balance, contribution), holding events, prices and income; the web forms, `POST /transactions`, `hearthctl` CSV import and Telegram `/spend` all reach it. Walked in a real browser 2026-10-01. Built because one expense of int64 max was accepted and every money page of that household then answered 500 (QA ISSUE-001). **Three gaps, all named in the comment at the constant or in LEARNING.** (1) A holding's quantity × unit price can still overflow with both figures inside the ceiling (100,000 units priced at S$1 trillion each): the price is stored, `POST …/valuations` answers 500 and `GET /holdings` answers 500 from then on. The fix is an invariant across events and valuations and needs a design. (2) A row stored before the ceiling existed still breaks reads; nothing here repairs old rows, and production has not been checked for one. (3) The ceiling is per amount: tens of thousands of rows at the ceiling in one account still overflow its balance, and the read then fails rather than showing a clamped total. |
 | Warning in Settings before a primary-currency change strands every account | ⬜ |
 
 **Portfolio — investment holdings.** Twelve rows the design does not draw at
