@@ -25,7 +25,9 @@ import type { Goal, GoalsResponse } from "./goalSchemas";
 // on the wire assigns a goal a colour, and a household looking at its own
 // handful of goals on one card never needs more than this to tell segments
 // apart.
-const SEGMENT_COLORS = ["#1a6b52", "#5b8f7c", "#8fb5a5", "#c4d8cf"];
+// Whole class names, never built from a number: Tailwind only emits a colour
+// utility it can read in the source as one literal string.
+const SEGMENT_CLASSES = ["bg-accent", "bg-contribution-2", "bg-contribution-3", "bg-contribution-4"];
 
 export function MonthlyContributionsCard({
   goals,
@@ -107,7 +109,8 @@ export function MonthlyContributionsCard({
               <div
                 key={goal.id}
                 data-testid="monthly-contributions-segment"
-                style={{ width: `${width}%`, background: SEGMENT_COLORS[index % SEGMENT_COLORS.length] }}
+                className={SEGMENT_CLASSES[index % SEGMENT_CLASSES.length]}
+                style={{ width: `${width}%` }}
               />
             );
           })}
@@ -120,8 +123,7 @@ export function MonthlyContributionsCard({
               className="flex items-center gap-1.5 text-ink"
             >
               <span
-                className="h-2 w-2 flex-none rounded-sm"
-                style={{ background: SEGMENT_COLORS[index % SEGMENT_COLORS.length] }}
+                className={`h-2 w-2 flex-none rounded-sm ${SEGMENT_CLASSES[index % SEGMENT_CLASSES.length]}`}
               />
               {goal.name} ·{" "}
               {formatMoney(goal.plannedMonthlyMinor, goal.currency, symbolFor(goal.currency))}

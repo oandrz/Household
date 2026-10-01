@@ -37,11 +37,11 @@ const MAX_BARS = 40;
 // less misleading than two colours nobody can tell apart.
 const HUES = [
   "text-accent",
-  "text-emerald-600",
-  "text-amber-600",
-  "text-sky-600",
-  "text-rose-500",
-  "text-violet-600",
+  "text-holding-2",
+  "text-holding-3",
+  "text-holding-4",
+  "text-holding-5",
+  "text-holding-6",
 ];
 
 type Props = {
@@ -99,88 +99,89 @@ export function PeriodReturnChart({ periods, holdings, primaryCurrency }: Props)
 
   return (
     <div className="mt-4">
-      <svg
-        data-testid="period-return-chart"
-        // The baseline is published so a test can prove a loss is drawn below
-        // it rather than merely drawn, and the plot floor beside it so a test
-        // can prove nothing is drawn off the end of the chart -- which is what
-        // a baseline measured from anything but zero would do.
-        data-baseline={baselineY}
-        data-plot-bottom={PAD_TOP + PLOT_HEIGHT}
-        viewBox={`0 0 ${WIDTH} ${HEIGHT}`}
-        // role + label: rectangles announce nothing on their own, and naming
-        // the range beats a screen reader saying "chart".
-        role="img"
-        aria-label={`What each holding earned, ${shown[0].label} to ${shown[shown.length - 1].label}, in ${primaryCurrency}`}
-        className="w-full"
-      >
-        {shown.map((period, groupIndex) =>
-          holdings.map((holding, holdingIndex) => {
-            const total = holding.returns[offset + groupIndex]?.total;
-            // NO BAR for a figure that cannot be known. A zero-height bar on
-            // the axis claims "this earned nothing", which is a different
-            // statement from "nobody priced it" -- the rule TrendPoint's
-            // nullable figure carries on the backend.
-            if (!total) return null;
+      <div className="relative">
+        <svg
+          data-testid="period-return-chart"
+          // The baseline is published so a test can prove a loss is drawn below
+          // it rather than merely drawn, and the plot floor beside it so a test
+          // can prove nothing is drawn off the end of the chart -- which is what
+          // a baseline measured from anything but zero would do.
+          data-baseline={baselineY}
+          data-plot-bottom={PAD_TOP + PLOT_HEIGHT}
+          viewBox={`0 0 ${WIDTH} ${HEIGHT}`}
+          // role + label: rectangles announce nothing on their own, and naming
+          // the range beats a screen reader saying "chart".
+          role="img"
+          aria-label={`What each holding earned, ${shown[0].label} to ${shown[shown.length - 1].label}, in ${primaryCurrency}`}
+          className="w-full"
+        >
+          {shown.map((period, groupIndex) =>
+            holdings.map((holding, holdingIndex) => {
+              const total = holding.returns[offset + groupIndex]?.total;
+              // NO BAR for a figure that cannot be known. A zero-height bar on
+              // the axis claims "this earned nothing", which is a different
+              // statement from "nobody priced it" -- the rule TrendPoint's
+              // nullable figure carries on the backend.
+              if (!total) return null;
 
-            const y = PAD_TOP + ((max - total.primaryMinor) / span) * PLOT_HEIGHT;
-            return (
-              <rect
-                key={`${period.label}-${holding.id}`}
-                data-testid="return-bar"
-                data-period={period.label}
-                data-holding={holding.name}
-                x={
-                  PAD_X +
-                  groupIndex * (groupWidth + GROUP_GAP) +
-                  holdingIndex * (barWidth + BAR_GAP)
-                }
-                y={Math.min(y, baselineY)}
-                width={barWidth}
-                // A period that earned exactly zero still gets a sliver, so
-                // "we knew, and it was nothing" does not look like a gap.
-                height={Math.max(1, Math.abs(baselineY - y))}
-                rx={1}
-                fill="currentColor"
-                className={HUES[holdingIndex % HUES.length]}
-                // The period still running is drawn faintly: it is a figure in
-                // progress, not a result, and the table beside it says "to
-                // date" for the same reason.
-                opacity={period.current ? 0.45 : 1}
-              >
-                <title>{`${holding.name}, ${period.label}`}</title>
-              </rect>
-            );
-          }),
-        )}
-        {/* The zero line itself, drawn only when something sits below it --
-            otherwise the axis and the baseline are the same line and a second
-            stroke is noise. */}
-        {min < 0 && (
-          <line
-            x1={PAD_X}
-            x2={WIDTH - PAD_X}
-            y1={baselineY}
-            y2={baselineY}
-            stroke="currentColor"
-            strokeWidth={0.5}
-            className="text-muted"
-          />
-        )}
+              const y = PAD_TOP + ((max - total.primaryMinor) / span) * PLOT_HEIGHT;
+              return (
+                <rect
+                  key={`${period.label}-${holding.id}`}
+                  data-testid="return-bar"
+                  data-period={period.label}
+                  data-holding={holding.name}
+                  x={
+                    PAD_X +
+                    groupIndex * (groupWidth + GROUP_GAP) +
+                    holdingIndex * (barWidth + BAR_GAP)
+                  }
+                  y={Math.min(y, baselineY)}
+                  width={barWidth}
+                  // A period that earned exactly zero still gets a sliver, so
+                  // "we knew, and it was nothing" does not look like a gap.
+                  height={Math.max(1, Math.abs(baselineY - y))}
+                  rx={1}
+                  fill="currentColor"
+                  className={HUES[holdingIndex % HUES.length]}
+                  // The period still running is drawn faintly: it is a figure in
+                  // progress, not a result, and the table beside it says "to
+                  // date" for the same reason.
+                  opacity={period.current ? 0.45 : 1}
+                >
+                  <title>{`${holding.name}, ${period.label}`}</title>
+                </rect>
+              );
+            }),
+          )}
+          {/* The zero line itself, drawn only when something sits below it --
+              otherwise the axis and the baseline are the same line and a second
+              stroke is noise. */}
+          {min < 0 && (
+            <line
+              x1={PAD_X}
+              x2={WIDTH - PAD_X}
+              y1={baselineY}
+              y2={baselineY}
+              stroke="currentColor"
+              strokeWidth={0.5}
+              className="text-muted"
+            />
+          )}
+        </svg>
+        {/* HTML, not SVG <text>: the SVG scales with its card, so a label drawn
+            inside it came out at whatever size the card happened to be. Placed
+            by the same x, as a percentage. */}
         {shown.map((period, index) => (
-          <text
+          <span
             key={period.label}
-            x={PAD_X + index * (groupWidth + GROUP_GAP) + groupWidth / 2}
-            y={HEIGHT - 8}
-            textAnchor="middle"
-            fontSize={8}
-            fill="currentColor"
-            className="text-muted"
+            className="absolute bottom-0 -translate-x-1/2 whitespace-nowrap text-[11px] text-muted"
+            style={{ left: `${((PAD_X + index * (groupWidth + GROUP_GAP) + groupWidth / 2) / WIDTH) * 100}%` }}
           >
             {period.label}
-          </text>
+          </span>
         ))}
-      </svg>
+      </div>
 
       <ul
         data-testid="period-return-chart-legend"
