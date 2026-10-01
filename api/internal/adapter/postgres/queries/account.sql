@@ -120,8 +120,9 @@ SELECT EXISTS (
 -- in the usecase layer (MonthTotalsQuery says the same).
 --
 -- The filter mirrors ListAccounts's balance expression, including the
--- missing upper bound on occurred_on (a future-dated transaction is already
--- inside the anchor balance). It must stay identical: the trend walks
+-- missing upper bound on occurred_on. A transaction dated after today is
+-- refused when it is written, but one stored earlier may be, and it is
+-- already inside the anchor balance. It must stay identical: the trend walks
 -- backwards from AccountView.Balance by subtracting these deltas, so any
 -- mismatch makes older bars disagree with the headline figure. The service
 -- buckets any later month into the current one.

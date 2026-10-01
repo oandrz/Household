@@ -440,7 +440,7 @@ func handleCreateTransaction(deps Deps) http.HandlerFunc {
 			in.ToAccountID = *req.ToAccountID
 		}
 
-		created, replayed, err := deps.Transactions.CreateOrReplay(r.Context(), in)
+		created, replayed, err := deps.Transactions.CreateOrReplay(r.Context(), in, scope.Today)
 		if err != nil {
 			MapDomainError(w, r, err)
 			return
@@ -485,7 +485,7 @@ func handleUpdateTransaction(deps Deps) http.HandlerFunc {
 		}
 
 		id := chi.URLParam(r, "id")
-		if _, err := deps.Transactions.Update(r.Context(), scope.HouseholdID, id, patch); err != nil {
+		if _, err := deps.Transactions.Update(r.Context(), scope.HouseholdID, id, patch, scope.Today); err != nil {
 			MapDomainError(w, r, err)
 			return
 		}

@@ -30,7 +30,7 @@ func TestTransactionCreateRefusesAnAmountPastTheCeiling(t *testing.T) {
 	for _, amount := range []int64{onePastTheCeiling, 5_000_000_000_000_000_000, math.MaxInt64} {
 		tooLarge := expenseInput()
 		tooLarge.AmountMinor = amount
-		if _, err := svc.Create(ctx, tooLarge); !errors.Is(err, domain.ErrAmountTooLarge) {
+		if _, err := svc.Create(ctx, tooLarge, transactionToday); !errors.Is(err, domain.ErrAmountTooLarge) {
 			t.Fatalf("amount %d = %v, want ErrAmountTooLarge", amount, err)
 		}
 	}
@@ -41,7 +41,7 @@ func TestTransactionCreateRefusesAnAmountPastTheCeiling(t *testing.T) {
 	// The ceiling itself is allowed: the refusal starts one minor unit later.
 	atCeiling := expenseInput()
 	atCeiling.AmountMinor = domain.MaxAmountMinor
-	if _, err := svc.Create(ctx, atCeiling); err != nil {
+	if _, err := svc.Create(ctx, atCeiling, transactionToday); err != nil {
 		t.Fatalf("amount at the ceiling: %v", err)
 	}
 }
@@ -56,7 +56,7 @@ func TestTransactionCreateRefusesAReceivedAmountPastTheCeiling(t *testing.T) {
 		Description: "To BCA", FromAccountID: "dbs", ToAccountID: "bca",
 		AmountMinor: 50000, ReceivedAmountMinor: &received,
 	}
-	if _, err := svc.Create(context.Background(), transfer); !errors.Is(err, domain.ErrAmountTooLarge) {
+	if _, err := svc.Create(context.Background(), transfer, transactionToday); !errors.Is(err, domain.ErrAmountTooLarge) {
 		t.Fatalf("received amount past the ceiling = %v, want ErrAmountTooLarge", err)
 	}
 	if len(repo.transactions) != 0 {
@@ -69,13 +69,13 @@ func TestTransactionCreateRefusesAReceivedAmountPastTheCeiling(t *testing.T) {
 func TestTransactionUpdateRefusesAnAmountPastTheCeiling(t *testing.T) {
 	svc, repo := transactionFixture(t)
 	ctx := context.Background()
-	created, err := svc.Create(ctx, expenseInput())
+	created, err := svc.Create(ctx, expenseInput(), transactionToday)
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 
 	tooLarge := onePastTheCeiling
-	_, err = svc.Update(ctx, "house-1", created.ID, usecase.TransactionUpdate{AmountMinor: &tooLarge})
+	_, err = svc.Update(ctx, "house-1", created.ID, usecase.TransactionUpdate{AmountMinor: &tooLarge}, transactionToday)
 	if !errors.Is(err, domain.ErrAmountTooLarge) {
 		t.Fatalf("Update = %v, want ErrAmountTooLarge", err)
 	}

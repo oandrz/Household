@@ -55,13 +55,16 @@ type TransactionUpdate struct {
 // AccountDeps. Households and FX are unused by validation -- they exist
 // because MonthSummary, a second method on this same service, needs both to
 // convert one currency's spend into the household's primary.
+//
+// There is no Clock: Create and Update take the household's today as a
+// parameter, so nothing here reads the wall clock and every test is
+// deterministic.
 type TransactionDeps struct {
 	Transactions TransactionRepository
 	Categories   CategoryLookup
 	Accounts     AccountLookup
 	Households   HouseholdRepository
 	FX           FXRateProvider
-	Clock        Clock
 }
 
 // TransactionService covers the ledger: the transactions themselves and the
@@ -90,8 +93,11 @@ func (s *TransactionService) Delete(ctx context.Context, householdID, id string)
 	return s.d.Transactions.Delete(ctx, householdID, id)
 }
 
-func (s *TransactionService) Create(ctx context.Context, in NewTransaction) (domain.Transaction, error) {
-	created, _, err := s.CreateOrReplay(ctx, in)
+// Create writes one transaction. today is the household's calendar day,
+// passed in by the caller: a transaction is a recorded fact and may not be
+// dated after it (refuseFutureDate).
+func (s *TransactionService) Create(ctx context.Context, in NewTransaction, today time.Time) (domain.Transaction, error) {
+	created, _, err := s.CreateOrReplay(ctx, in, today)
 	return created, err
 }
 
@@ -104,7 +110,13 @@ func (s *TransactionService) Create(ctx context.Context, in NewTransaction) (dom
 // and turns the other into the replay path. A differing stored row for an
 // existing key is refused (ErrIdempotencyKeyReused), not silently reported
 // "done" for the wrong transaction.
-func (s *TransactionService) CreateOrReplay(ctx context.Context, in NewTransaction) (domain.Transaction, bool, error) {
+//
+// The date is checked before the insert, so a replay is checked too. A
+// request that was accepted once is refused on a retry only if its date has
+// since become the future, which takes the household moving its zone west
+// between the two. Accepted: the retry is then asking to record a
+// future-dated fact, and the row already stored is untouched.
+func (s *TransactionService) CreateOrReplay(ctx context.Context, in NewTransaction, today time.Time) (domain.Transaction, bool, error) {
 	if in.IdempotencyKey != "" {
 		if err := domain.ValidateIdempotencyKey(in.IdempotencyKey); err != nil {
 			return domain.Transaction{}, false, err
@@ -126,6 +138,9 @@ func (s *TransactionService) CreateOrReplay(ctx context.Context, in NewTransacti
 		t.ReceivedAmount = &domain.Money{Amount: *in.ReceivedAmountMinor}
 	}
 	if err := s.validate(ctx, &t); err != nil {
+		return domain.Transaction{}, false, err
+	}
+	if err := refuseFutureDate(t.OccurredOn, today); err != nil {
 		return domain.Transaction{}, false, err
 	}
 	created, err := s.d.Transactions.Create(ctx, t)
@@ -154,7 +169,14 @@ func (s *TransactionService) CreateOrReplay(ctx context.Context, in NewTransacti
 // leaving a category alone are each legal alone and illegal together, so
 // validating the patch would let the pair through. AccountService.Update is
 // the same shape for the same reason.
-func (s *TransactionService) Update(ctx context.Context, householdID, id string, patch TransactionUpdate) (domain.Transaction, error) {
+//
+// The date is the one rule checked only when the patch changes it, against
+// today, the household's calendar day. Don't move the check into validate:
+// it runs on every edit, and a row stored with a date after today (see
+// refuseFutureDate) could then never have its description corrected.
+// "Changed" compares the patch with the stored day, not "the patch names a
+// date": the edit form sends every field back, the untouched date included.
+func (s *TransactionService) Update(ctx context.Context, householdID, id string, patch TransactionUpdate, today time.Time) (domain.Transaction, error) {
 	view, err := s.d.Transactions.Get(ctx, householdID, id)
 	if err != nil {
 		return domain.Transaction{}, err
@@ -172,7 +194,9 @@ func (s *TransactionService) Update(ctx context.Context, householdID, id string,
 	if patch.Kind != nil {
 		t.Kind = domain.TransactionKind(*patch.Kind)
 	}
+	dateChanged := false
 	if patch.OccurredOn != nil {
+		dateChanged = !sameDay(*patch.OccurredOn, t.OccurredOn)
 		t.OccurredOn = *patch.OccurredOn
 	}
 	if patch.Description != nil {
@@ -205,12 +229,20 @@ func (s *TransactionService) Update(ctx context.Context, householdID, id string,
 	if err := s.validate(ctx, &t); err != nil {
 		return domain.Transaction{}, err
 	}
+	if dateChanged {
+		if err := refuseFutureDate(t.OccurredOn, today); err != nil {
+			return domain.Transaction{}, err
+		}
+	}
 	return s.d.Transactions.Update(ctx, t)
 }
 
 // validate normalises and checks an assembled transaction in place, shared
 // by Create and Update so a rule can't be fixed at one call site and missed
 // in its sibling -- the defect class this project keeps hitting.
+//
+// The date is the one rule not in here: Create checks it always and Update
+// only when the date changed (see Update).
 func (s *TransactionService) validate(ctx context.Context, t *domain.Transaction) error {
 	kind, err := domain.ParseTransactionKind(string(t.Kind))
 	if err != nil {

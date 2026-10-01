@@ -264,7 +264,6 @@ func run() error {
 		Accounts:   accountRepo,
 		Households: households,
 		FX:         fxProvider,
-		Clock:      sysClock,
 	})
 	goalSvc := usecase.NewGoalService(usecase.GoalDeps{
 		Goals:      goalRepo,

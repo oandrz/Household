@@ -155,7 +155,7 @@ func TestSpendCountsATransactionDatedBeforeTheAccountsOpeningBalance(t *testing.
 
 func mustCreate(t *testing.T, svc *usecase.TransactionService, in usecase.NewTransaction) domain.Transaction {
 	t.Helper()
-	created, err := svc.Create(context.Background(), in)
+	created, err := svc.Create(context.Background(), in, transactionToday)
 	if err != nil {
 		t.Fatalf("create %q: %v", in.Description, err)
 	}

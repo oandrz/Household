@@ -228,6 +228,10 @@ func changeBasisPoints(current, previous TrendPoint) *int64 {
 // the transaction date, so a next-month transaction is already inside the
 // anchor balance. Left in its own bucket, it would never be subtracted,
 // leaving every older bar wrong.
+//
+// A new transaction cannot be dated after today (domain.ErrDateInFuture),
+// but a stored one can be: it was written before that rule, or the
+// household's zone has moved west since. This fold is for those rows.
 func deltasByAccountMonth(
 	movements []AccountMonthMovement,
 	current time.Time,

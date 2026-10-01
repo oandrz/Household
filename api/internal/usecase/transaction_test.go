@@ -68,10 +68,13 @@ func newTransactionFixtureWithFX(t *testing.T, extraAccounts map[string]fakeAcco
 		},
 		Households: households,
 		FX:         fx,
-		Clock:      &fixedClock{now: time.Date(2026, 7, 20, 12, 0, 0, 0, time.UTC)},
 	})
 	return svc, repo
 }
+
+// transactionToday is the household's calendar day every test here writes
+// on, unless it says otherwise. The fixtures are dated two days before it.
+var transactionToday = time.Date(2026, 7, 20, 0, 0, 0, 0, time.UTC)
 
 func expenseInput() usecase.NewTransaction {
 	return usecase.NewTransaction{
@@ -94,7 +97,7 @@ func expenseInput() usecase.NewTransaction {
 func TestCreateTakesTheAccountsCurrency(t *testing.T) {
 	svc, _ := transactionFixture(t)
 
-	created, err := svc.Create(context.Background(), expenseInput())
+	created, err := svc.Create(context.Background(), expenseInput(), transactionToday)
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -104,7 +107,7 @@ func TestCreateTakesTheAccountsCurrency(t *testing.T) {
 
 	idrExpense := expenseInput()
 	idrExpense.FromAccountID = "bca"
-	created, err = svc.Create(context.Background(), idrExpense)
+	created, err = svc.Create(context.Background(), idrExpense, transactionToday)
 	if err != nil {
 		t.Fatalf("create on an IDR account: %v", err)
 	}
@@ -118,7 +121,7 @@ func TestCreateTakesTheAccountsCurrency(t *testing.T) {
 		Description: "Interest", ToAccountID: "bca",
 		CategoryID: "cat-income", AmountMinor: 15000,
 	}
-	created, err = svc.Create(context.Background(), income)
+	created, err = svc.Create(context.Background(), income, transactionToday)
 	if err != nil {
 		t.Fatalf("create income on an IDR account: %v", err)
 	}
@@ -165,7 +168,7 @@ func TestCreateRefusesTheWrongAccountsForItsKind(t *testing.T) {
 	}
 	for name, mutate := range cases {
 		t.Run(name, func(t *testing.T) {
-			_, err := svc.Create(ctx, mutate(expenseInput()))
+			_, err := svc.Create(ctx, mutate(expenseInput()), transactionToday)
 			if !errors.Is(err, domain.ErrTransactionAccountsInvalid) {
 				t.Fatalf("create = %v, want ErrTransactionAccountsInvalid", err)
 			}
@@ -187,13 +190,13 @@ func TestTheReceivedAmountFollowsTheCurrencies(t *testing.T) {
 		Description: "To BCA", FromAccountID: "dbs", ToAccountID: "bca",
 		AmountMinor: 50000,
 	}
-	if _, err := svc.Create(ctx, crossCurrency); !errors.Is(err, domain.ErrReceivedAmountRequired) {
+	if _, err := svc.Create(ctx, crossCurrency, transactionToday); !errors.Is(err, domain.ErrReceivedAmountRequired) {
 		t.Fatalf("cross-currency transfer with no received amount = %v, want ErrReceivedAmountRequired", err)
 	}
 
 	received := int64(620000000)
 	crossCurrency.ReceivedAmountMinor = &received
-	created, err := svc.Create(ctx, crossCurrency)
+	created, err := svc.Create(ctx, crossCurrency, transactionToday)
 	if err != nil {
 		t.Fatalf("cross-currency transfer: %v", err)
 	}
@@ -206,14 +209,14 @@ func TestTheReceivedAmountFollowsTheCurrencies(t *testing.T) {
 	sameCurrency := crossCurrency
 	sameCurrency.ToAccountID = "ocbc"
 	sameCurrency.ReceivedAmountMinor = &fee
-	if _, err := svc.Create(ctx, sameCurrency); err != nil {
+	if _, err := svc.Create(ctx, sameCurrency, transactionToday); err != nil {
 		t.Fatalf("same-currency transfer with a fee: %v", err)
 	}
 
 	// An expense cannot carry one.
 	expense := expenseInput()
 	expense.ReceivedAmountMinor = &fee
-	if _, err := svc.Create(ctx, expense); !errors.Is(err, domain.ErrReceivedAmountNotAllowed) {
+	if _, err := svc.Create(ctx, expense, transactionToday); !errors.Is(err, domain.ErrReceivedAmountNotAllowed) {
 		t.Fatalf("expense with a received amount = %v, want ErrReceivedAmountNotAllowed", err)
 	}
 }
@@ -232,7 +235,7 @@ func TestUpdateClearsTheReceivedAmount(t *testing.T) {
 		OccurredOn:  time.Date(2026, 6, 29, 0, 0, 0, 0, time.UTC),
 		Description: "To BCA", FromAccountID: "dbs", ToAccountID: "bca",
 		AmountMinor: 50000, ReceivedAmountMinor: &received,
-	})
+	}, transactionToday)
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -247,7 +250,7 @@ func TestUpdateClearsTheReceivedAmount(t *testing.T) {
 	updated, err := svc.Update(ctx, "house-1", created.ID, usecase.TransactionUpdate{
 		ToAccountID:         &toAccount,
 		ClearReceivedAmount: true,
-	})
+	}, transactionToday)
 	if err != nil {
 		t.Fatalf("update: %v", err)
 	}
@@ -265,7 +268,7 @@ func TestCreateRefusesACategoryOfTheWrongKind(t *testing.T) {
 		Description: "Bonus", ToAccountID: "dbs",
 		CategoryID: "cat-groceries", AmountMinor: 120000,
 	}
-	if _, err := svc.Create(context.Background(), income); !errors.Is(err, domain.ErrCategoryKindMismatch) {
+	if _, err := svc.Create(context.Background(), income, transactionToday); !errors.Is(err, domain.ErrCategoryKindMismatch) {
 		t.Fatalf("income categorised as Groceries = %v, want ErrCategoryKindMismatch", err)
 	}
 
@@ -275,7 +278,7 @@ func TestCreateRefusesACategoryOfTheWrongKind(t *testing.T) {
 		Description: "To savings", FromAccountID: "dbs", ToAccountID: "ocbc",
 		CategoryID: "cat-groceries", AmountMinor: 50000,
 	}
-	if _, err := svc.Create(context.Background(), transfer); !errors.Is(err, domain.ErrCategoryKindMismatch) {
+	if _, err := svc.Create(context.Background(), transfer, transactionToday); !errors.Is(err, domain.ErrCategoryKindMismatch) {
 		t.Fatalf("transfer with a category = %v, want ErrCategoryKindMismatch", err)
 	}
 }
@@ -286,14 +289,14 @@ func TestCreateRefusesAnEmptyDescriptionAndANonPositiveAmount(t *testing.T) {
 
 	blank := expenseInput()
 	blank.Description = "   "
-	if _, err := svc.Create(ctx, blank); !errors.Is(err, domain.ErrTransactionDescriptionRequired) {
+	if _, err := svc.Create(ctx, blank, transactionToday); !errors.Is(err, domain.ErrTransactionDescriptionRequired) {
 		t.Fatalf("blank description = %v, want ErrTransactionDescriptionRequired", err)
 	}
 
 	for _, amount := range []int64{0, -100} {
 		bad := expenseInput()
 		bad.AmountMinor = amount
-		if _, err := svc.Create(ctx, bad); !errors.Is(err, domain.ErrTransactionAmountNotPositive) {
+		if _, err := svc.Create(ctx, bad, transactionToday); !errors.Is(err, domain.ErrTransactionAmountNotPositive) {
 			t.Fatalf("amount %d = %v, want ErrTransactionAmountNotPositive", amount, err)
 		}
 	}
@@ -309,7 +312,7 @@ func TestUpdateValidatesTheMergedResult(t *testing.T) {
 	svc, _ := transactionFixture(t)
 	ctx := context.Background()
 
-	created, err := svc.Create(ctx, expenseInput())
+	created, err := svc.Create(ctx, expenseInput(), transactionToday)
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -319,7 +322,7 @@ func TestUpdateValidatesTheMergedResult(t *testing.T) {
 	_, err = svc.Update(ctx, "house-1", created.ID, usecase.TransactionUpdate{
 		Kind:        &kind,
 		ToAccountID: &toAccount,
-	})
+	}, transactionToday)
 	if !errors.Is(err, domain.ErrCategoryKindMismatch) {
 		t.Fatalf("switching an expense to a transfer kept its category = %v, want ErrCategoryKindMismatch", err)
 	}
@@ -343,7 +346,7 @@ func TestARejectedUpdateDoesNotMutateTheStoredReceivedAmount(t *testing.T) {
 		OccurredOn:  time.Date(2026, 6, 29, 0, 0, 0, 0, time.UTC),
 		Description: "To BCA", FromAccountID: "dbs", ToAccountID: "bca",
 		AmountMinor: 50000, ReceivedAmountMinor: &received,
-	})
+	}, transactionToday)
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -356,7 +359,7 @@ func TestARejectedUpdateDoesNotMutateTheStoredReceivedAmount(t *testing.T) {
 	_, err = svc.Update(ctx, "house-1", created.ID, usecase.TransactionUpdate{
 		ToAccountID: &toAccount,
 		CategoryID:  &category,
-	})
+	}, transactionToday)
 	if !errors.Is(err, domain.ErrCategoryKindMismatch) {
 		t.Fatalf("update = %v, want ErrCategoryKindMismatch (so nothing should have been persisted)", err)
 	}
@@ -379,11 +382,11 @@ func TestCreateOrReplayReturnsTheStoredRowForARepeatedKey(t *testing.T) {
 	in := expenseInput()
 	in.IdempotencyKey = "import-2026-09-08-row-7"
 
-	first, replayed, err := svc.CreateOrReplay(context.Background(), in)
+	first, replayed, err := svc.CreateOrReplay(context.Background(), in, transactionToday)
 	if err != nil || replayed {
 		t.Fatalf("first create: err=%v replayed=%v", err, replayed)
 	}
-	second, replayed, err := svc.CreateOrReplay(context.Background(), in)
+	second, replayed, err := svc.CreateOrReplay(context.Background(), in, transactionToday)
 	if err != nil {
 		t.Fatalf("second create with the same key: %v", err)
 	}
@@ -402,13 +405,13 @@ func TestCreateOrReplayRefusesAKeyReusedForADifferentTransaction(t *testing.T) {
 	svc, repo := transactionFixture(t)
 	in := expenseInput()
 	in.IdempotencyKey = "k1"
-	if _, _, err := svc.CreateOrReplay(context.Background(), in); err != nil {
+	if _, _, err := svc.CreateOrReplay(context.Background(), in, transactionToday); err != nil {
 		t.Fatal(err)
 	}
 
 	changed := in
 	changed.AmountMinor = in.AmountMinor + 1
-	_, _, err := svc.CreateOrReplay(context.Background(), changed)
+	_, _, err := svc.CreateOrReplay(context.Background(), changed, transactionToday)
 	if !errors.Is(err, domain.ErrIdempotencyKeyReused) {
 		t.Fatalf("err = %v, want ErrIdempotencyKeyReused", err)
 	}
@@ -420,7 +423,7 @@ func TestCreateOrReplayRefusesAKeyReusedForADifferentTransaction(t *testing.T) {
 func TestCreateOrReplayWithoutAKeyWritesEveryTime(t *testing.T) {
 	svc, repo := transactionFixture(t)
 	for i := 0; i < 2; i++ {
-		if _, replayed, err := svc.CreateOrReplay(context.Background(), expenseInput()); err != nil || replayed {
+		if _, replayed, err := svc.CreateOrReplay(context.Background(), expenseInput(), transactionToday); err != nil || replayed {
 			t.Fatalf("call %d: err=%v replayed=%v", i, err, replayed)
 		}
 	}
@@ -434,7 +437,7 @@ func TestCreateOrReplayRefusesAMalformedKey(t *testing.T) {
 	for _, key := range []string{"has space", "tab\tkey", strings.Repeat("x", 129), "ünïcode"} {
 		in := expenseInput()
 		in.IdempotencyKey = key
-		if _, _, err := svc.CreateOrReplay(context.Background(), in); !errors.Is(err, domain.ErrIdempotencyKeyInvalid) {
+		if _, _, err := svc.CreateOrReplay(context.Background(), in, transactionToday); !errors.Is(err, domain.ErrIdempotencyKeyInvalid) {
 			t.Errorf("key %q: err = %v, want ErrIdempotencyKeyInvalid", key, err)
 		}
 	}
@@ -452,5 +455,134 @@ func TestIdempotencyKeysAreScopedToTheHousehold(t *testing.T) {
 	}
 	if _, err := repo.Create(context.Background(), b); err != nil {
 		t.Fatalf("another household's identical key must not collide: %v", err)
+	}
+}
+
+// A transaction is a recorded fact, so it may not be dated after the
+// household's today: a 2099 expense would lower today's balance, because a
+// balance sums every row with no upper bound on the date. Today itself is
+// allowed. Every kind is checked, and a refused create writes nothing.
+func TestCreateRefusesATransactionDatedAfterTheHouseholdsToday(t *testing.T) {
+	tomorrow := transactionToday.AddDate(0, 0, 1)
+
+	inputs := map[string]usecase.NewTransaction{
+		"an expense": expenseInput(),
+		"an income": {
+			HouseholdID: "house-1", Kind: "income", Description: "Salary",
+			ToAccountID: "dbs", CategoryID: "cat-income", AmountMinor: 500000,
+		},
+		"a transfer": {
+			HouseholdID: "house-1", Kind: "transfer", Description: "To savings",
+			FromAccountID: "dbs", ToAccountID: "ocbc", AmountMinor: 10000,
+		},
+	}
+	for name, in := range inputs {
+		t.Run(name, func(t *testing.T) {
+			svc, repo := transactionFixture(t)
+			ctx := context.Background()
+
+			in.OccurredOn = tomorrow
+			if _, err := svc.Create(ctx, in, transactionToday); !errors.Is(err, domain.ErrDateInFuture) {
+				t.Fatalf("dated tomorrow: err = %v, want ErrDateInFuture", err)
+			}
+			if len(repo.transactions) != 0 {
+				t.Fatalf("%d row(s) written by a refused create", len(repo.transactions))
+			}
+
+			in.OccurredOn = transactionToday
+			if _, err := svc.Create(ctx, in, transactionToday); err != nil {
+				t.Fatalf("dated today: %v", err)
+			}
+		})
+	}
+}
+
+// The keyed create is the path hearthctl's import and the Telegram bot use.
+// It is the same rule: a key does not get a future date past it.
+func TestCreateOrReplayRefusesAFutureDateBeforeAnythingIsWritten(t *testing.T) {
+	svc, repo := transactionFixture(t)
+
+	in := expenseInput()
+	in.IdempotencyKey = "import-row-17"
+	in.OccurredOn = transactionToday.AddDate(0, 0, 1)
+
+	_, replayed, err := svc.CreateOrReplay(context.Background(), in, transactionToday)
+	if !errors.Is(err, domain.ErrDateInFuture) {
+		t.Fatalf("err = %v, want ErrDateInFuture", err)
+	}
+	if replayed {
+		t.Fatal("a refused create was reported as a replay")
+	}
+	if len(repo.transactions) != 0 {
+		t.Fatalf("%d row(s) written by a refused create", len(repo.transactions))
+	}
+}
+
+// An edit that moves a transaction to a later day than today is refused, and
+// the stored row keeps the date it had.
+func TestUpdateRefusesMovingATransactionIntoTheFuture(t *testing.T) {
+	svc, repo := transactionFixture(t)
+	ctx := context.Background()
+
+	created, err := svc.Create(ctx, expenseInput(), transactionToday)
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	tomorrow := transactionToday.AddDate(0, 0, 1)
+	_, err = svc.Update(ctx, "house-1", created.ID, usecase.TransactionUpdate{OccurredOn: &tomorrow}, transactionToday)
+	if !errors.Is(err, domain.ErrDateInFuture) {
+		t.Fatalf("moved to tomorrow: err = %v, want ErrDateInFuture", err)
+	}
+	if got := repo.transactions[0].OccurredOn; !got.Equal(expenseInput().OccurredOn) {
+		t.Fatalf("stored date = %v after a refused edit, want it unchanged", got)
+	}
+
+	today := transactionToday
+	if _, err := svc.Update(ctx, "house-1", created.ID, usecase.TransactionUpdate{OccurredOn: &today}, transactionToday); err != nil {
+		t.Fatalf("moved to today: %v", err)
+	}
+}
+
+// A row already stored with a date after today stays as it is, and can still
+// be edited: the date is checked only when the edit changes it. Such a row
+// exists without anyone having typed a future date after this rule: it was
+// saved before the rule, or the household's zone was moved west afterwards.
+//
+// The edit form sends every field back, the unchanged date included, so
+// "the patch carries a date" must not be read as "the date changed".
+func TestUpdateChecksTheDateOnlyWhenTheEditChangesIt(t *testing.T) {
+	svc, repo := transactionFixture(t)
+	ctx := context.Background()
+
+	// Written on a day when this date was not in the future.
+	stored := expenseInput()
+	stored.OccurredOn = time.Date(2026, 8, 30, 0, 0, 0, 0, time.UTC)
+	created, err := svc.Create(ctx, stored, stored.OccurredOn)
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	description := "Cold Storage, Great World"
+	if _, err := svc.Update(ctx, "house-1", created.ID,
+		usecase.TransactionUpdate{Description: &description}, transactionToday); err != nil {
+		t.Fatalf("an edit that does not name the date: %v", err)
+	}
+
+	sameDate := stored.OccurredOn
+	amount := int64(6100)
+	if _, err := svc.Update(ctx, "house-1", created.ID,
+		usecase.TransactionUpdate{OccurredOn: &sameDate, AmountMinor: &amount}, transactionToday); err != nil {
+		t.Fatalf("an edit that sends the same date back: %v", err)
+	}
+	if got := repo.transactions[0]; got.Description != description || got.Amount.Amount != amount {
+		t.Fatalf("stored = %q %d, want both edits saved", got.Description, got.Amount.Amount)
+	}
+
+	otherFutureDate := stored.OccurredOn.AddDate(0, 0, 1)
+	_, err = svc.Update(ctx, "house-1", created.ID,
+		usecase.TransactionUpdate{OccurredOn: &otherFutureDate}, transactionToday)
+	if !errors.Is(err, domain.ErrDateInFuture) {
+		t.Fatalf("an edit to a different future date: err = %v, want ErrDateInFuture", err)
 	}
 }

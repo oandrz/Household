@@ -144,7 +144,10 @@ func (s *TelegramCommandService) LogSpend(ctx context.Context, in TelegramSpend)
 		// Transfers need two accounts and are a form, not a one-liner.
 		return TelegramSpendResult{}, domain.ErrTransactionAccountsInvalid
 	}
-	created, replayed, err := s.d.Transactions.CreateOrReplay(ctx, nt)
+	// today is also the row's own date, so the future-date rule can never
+	// refuse a chat command. It is passed all the same: the rule belongs to
+	// the service, and a later command that takes a date gets it for free.
+	created, replayed, err := s.d.Transactions.CreateOrReplay(ctx, nt, today)
 	if err != nil {
 		return TelegramSpendResult{}, err
 	}

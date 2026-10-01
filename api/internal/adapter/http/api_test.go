@@ -325,7 +325,6 @@ func newTestEnvWith(t *testing.T, clk usecase.Clock, outbox usecase.MailOutbox) 
 		Accounts:     accountRepo,
 		Households:   households,
 		FX:           fxProvider,
-		Clock:        clk,
 	})
 	goalRepo := postgres.NewGoalRepo(db)
 	holdingSvc := usecase.NewHoldingService(usecase.HoldingDeps{
