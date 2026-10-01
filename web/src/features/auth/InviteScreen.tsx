@@ -61,43 +61,58 @@ function AuthShell({ children }: { children: ReactNode }) {
   );
 }
 
-function InvitePreviewError({ error }: { error: unknown }) {
-  let message =
-    "Something went wrong loading this invite. Please try again.";
+// One card for every way the invite lookup can fail: what happened, why, and
+// one way forward. `heading` says only what is known -- a load that failed
+// has not shown the invite to be dead, so it must not say so.
+function inviteFailure(error: unknown): { heading: string; message: string; action: string } {
   if (error instanceof ApiError) {
     if (error.status === 404) {
-      message =
-        "We couldn’t find that invite. Check the link, or ask whoever invited you to send a new one.";
-    } else if (error.status === 410) {
-      message =
-        "This invite has expired. Ask whoever invited you to send a new one.";
-    } else if (error.status === 409) {
-      return (
-        <p role="alert" className="text-[13px] leading-relaxed text-muted">
-          This invite has already been accepted.{" "}
-          <a href="/" className="font-medium text-accent">
-            Sign in
-          </a>{" "}
-          instead.
-        </p>
-      );
+      return {
+        heading: "That invite won’t work.",
+        message:
+          "We couldn’t find that invite. Check the link, or ask whoever invited you to send a new one.",
+        action: "Go to Hearth",
+      };
+    }
+    if (error.status === 410) {
+      return {
+        heading: "That invite won’t work.",
+        message: "This invite has expired. Ask whoever invited you to send a new one.",
+        action: "Go to Hearth",
+      };
+    }
+    if (error.status === 409) {
+      return {
+        heading: "That invite was already used.",
+        message: "This invite has already been accepted.",
+        action: "Sign in",
+      };
     }
   }
+  return {
+    heading: "We couldn’t load that invite.",
+    message: "Something went wrong loading this invite. Please try again.",
+    action: "Go to Hearth",
+  };
+}
+
+function InvitePreviewError({ error }: { error: unknown }) {
+  const failure = inviteFailure(error);
   return (
     <div className="text-center">
       <h1 className="mb-1 mt-0.5 font-serif text-[27px] font-medium tracking-[-0.015em]">
-        That invite won’t work.
+        {failure.heading}
       </h1>
       <p role="alert" className="mb-5 text-[13px] leading-relaxed text-muted">
-        {message}
+        {failure.message}
       </p>
       {/* "/" lands a signed-in visitor on Overview and anyone else on sign-in,
-          so one link is the right way out for both. */}
+          so one link is the right way out for every case. */}
       <a
         href="/"
         className="block w-full rounded-[9px] bg-accent py-3 text-center text-[13.5px] font-semibold text-white"
       >
-        Go to Hearth
+        {failure.action}
       </a>
     </div>
   );
