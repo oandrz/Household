@@ -147,4 +147,26 @@ describe("HoldingLotsPanel", () => {
     await waitFor(() => expect(screen.getByLabelText("On")).toHaveValue("2026-10-01"));
     expect(screen.getByLabelText("As of")).toHaveValue("2026-10-01");
   });
+  // QA ISSUE-009. The unit is whatever the household typed, singular or
+  // plural, so no label may glue a letter or an article onto it: "grams" used
+  // to read "How many gramss", "What one grams was worth" and "Price per grams".
+  it.each(["gram", "grams"])(
+    "shows a unit called %s as a label, never bent into a sentence",
+    async (unit) => {
+      stubFetchRoutes({
+        ...meRoute("Asia/Singapore"),
+        "GET /api/v1/currencies": CURRENCIES,
+        "GET /api/v1/holdings/holding-1/events": { status: 200, body: { events: [] } },
+        "GET /api/v1/holdings/holding-1/valuations": { status: 200, body: { valuations: [] } },
+      });
+
+      renderWithRouter(<HoldingLotsPanel holding={{ ...holdingFixture(), unit }} onClose={() => {}} />);
+
+      expect(await screen.findByLabelText(`How many (${unit})`)).toBeInTheDocument();
+      expect(screen.getByLabelText("Price per unit (SGD)")).toBeInTheDocument();
+      expect(screen.getByText(/What one unit was worth on a given day\./)).toBeInTheDocument();
+      // The unit followed by an "s" it was not typed with is the old defect.
+      expect(document.body.textContent).not.toContain(`${unit}s`);
+    },
+  );
 });

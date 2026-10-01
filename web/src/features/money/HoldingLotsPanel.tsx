@@ -116,7 +116,11 @@ export function HoldingLotsPanel({
             </select>
           </label>
           <label className="flex flex-1 min-w-[9rem] flex-col gap-1.5">
-            <span className="text-xs font-semibold text-label">How many {holding.unit}s</span>
+            {/* The unit sits in brackets, like the currency beside it. It is
+                whatever the household typed, singular or plural, so it is never
+                given an "s" or put after "one" or "per": "grams" became
+                "How many gramss" and "Price per grams". */}
+            <span className="text-xs font-semibold text-label">How many ({holding.unit})</span>
             <input
               className={FIELD_CONTROL_CLASS}
               type="text"
@@ -226,12 +230,12 @@ export function HoldingLotsPanel({
       <section className="mt-2 flex flex-col gap-3 border-t border-hairline pt-4 first:mt-0 first:border-0 first:pt-0">
         <h3 className="text-[13px] font-semibold text-ink">Record a price</h3>
         <p className="text-[11.5px] leading-snug text-muted">
-          What one {holding.unit} was worth on a given day. Re-entering a day's
-          price replaces it.
+          What one unit was worth on a given day. Re-entering a day's price
+          replaces it.
         </p>
         <form onSubmit={submitPrice} className="flex flex-wrap items-end gap-3">
           <label className="flex flex-1 min-w-[9rem] flex-col gap-1.5">
-            <span className="text-xs font-semibold text-label">Price per {holding.unit} ({holding.currency})</span>
+            <span className="text-xs font-semibold text-label">Price per unit ({holding.currency})</span>
             <input
               className={FIELD_CONTROL_CLASS}
               type="text"
