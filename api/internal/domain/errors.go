@@ -55,6 +55,15 @@ var (
 	// arithmetic on figures already stored went wrong (a 500). This refusal
 	// at the door is what keeps that one from being reachable by a typo.
 	ErrAmountTooLarge = errors.New("amount is larger than Hearth records")
+	// ErrHoldingValueTooLarge is CheckHoldingValueWithinLimit's refusal: the
+	// most a holding has ever held, at one of its recorded prices, would be
+	// worth more than MaxAmountMinor. It is the caller's mistake (a 422).
+	//
+	// Don't reuse ErrAmountTooLarge for it. There one typed figure is past
+	// the ceiling; here every typed figure is inside it and only the two
+	// multiplied together are not, so "check it for extra digits" would
+	// point at a field that may be right.
+	ErrHoldingValueTooLarge = errors.New("holding would be worth more than Hearth records")
 	// ErrNoRate: there is no rate between two currencies. An FXRateProvider
 	// returns it, wrapped, for a pair it doesn't cover. It's the ONLY
 	// conversion failure a screen may answer by leaving an amount out of a

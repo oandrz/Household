@@ -56,6 +56,11 @@ const MaxAmountMinor int64 = 100_000_000_000_000
 // Call it only on a figure a person supplied. A figure this code computed --
 // a balance, a total, a rollover -- is a sum of many amounts and may
 // legitimately be larger.
+//
+// One computed figure IS held to MaxAmountMinor, by its own rule: a holding's
+// worth, quantity times unit price (CheckHoldingValueWithinLimit). It is a
+// product of two typed figures rather than a sum of many rows, so a single
+// typo can take it past an int64.
 func CheckAmountWithinLimit(minor int64) error {
 	// Two comparisons, not one on the absolute value: negating math.MinInt64
 	// returns itself, so an "abs(minor) > max" check would let it through.
