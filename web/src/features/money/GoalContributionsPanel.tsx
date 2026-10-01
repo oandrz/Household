@@ -101,7 +101,7 @@ function ContributionRow({
             <button
               type="button"
               onClick={onAskToDelete}
-              className="min-h-11 text-[11.5px] font-semibold text-danger sm:min-h-0"
+              className="min-h-11 text-[11.5px] font-semibold text-danger lg:min-h-0"
             >
               {GOAL_COPY.deleteContributionTrigger}
             </button>
@@ -115,10 +115,10 @@ function ContributionRow({
             <button
               type="button"
               onClick={onCancelDelete}
-              // min-h-11/sm:min-h-0: py-2.5 alone measured short of the 44px
+              // min-h-11/lg:min-h-0: py-2.5 alone measured short of the 44px
               // floor at this text size -- TransactionFilters.tsx's own
               // SELECT_CLASS comment has the measured numbers.
-              className="min-h-11 flex-1 rounded-lg border border-hairline py-2.5 text-center text-[12.5px] font-semibold text-label sm:min-h-0 sm:py-1.5"
+              className="min-h-11 flex-1 rounded-lg border border-hairline py-2.5 text-center text-[12.5px] font-semibold text-label lg:min-h-0 lg:py-1.5"
             >
               {GOAL_COPY.deleteContributionCancelAction}
             </button>
@@ -126,7 +126,7 @@ function ContributionRow({
               type="button"
               disabled={deleting}
               onClick={onConfirmDelete}
-              className="min-h-11 flex-1 rounded-lg bg-danger py-2.5 text-center text-[12.5px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60 sm:min-h-0 sm:py-1.5"
+              className="min-h-11 flex-1 rounded-lg bg-danger py-2.5 text-center text-[12.5px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60 lg:min-h-0 lg:py-1.5"
             >
               {GOAL_COPY.deleteContributionConfirmAction}
             </button>
@@ -269,7 +269,7 @@ export function GoalContributionsPanel({
         <button
           type="submit"
           disabled={isAdding}
-          className="min-h-11 rounded-lg bg-accent py-2.5 text-center text-[13px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60 sm:min-h-0"
+          className="min-h-11 rounded-lg bg-accent py-2.5 text-center text-[13px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60 lg:min-h-0"
         >
           Add
         </button>

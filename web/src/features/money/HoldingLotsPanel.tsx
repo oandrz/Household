@@ -147,7 +147,7 @@ export function HoldingLotsPanel({
               required
             />
           </label>
-          <button type="submit" className="min-h-11 rounded-lg bg-accent px-3.5 py-2 text-[13px] font-semibold text-white sm:min-h-0" disabled={recordEvent.isPending}>
+          <button type="submit" className="min-h-11 rounded-lg bg-accent px-3.5 py-2 text-[13px] font-semibold text-white lg:min-h-0" disabled={recordEvent.isPending}>
             Record
           </button>
         </form>
@@ -183,7 +183,7 @@ export function HoldingLotsPanel({
                       // per-entry flag, not deleteEvent.isPending: one mutation
                       // serves every row, so its flag would grey every row.
                       disabled={entryRemoval.isPending(event.id)}
-                      className="min-h-11 rounded-lg bg-danger px-3.5 py-2 text-[13px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60 sm:min-h-0"
+                      className="min-h-11 rounded-lg bg-danger px-3.5 py-2 text-[13px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60 lg:min-h-0"
                       onClick={() =>
                         void entryRemoval.confirm(async () => {
                           // A failure shows in this section's own error line,
@@ -202,12 +202,12 @@ export function HoldingLotsPanel({
                     >
                       Remove
                     </button>
-                    <button type="button" className="min-h-11 rounded-lg border border-hairline bg-card px-3.5 py-2 text-[13px] font-semibold text-ink sm:min-h-0" onClick={entryRemoval.cancel}>
+                    <button type="button" className="min-h-11 rounded-lg border border-hairline bg-card px-3.5 py-2 text-[13px] font-semibold text-ink lg:min-h-0" onClick={entryRemoval.cancel}>
                       Keep
                     </button>
                   </span>
                 ) : (
-                  <button type="button" className="min-h-11 rounded-lg border border-hairline bg-card px-3.5 py-2 text-[13px] font-semibold text-ink sm:min-h-0" onClick={() => entryRemoval.ask(event.id)}>
+                  <button type="button" className="min-h-11 rounded-lg border border-hairline bg-card px-3.5 py-2 text-[13px] font-semibold text-ink lg:min-h-0" onClick={() => entryRemoval.ask(event.id)}>
                     Remove
                   </button>
                 )}
@@ -250,7 +250,7 @@ export function HoldingLotsPanel({
           </label>
           <button
             type="submit"
-            className="min-h-11 rounded-lg bg-accent px-3.5 py-2 text-[13px] font-semibold text-white sm:min-h-0"
+            className="min-h-11 rounded-lg bg-accent px-3.5 py-2 text-[13px] font-semibold text-white lg:min-h-0"
             disabled={recordValuation.isPending}
           >
             Save price

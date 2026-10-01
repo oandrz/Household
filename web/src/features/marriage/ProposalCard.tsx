@@ -27,13 +27,13 @@ type Action = "agree" | "park" | "withdraw";
 // written, so `${primary} bg-danger` is a coin toss between accent and danger.
 // DiscardDraftControl.tsx spells its own danger button out for the same reason.
 const primary =
-  "min-h-11 rounded-lg bg-accent px-3.5 py-2 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60 sm:min-h-0";
+  "min-h-11 rounded-lg bg-accent px-3.5 py-2 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60 lg:min-h-0";
 const secondary =
-  "min-h-11 rounded-lg border border-callout-border bg-card px-3.5 py-2 text-xs font-semibold text-label disabled:cursor-not-allowed disabled:opacity-60 sm:min-h-0";
+  "min-h-11 rounded-lg border border-callout-border bg-card px-3.5 py-2 text-xs font-semibold text-label disabled:cursor-not-allowed disabled:opacity-60 lg:min-h-0";
 const dangerGhost =
-  "min-h-11 rounded-lg border border-callout-border bg-card px-3.5 py-2 text-xs font-semibold text-danger disabled:cursor-not-allowed disabled:opacity-60 sm:min-h-0";
+  "min-h-11 rounded-lg border border-callout-border bg-card px-3.5 py-2 text-xs font-semibold text-danger disabled:cursor-not-allowed disabled:opacity-60 lg:min-h-0";
 const dangerPrimary =
-  "min-h-11 flex-1 rounded-lg bg-danger px-3.5 py-2 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60 sm:min-h-0";
+  "min-h-11 flex-1 rounded-lg bg-danger px-3.5 py-2 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60 lg:min-h-0";
 const box = "mt-3 rounded-[10px] border border-hairline bg-card p-3";
 const alertLine = "mt-2 text-xs leading-snug text-danger";
 // Colourless: every line below adds its own colour, for the same

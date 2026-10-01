@@ -230,10 +230,10 @@ export function BillsPage() {
               data-testid="bills-add"
               disabled={noAccounts}
               onClick={() => setModalBill("new")}
-              // min-h-11/sm:min-h-0: TransactionFilters.tsx's own
+              // min-h-11/lg:min-h-0: TransactionFilters.tsx's own
               // SELECT_CLASS comment has the measured reason py-2 alone
               // falls short of the 44px floor on a phone.
-              className="min-h-11 rounded-lg bg-accent px-3.5 py-2 text-[13px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60 sm:min-h-0"
+              className="min-h-11 rounded-lg bg-accent px-3.5 py-2 text-[13px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60 lg:min-h-0"
             >
               {BILL_COPY.addBill}
             </button>
@@ -269,7 +269,7 @@ export function BillsPage() {
               <Link
                 to="/money"
                 data-testid="bills-add-account"
-                className="inline-flex min-h-11 items-center rounded-lg bg-accent px-5 py-2.5 text-[13px] font-semibold text-white sm:min-h-0"
+                className="inline-flex min-h-11 items-center rounded-lg bg-accent px-5 py-2.5 text-[13px] font-semibold text-white lg:min-h-0"
               >
                 {BILL_COPY.noAccountsAction}
               </Link>
@@ -284,7 +284,7 @@ export function BillsPage() {
                 type="button"
                 data-testid="bills-create-first"
                 onClick={() => setModalBill("new")}
-                className="min-h-11 rounded-lg bg-accent px-5 py-2.5 text-[13px] font-semibold text-white sm:min-h-0"
+                className="min-h-11 rounded-lg bg-accent px-5 py-2.5 text-[13px] font-semibold text-white lg:min-h-0"
               >
                 {BILL_COPY.createFirstBill}
               </button>

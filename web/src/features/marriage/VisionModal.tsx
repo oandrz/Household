@@ -297,7 +297,7 @@ export function VisionModal({
                     data-testid="vision-conflict-reload"
                     disabled={draft.isReloading}
                     onClick={() => void draft.handleReloadAndDiscard()}
-                    className="min-h-11 self-start rounded-lg border border-hairline px-3 py-2.5 text-[12.5px] font-semibold text-accent disabled:cursor-not-allowed disabled:opacity-60 sm:min-h-0 sm:py-1.5"
+                    className="min-h-11 self-start rounded-lg border border-hairline px-3 py-2.5 text-[12.5px] font-semibold text-accent disabled:cursor-not-allowed disabled:opacity-60 lg:min-h-0 lg:py-1.5"
                   >
                     {VISION_COPY.reloadAndDiscardChanges}
                   </button>

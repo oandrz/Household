@@ -109,10 +109,10 @@ export function NewSpaceModal({
               type="button"
               onClick={() => setVisibility("everyone")}
               aria-pressed={visibility === "everyone"}
-              // min-h-11/sm:min-h-0: py-2.5 alone measured short of the 44px
+              // min-h-11/lg:min-h-0: py-2.5 alone measured short of the 44px
               // floor at this text size -- TransactionFilters.tsx's own
               // SELECT_CLASS comment has the measured numbers.
-              className={`min-h-11 rounded-full px-3.5 py-2.5 text-[12.5px] font-semibold sm:min-h-0 sm:py-1.5 ${
+              className={`min-h-11 rounded-full px-3.5 py-2.5 text-[12.5px] font-semibold lg:min-h-0 lg:py-1.5 ${
                 visibility === "everyone" ? "bg-accent text-white" : "border border-hairline text-label"
               }`}
             >
@@ -122,7 +122,7 @@ export function NewSpaceModal({
               type="button"
               onClick={() => setVisibility("parents_only")}
               aria-pressed={visibility === "parents_only"}
-              className={`min-h-11 rounded-full px-3.5 py-2.5 text-[12.5px] font-semibold sm:min-h-0 sm:py-1.5 ${
+              className={`min-h-11 rounded-full px-3.5 py-2.5 text-[12.5px] font-semibold lg:min-h-0 lg:py-1.5 ${
                 visibility === "parents_only" ? "bg-accent text-white" : "border border-hairline text-label"
               }`}
             >
@@ -138,7 +138,7 @@ export function NewSpaceModal({
               type="button"
               disabled
               aria-pressed={false}
-              className="min-h-11 rounded-full border border-hairline px-3.5 py-2.5 text-[12.5px] font-semibold text-muted disabled:cursor-not-allowed sm:min-h-0 sm:py-1.5"
+              className="min-h-11 rounded-full border border-hairline px-3.5 py-2.5 text-[12.5px] font-semibold text-muted disabled:cursor-not-allowed lg:min-h-0 lg:py-1.5"
             >
               Custom <span className="text-[10px] font-medium">· not built</span>
             </button>

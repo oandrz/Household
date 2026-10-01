@@ -14,7 +14,7 @@
 // An SVG carries its own shape, so it renders identically on a phone with no
 // symbol font at all. `currentColor` keeps each one inheriting the colour of
 // the control holding it, exactly as the character did, and the caller passes
-// its own size class because these sit in controls that shrink at `sm`/`lg`.
+// its own size class because these sit in controls that shrink at `lg`.
 //
 // Each icon is decorative: every control using one already carries its
 // meaning in an `aria-label`, so `aria-hidden` keeps a screen reader from

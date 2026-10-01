@@ -181,7 +181,7 @@ export function InviteMemberModal({
           <button
             type="button"
             onClick={onClose}
-            className="min-h-11 rounded-lg border border-hairline px-4 py-2 text-[13px] font-semibold text-label sm:min-h-0"
+            className="min-h-11 rounded-lg border border-hairline px-4 py-2 text-[13px] font-semibold text-label lg:min-h-0"
           >
             Done
           </button>
@@ -229,7 +229,7 @@ export function InviteMemberModal({
             {availableChannels.map((option) => (
               <label
                 key={option}
-                className="flex min-h-11 items-center gap-2 text-[13px] text-ink sm:min-h-0"
+                className="flex min-h-11 items-center gap-2 text-[13px] text-ink lg:min-h-0"
               >
                 <input
                   type="radio"
@@ -332,7 +332,7 @@ export function InviteMemberModal({
             <button
               type="button"
               onClick={onClose}
-              className="min-h-11 self-start rounded-lg border border-hairline px-4 py-2 text-[13px] font-semibold text-label sm:min-h-0"
+              className="min-h-11 self-start rounded-lg border border-hairline px-4 py-2 text-[13px] font-semibold text-label lg:min-h-0"
             >
               Cancel
             </button>
