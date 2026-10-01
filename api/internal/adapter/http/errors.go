@@ -729,6 +729,19 @@ var domainErrorResponses = []domainErrorResponse{
 		message:   "That would sell more than this holding has ever held.",
 	},
 	{
+		// Three writes reach this, so the sentence names neither a field nor
+		// an action: a price on a large holding, a purchase on a holding with
+		// a high price, and deleting a sale (which makes the holding larger
+		// at every later date). It names both figures because either may be
+		// the mistyped one. Not AMOUNT_TOO_LARGE: every figure in the request
+		// is inside that ceiling, and "check it for extra digits" would point
+		// at a field that may be right.
+		sentinels: []error{domain.ErrHoldingValueTooLarge},
+		status:    http.StatusUnprocessableEntity,
+		code:      "HOLDING_VALUE_TOO_LARGE",
+		message:   "That would make this holding worth more than Hearth can record. Check the quantity and the price for extra digits.",
+	},
+	{
 		sentinels: []error{domain.ErrHoldingEventQuantityNotPositive},
 		status:    http.StatusUnprocessableEntity,
 		code:      "INVALID_QUANTITY",
