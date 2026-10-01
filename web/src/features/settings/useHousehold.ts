@@ -1,4 +1,5 @@
-// Fetch orchestration for CurrencyPanel: GET and PATCH /household.
+// Fetch orchestration for CurrencyPanel and TimeZoneRow: GET and PATCH
+// /household.
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { fetchAndParse } from "../../api/client";
 import { householdSchema, type Household } from "../auth/schemas";
@@ -20,7 +21,7 @@ export function useUpdateHousehold() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (
-      vars: { showSecondaryCurrency: boolean } | { primaryCurrency: string },
+      vars: { showSecondaryCurrency: boolean } | { primaryCurrency: string } | { timezone: string },
     ): Promise<Household> => {
       return fetchAndParse(householdSchema, "/api/v1/household", {
         method: "PATCH",

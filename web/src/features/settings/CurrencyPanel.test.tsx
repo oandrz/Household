@@ -167,7 +167,7 @@ describe("CurrencyPanel", () => {
     // non-owner's label became a plain span.
     expect(screen.getByLabelText("Primary currency")).toBe(input);
     fireEvent.change(input, { target: { value: "usd" } });
-    fireEvent.click(screen.getByRole("button", { name: /save/i }));
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
     await waitFor(() => {
       const call = fetchMock.mock.calls.find(
@@ -190,7 +190,7 @@ describe("CurrencyPanel", () => {
     renderPanel();
 
     const input = await screen.findByDisplayValue("SGD");
-    const save = screen.getByRole("button", { name: /save/i });
+    const save = screen.getByRole("button", { name: "Save" });
 
     // Unchanged from the saved value.
     expect(save).toBeDisabled();
@@ -218,7 +218,7 @@ describe("CurrencyPanel", () => {
 
     const input = await screen.findByDisplayValue("SGD");
     fireEvent.change(input, { target: { value: "ZZZ" } });
-    fireEvent.click(screen.getByRole("button", { name: /save/i }));
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
     expect(await screen.findByText("That currency code is not valid.")).toBeInTheDocument();
     // The rejected attempt stays on screen for the owner to correct, rather

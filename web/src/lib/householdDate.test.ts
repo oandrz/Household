@@ -3,7 +3,7 @@
 // else, and the clock is stopped at an instant where the two are on
 // different dates.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { monthIn, monthNameIn, todayIn, yearIn } from "./householdDate";
+import { longDateIn, monthIn, monthNameIn, todayIn, yearIn } from "./householdDate";
 
 const ORIGINAL_TZ = process.env.TZ;
 
@@ -86,5 +86,14 @@ describe("yearIn", () => {
 
     expect(yearIn("Asia/Singapore")).toBe(2027);
     expect(yearIn("UTC")).toBe(2026);
+  });
+});
+
+describe("longDateIn", () => {
+  it("writes out the household's date for a person to read", () => {
+    vi.setSystemTime(new Date("2026-09-30T23:00:00Z"));
+
+    expect(longDateIn("Asia/Singapore")).toBe("Thu, 1 Oct 2026");
+    expect(longDateIn("Pacific/Pago_Pago")).toBe("Wed, 30 Sep 2026");
   });
 });

@@ -28,9 +28,34 @@ const ORIGINAL_TZ = process.env.TZ;
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
   if (ORIGINAL_TZ === undefined) delete process.env.TZ;
   else process.env.TZ = ORIGINAL_TZ;
 });
+
+const SIGNED_IN = {
+  user: { id: "u1", email: "founder@example.test", displayName: "Ade", avatarInitial: "A" },
+  household: {
+    id: "h1", name: "Ade & Kris", familyName: "Ade & Kris",
+    primaryCurrency: "BRL", showSecondaryCurrency: false,
+    secondaryCurrency: "BRL", fxRateMode: "auto", timezone: "Asia/Singapore",
+  },
+  membership: {
+    id: "m1", householdId: "h1", userId: "u1", role: "owner",
+    capabilities: ["calendar", "chores", "money", "marriage"],
+  },
+  capabilities: ["calendar", "chores", "money", "marriage"],
+  spaces: [],
+};
+
+// Fills the four fields the form always shows and submits it.
+async function fillAndSubmit() {
+  fireEvent.change(await screen.findByLabelText("Household name"), { target: { value: "Ade & Kris" } });
+  fireEvent.change(screen.getByLabelText("Primary currency"), { target: { value: "BRL" } });
+  fireEvent.change(screen.getByLabelText("Your name"), { target: { value: "Ade" } });
+  fireEvent.change(screen.getByLabelText("Password"), { target: { value: "a-long-enough-password" } });
+  fireEvent.click(screen.getByRole("button", { name: "Create household" }));
+}
 
 describe("SignUpCompleteScreen", () => {
   it("shows the verified address read-only", async () => {
@@ -145,6 +170,77 @@ describe("SignUpCompleteScreen", () => {
         password: "a-long-enough-password",
       });
     });
+  });
+
+  // The zone is read from the device, so the form has no field for it. A
+  // field nobody needs to fill is a field someone will fill wrongly.
+  it("shows no time zone field while the browser's zone is usable", async () => {
+    stubFetchRoutes(preview);
+    renderWithRouter(<SignUpCompleteScreen token="tok" />);
+
+    await screen.findByLabelText("Household name");
+    expect(screen.queryByLabelText("Time zone")).not.toBeInTheDocument();
+  });
+
+  // The server refuses a zone it cannot load rather than guess one. Without
+  // a way to choose another, that refusal would be a wall: an error about a
+  // value the person never saw and cannot change.
+  it("asks for a time zone when the server refuses the browser's, and sends the one chosen", async () => {
+    process.env.TZ = "America/Sao_Paulo";
+    const posted: unknown[] = [];
+    stubFetchRoutes({
+      ...preview,
+      "POST /api/v1/auth/sign-up/tok/complete": [
+        {
+          status: 422,
+          body: { error: { code: "INVALID_TIMEZONE", message: "That time zone is not recognised." } },
+          capture: (body: unknown) => posted.push(body),
+        },
+        { status: 200, body: SIGNED_IN, capture: (body: unknown) => posted.push(body) },
+      ],
+    });
+    renderWithRouter(<SignUpCompleteScreen token="tok" />);
+    await fillAndSubmit();
+
+    const zone = await screen.findByLabelText("Time zone");
+    expect(screen.getByRole("alert")).toHaveTextContent("That time zone is not recognised.");
+    // Every other field keeps what was typed.
+    expect(screen.getByLabelText("Household name")).toHaveValue("Ade & Kris");
+
+    fireEvent.change(zone, { target: { value: "Asia/Singapore" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create household" }));
+
+    await waitFor(() => expect(posted).toHaveLength(2));
+    expect(posted[0]).toMatchObject({ timezone: "America/Sao_Paulo" });
+    expect(posted[1]).toMatchObject({ timezone: "Asia/Singapore" });
+  });
+
+  it("asks for a time zone from the start when the browser cannot name its own", async () => {
+    vi.spyOn(Intl.DateTimeFormat.prototype, "resolvedOptions").mockReturnValue({
+      timeZone: undefined,
+    } as unknown as Intl.ResolvedDateTimeFormatOptions);
+    let posted: unknown = null;
+    stubFetchRoutes({
+      ...preview,
+      "POST /api/v1/auth/sign-up/tok/complete": {
+        status: 200,
+        body: SIGNED_IN,
+        capture: (body: unknown) => {
+          posted = body;
+        },
+      },
+    });
+    renderWithRouter(<SignUpCompleteScreen token="tok" />);
+
+    expect(await screen.findByLabelText("Time zone")).toHaveValue("");
+    await fillAndSubmit();
+    // Nothing is sent until a zone is chosen: the server would only refuse it.
+    expect(await screen.findByRole("alert")).toHaveTextContent("Choose a time zone.");
+    expect(posted).toBeNull();
+
+    fireEvent.change(screen.getByLabelText("Time zone"), { target: { value: "Asia/Singapore" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create household" }));
+    await waitFor(() => expect(posted).toMatchObject({ timezone: "Asia/Singapore" }));
   });
 
   it("explains a spent token and points back at sign-up", async () => {

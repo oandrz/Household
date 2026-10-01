@@ -59,3 +59,20 @@ export function yearIn(zone: string, now: Date = new Date()): number {
 export function monthNameIn(zone: string, now: Date = new Date()): string {
   return new Intl.DateTimeFormat("en-US", { timeZone: zone, month: "long" }).format(now);
 }
+
+// Today in the household's zone, written out for a person to read and check
+// against their own calendar: "Thu, 1 Oct 2026".
+export function longDateIn(zone: string, now: Date = new Date()): string {
+  // Assembled from named parts, so the order is ours and only the words come
+  // from the locale. en-US, like every other month name in the app: en-GB
+  // abbreviates September as "Sept".
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: zone,
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  }).formatToParts(now);
+  const read = (type: Intl.DateTimeFormatPartTypes) => parts.find((p) => p.type === type)?.value ?? "";
+  return `${read("weekday")}, ${read("day")} ${read("month")} ${read("year")}`;
+}

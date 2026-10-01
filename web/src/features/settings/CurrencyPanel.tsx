@@ -13,6 +13,7 @@ import { apiErrorMessage } from "../../api/errorMessage";
 import { useCurrencies, useMe } from "../auth/useAuth";
 import { ToggleSwitch } from "../../components/ToggleSwitch";
 import { currencyLabel } from "./copy";
+import { TimeZoneRow } from "./TimeZoneRow";
 import { useHousehold, useUpdateHousehold } from "./useHousehold";
 
 // Mirrors the backend's own rule (api/internal/domain/money.go's NewMoney:
@@ -176,6 +177,10 @@ export function CurrencyPanel() {
               {apiErrorMessage(updateHousehold.error, "Something went wrong saving that. Please try again.")}
             </p>
           )}
+
+          {/* The "region" half of this card. Its own component, with its own
+              save and its own error line. */}
+          <TimeZoneRow />
         </div>
       )}
     </section>

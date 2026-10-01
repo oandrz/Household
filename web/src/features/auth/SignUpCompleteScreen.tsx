@@ -4,6 +4,10 @@
 // proven the address. See SignUpScreen.tsx (step 1) for why the address is
 // collected first, on a separate screen, before any of this.
 //
+// The household's time zone is collected here too, without a field: it is
+// read from the device. A "Time zone" select appears only when that fails --
+// the browser cannot name its zone, or the server refuses the one it named.
+//
 // The design's own authCreate block has no currency field (Task 22 is what
 // introduced a currency choice to this codebase at all) -- everything else
 // here (the card shell, the field markup) is taken verbatim from
@@ -14,6 +18,7 @@ import { Link, useNavigate } from "@tanstack/react-router";
 import { ApiError } from "../../api/client";
 import { apiErrorMessage } from "../../api/errorMessage";
 import { Field } from "../../components/Field";
+import { TimeZoneSelect } from "../../components/TimeZoneSelect";
 import { browserTimeZone } from "../../lib/browserTimeZone";
 import { type Currency, type SignUpPreview } from "./schemas";
 import { useCompleteSignUp, useCurrencies, useSignUpPreview } from "./useAuth";
@@ -101,6 +106,12 @@ function CompleteSignUpForm({
   const [currency, setCurrency] = useState("");
   const [displayName, setDisplayName] = useState("");
   const [password, setPassword] = useState("");
+  // The household's time zone, taken from the device. There is normally no
+  // field for it. askForTimeZone turns one on in the two cases where the
+  // device's answer cannot be used, so that the server's refusal of a zone
+  // is something the person can act on rather than a dead end.
+  const [timeZone, setTimeZone] = useState(() => browserTimeZone());
+  const [askForTimeZone, setAskForTimeZone] = useState(() => browserTimeZone() === "");
   // unknown, not ApiError | null: an onError handler receives whatever the
   // mutation rejected with, which can be a network TypeError or a zod
   // ParseError, not only an ApiError -- matching SignUpScreen's and
@@ -141,6 +152,10 @@ function CompleteSignUpForm({
       setValidationError("Password must be at least 12 characters.");
       return;
     }
+    if (!timeZone) {
+      setValidationError("Choose a time zone.");
+      return;
+    }
     setValidationError(null);
     setError(null);
 
@@ -150,9 +165,7 @@ function CompleteSignUpForm({
         householdName: trimmedHouseholdName,
         displayName: trimmedDisplayName,
         primaryCurrency: currency,
-        // Read at submit, not at render: the form has no field for it, so
-        // there is no state for it to go stale in.
-        timezone: browserTimeZone(),
+        timezone: timeZone,
         password,
       },
       {
@@ -164,7 +177,13 @@ function CompleteSignUpForm({
         // survives it, so the person must be able to correct one field
         // (a taken currency? an unmet password rule the client guard above
         // didn't anticipate?) and retry, rather than retype everything.
-        onError: (err) => setError(err),
+        onError: (err) => {
+          setError(err);
+          // Branches on the code, not the message, like SignUpTokenError.
+          if (err instanceof ApiError && err.code === "INVALID_TIMEZONE") {
+            setAskForTimeZone(true);
+          }
+        },
       },
     );
   }
@@ -237,6 +256,22 @@ function CompleteSignUpForm({
             )}
           </select>
         </Field>
+
+        {askForTimeZone && (
+          <Field label="Time zone" htmlFor="sign-up-time-zone">
+            <TimeZoneSelect
+              id="sign-up-time-zone"
+              value={timeZone}
+              onChange={setTimeZone}
+              // min-w-0 for the reason the wrapper below gives: one long
+              // <option> must not widen the card past a phone's width.
+              className="min-w-0 rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px]"
+            />
+            <p className="text-[11px] text-muted">
+              Decides which day is “today” for your household. Change it any time in Settings.
+            </p>
+          </Field>
+        )}
 
         <Field label="Your name" htmlFor="sign-up-name">
           <input
