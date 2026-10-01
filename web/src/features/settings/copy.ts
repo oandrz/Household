@@ -31,23 +31,35 @@ export function memberBadgeLabel(role: string): string {
   return role;
 }
 
-// A Space carries `visibility` and an optional `requiredCapability`, but no
-// single "audience" field -- the design's three builtin rows ("Parents",
-// "🔒 Parents only", "Everyone") are derived from both together:
-// VisibilityParentsOnly is the structural lock (Marriage); a
-// requiredCapability without that lock reads as "Parents" only because
-// every capability-gated builtin space in this household happens to be
-// parent-held today (Money), not because the domain forbids a limited
-// member from ever holding one -- there is no literal per-space audience
-// field to read a stricter answer from. Documented here rather than
-// asserted with more confidence than the data supports.
-export function spaceAudienceLabel(space: {
-  visibility: string;
-  requiredCapability?: string;
-}): string {
-  if (space.visibility === "parents_only") return "🔒 Parents only";
-  if (space.requiredCapability) return "Parents";
-  return "Everyone";
+// Who can open a space, in the design's words: "🔒 Parents only", "Parents",
+// "Everyone". A space carries no audience field, so the answer is worked out
+// the way the server works it out (domain.VisibleSpaces): the visibility
+// first, then who holds the capability the space requires.
+//
+// An owner holds every capability, so "Parents" is always part of a gated
+// space's audience. A kid can be given Money, and the label has to count the
+// kids who have it: "Parents" alone, printed beside a members list with Money
+// switched on for three kids, told a parent the opposite of the truth.
+//
+// `members` is undefined until the member list has loaded, and stays so if it
+// cannot be read. A gated space then gets no label at all: nothing is better
+// than a guess about who can see the household's money.
+//
+// Don't make "everyone" the fallback for a visibility this does not know.
+// The server shows such a space to owners only, so the label says the same.
+export function spaceAudienceLabel(
+  space: { visibility: string; requiredCapability?: string },
+  members: { role: string; capabilities: string[] }[] | undefined,
+): string {
+  if (space.visibility !== "everyone") return "🔒 Parents only";
+  const required = space.requiredCapability;
+  if (!required) return "Everyone";
+  if (members === undefined) return "";
+  const kids = members.filter(
+    (member) => member.role === "limited" && member.capabilities.includes(required),
+  ).length;
+  if (kids === 0) return "Parents";
+  return kids === 1 ? "Parents and 1 kid" : `Parents and ${kids} kids`;
 }
 
 // The symbol now comes from GET /api/v1/currencies rather than a list

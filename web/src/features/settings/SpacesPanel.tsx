@@ -8,11 +8,15 @@ import { useState } from "react";
 import { useMe } from "../auth/useAuth";
 import { spaceAudienceLabel } from "./copy";
 import { NewSpaceModal } from "./NewSpaceModal";
+import { useHouseholdMembers } from "./useHouseholdMembers";
 import { useSpaces } from "./useSpaces";
 
 export function SpacesPanel() {
   const me = useMe();
   const spaces = useSpaces();
+  // The same cache entry MembersPanel reads on this page, so an access switch
+  // flipped there refetches this list and the audience below follows it.
+  const members = useHouseholdMembers();
   const [newSpaceOpen, setNewSpaceOpen] = useState(false);
   const isOwner = me.data?.membership.role === "owner";
 
@@ -40,7 +44,7 @@ export function SpacesPanel() {
                   sub-pages yet), so, like the members list's omitted age
                   suffix, it is left out rather than invented. */}
               <span className="text-ink">{space.name}</span>
-              <span className="text-muted">{spaceAudienceLabel(space)}</span>
+              <span className="text-muted">{spaceAudienceLabel(space, members.data)}</span>
             </div>
           ))}
 
