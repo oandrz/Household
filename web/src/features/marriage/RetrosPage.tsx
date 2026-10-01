@@ -133,10 +133,10 @@ export function RetrosPage() {
               data-testid="retros-start"
               onClick={handleStart}
               disabled={starting}
-              // min-h-11/sm:min-h-0: TransactionFilters.tsx's own
+              // min-h-11/lg:min-h-0: TransactionFilters.tsx's own
               // SELECT_CLASS comment has the measured reason py-2 alone
               // falls short of the 44px floor on a phone.
-              className="min-h-11 rounded-lg bg-accent px-3.5 py-2 text-[13px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60 sm:min-h-0"
+              className="min-h-11 rounded-lg bg-accent px-3.5 py-2 text-[13px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60 lg:min-h-0"
             >
               {startLabel}
             </button>
@@ -174,7 +174,7 @@ export function RetrosPage() {
                 data-testid="retros-create-first"
                 onClick={handleStart}
                 disabled={starting}
-                className="min-h-11 rounded-lg bg-accent px-5 py-2.5 text-[13px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60 sm:min-h-0"
+                className="min-h-11 rounded-lg bg-accent px-5 py-2.5 text-[13px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60 lg:min-h-0"
               >
                 {RETRO_COPY.createFirstRetro}
               </button>
@@ -210,7 +210,7 @@ export function RetrosPage() {
                     type="button"
                     data-testid="retro-edit"
                     onClick={() => setEditingMonth(selectedMonth)}
-                    className="min-h-11 rounded-lg border border-hairline px-3 py-1.5 text-[12.5px] font-semibold text-accent sm:min-h-0"
+                    className="min-h-11 rounded-lg border border-hairline px-3 py-1.5 text-[12.5px] font-semibold text-accent lg:min-h-0"
                   >
                     {RETRO_COPY.editRetro}
                   </button>

@@ -96,7 +96,7 @@ export function CarryOverList({
               aria-label={RETRO_COPY.carryOverButton(action.body)}
               disabled={disabled || carryingId === action.id}
               onClick={() => void handleCarryOver(action)}
-              className="min-h-11 flex-none rounded-lg border border-hairline px-3 text-[12px] font-semibold text-accent disabled:cursor-not-allowed disabled:opacity-60 sm:min-h-0 sm:py-1.5"
+              className="min-h-11 flex-none rounded-lg border border-hairline px-3 text-[12px] font-semibold text-accent disabled:cursor-not-allowed disabled:opacity-60 lg:min-h-0 lg:py-1.5"
             >
               {RETRO_COPY.carryOverButtonLabel}
             </button>

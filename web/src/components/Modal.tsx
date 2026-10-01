@@ -170,9 +170,10 @@ export function Modal({
             type="button"
             onClick={onClose}
             aria-label="Close"
-            // 44px floor on phones, restoring at `sm`: modals aren't tied to
-            // the shell's `lg` nav switch, so the pointer breakpoint is fine.
-            className="grid h-11 w-11 flex-none place-items-center rounded-lg bg-canvas text-[13px] text-label sm:h-7 sm:w-7"
+            // 44px floor on phones and tablets, restoring at `lg`: a modal on
+            // a 768px tablet is tapped like anything else (fieldClasses.ts
+            // states the rule).
+            className="grid h-11 w-11 flex-none place-items-center rounded-lg bg-canvas text-[13px] text-label lg:h-7 lg:w-7"
           >
             <CloseIcon />
           </button>

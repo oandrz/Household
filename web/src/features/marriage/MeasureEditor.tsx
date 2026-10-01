@@ -37,7 +37,7 @@ export function MeasureEditor({
             value={measure.label}
             placeholder={VISION_COPY.modalMeasureLabelLabel}
             onChange={(event) => onChange({ ...measure, label: event.target.value })}
-            className="min-h-11 rounded-lg border border-hairline bg-card px-3 py-2 text-[13px] sm:min-h-0"
+            className="min-h-11 rounded-lg border border-hairline bg-card px-3 py-2 text-[13px] lg:min-h-0"
           />
         </div>
         <button
@@ -45,7 +45,7 @@ export function MeasureEditor({
           data-testid="vision-modal-remove-measure"
           aria-label={VISION_COPY.removeMeasure(measure.label)}
           onClick={onRemove}
-          className="flex h-11 w-11 flex-none items-center justify-center text-[15px] text-danger sm:h-7 sm:w-7"
+          className="flex h-11 w-11 flex-none items-center justify-center text-[15px] text-danger lg:h-7 lg:w-7"
         >
           <CloseIcon />
         </button>
@@ -60,7 +60,7 @@ export function MeasureEditor({
           data-testid="vision-modal-measure-mode"
           value={measure.kind}
           onChange={(event) => onChange(setMeasureMode(measure, event.target.value === "linked" ? "linked" : "typed"))}
-          className="min-h-11 rounded-lg border border-hairline bg-card px-3 py-2 text-[13px] sm:min-h-0"
+          className="min-h-11 rounded-lg border border-hairline bg-card px-3 py-2 text-[13px] lg:min-h-0"
         >
           <option value="typed">{VISION_COPY.modalMeasureModeTyped}</option>
           <option value="linked">{VISION_COPY.modalMeasureModeLinked}</option>
@@ -84,7 +84,7 @@ export function MeasureEditor({
               inputMode="numeric"
               value={String(measure.current)}
               onChange={(event) => onChange({ ...measure, current: parseWholeNumber(event.target.value) })}
-              className="tabular min-h-11 rounded-lg border border-hairline bg-card px-3 py-2 text-[13px] sm:min-h-0"
+              className="tabular min-h-11 rounded-lg border border-hairline bg-card px-3 py-2 text-[13px] lg:min-h-0"
             />
           </div>
           <div className="flex flex-col gap-1.5">
@@ -98,7 +98,7 @@ export function MeasureEditor({
               inputMode="numeric"
               value={String(measure.target)}
               onChange={(event) => onChange({ ...measure, target: parseWholeNumber(event.target.value) })}
-              className="tabular min-h-11 rounded-lg border border-hairline bg-card px-3 py-2 text-[13px] sm:min-h-0"
+              className="tabular min-h-11 rounded-lg border border-hairline bg-card px-3 py-2 text-[13px] lg:min-h-0"
             />
           </div>
         </FieldPair>
@@ -117,7 +117,7 @@ export function MeasureEditor({
             data-testid="vision-modal-measure-goal"
             value={measure.goalId}
             onChange={(event) => onChange({ ...measure, goalId: event.target.value })}
-            className="min-h-11 rounded-lg border border-hairline bg-card px-3 py-2 text-[13px] sm:min-h-0"
+            className="min-h-11 rounded-lg border border-hairline bg-card px-3 py-2 text-[13px] lg:min-h-0"
           >
             <option value="">{VISION_COPY.modalMeasureGoalPlaceholder}</option>
             {goals.map((goal) => (

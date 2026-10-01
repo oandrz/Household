@@ -40,7 +40,7 @@ export function ModalActions(props: ModalActionsProps) {
         type="button"
         disabled={props.secondaryDisabled}
         onClick={props.onSecondary}
-        className="min-h-11 flex-1 rounded-lg border border-hairline py-2.5 text-center text-[13px] font-semibold text-label disabled:cursor-not-allowed disabled:opacity-60 sm:min-h-0"
+        className="min-h-11 flex-1 rounded-lg border border-hairline py-2.5 text-center text-[13px] font-semibold text-label disabled:cursor-not-allowed disabled:opacity-60 lg:min-h-0"
       >
         {props.secondaryLabel}
       </button>
@@ -48,7 +48,7 @@ export function ModalActions(props: ModalActionsProps) {
         type={props.primaryType}
         disabled={props.primaryDisabled}
         onClick={props.primaryType === "button" ? props.onPrimary : undefined}
-        className="min-h-11 flex-[2] rounded-lg bg-accent py-2.5 text-center text-[13px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60 sm:min-h-0"
+        className="min-h-11 flex-[2] rounded-lg bg-accent py-2.5 text-center text-[13px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60 lg:min-h-0"
       >
         {props.primaryLabel}
       </button>

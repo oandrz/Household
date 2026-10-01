@@ -61,13 +61,13 @@ export function TimeZoneRow() {
               disabled={updateHousehold.isPending}
               // max-w: the longest label ("America/Argentina/ComodRivadavia
               // (GMT-3)") must not push the card wider than a phone.
-              className="min-h-11 min-w-0 max-w-[14rem] rounded-lg border border-hairline bg-card px-2 py-2.5 text-ink disabled:cursor-not-allowed disabled:opacity-60 sm:min-h-0 sm:py-1.5"
+              className="min-h-11 min-w-0 max-w-[14rem] rounded-lg border border-hairline bg-card px-2 py-2.5 text-ink disabled:cursor-not-allowed disabled:opacity-60 lg:min-h-0 lg:py-1.5"
             />
             <button
               type="submit"
               disabled={!canSave}
               aria-label="Save time zone"
-              className="min-h-11 rounded-lg bg-accent px-2.5 py-2.5 text-[11px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60 sm:min-h-0 sm:py-1.5"
+              className="min-h-11 rounded-lg bg-accent px-2.5 py-2.5 text-[11px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60 lg:min-h-0 lg:py-1.5"
             >
               Save
             </button>

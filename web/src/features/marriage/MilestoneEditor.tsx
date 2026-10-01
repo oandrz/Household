@@ -29,7 +29,7 @@ export function MilestoneEditor({
           inputMode="numeric"
           value={String(milestone.year)}
           onChange={(event) => onChange({ ...milestone, year: parseWholeNumber(event.target.value) })}
-          className="tabular min-h-11 rounded-lg border border-hairline bg-card px-2 py-2 text-[13px] sm:min-h-0"
+          className="tabular min-h-11 rounded-lg border border-hairline bg-card px-2 py-2 text-[13px] lg:min-h-0"
         />
       </div>
       <div className="flex min-w-0 flex-1 flex-col gap-1.5">
@@ -43,7 +43,7 @@ export function MilestoneEditor({
           placeholder={VISION_COPY.modalMilestoneTitleLabel}
           value={milestone.title}
           onChange={(event) => onChange({ ...milestone, title: event.target.value })}
-          className="min-h-11 rounded-lg border border-hairline bg-card px-3 py-2 text-[13px] sm:min-h-0"
+          className="min-h-11 rounded-lg border border-hairline bg-card px-3 py-2 text-[13px] lg:min-h-0"
         />
         <label htmlFor={`${idPrefix}-note`} className="sr-only">
           {VISION_COPY.modalMilestoneNoteLabel}
@@ -55,7 +55,7 @@ export function MilestoneEditor({
           placeholder={VISION_COPY.modalMilestoneNoteLabel}
           value={milestone.note}
           onChange={(event) => onChange({ ...milestone, note: event.target.value })}
-          className="min-h-11 rounded-lg border border-hairline bg-card px-3 py-2 text-[13px] sm:min-h-0"
+          className="min-h-11 rounded-lg border border-hairline bg-card px-3 py-2 text-[13px] lg:min-h-0"
         />
       </div>
       <button
@@ -63,7 +63,7 @@ export function MilestoneEditor({
         data-testid="vision-modal-remove-milestone"
         aria-label={VISION_COPY.removeMilestone(milestone.title)}
         onClick={onRemove}
-        className="mt-0.5 flex h-11 w-11 flex-none items-center justify-center text-[15px] text-danger sm:h-7 sm:w-7"
+        className="mt-0.5 flex h-11 w-11 flex-none items-center justify-center text-[15px] text-danger lg:h-7 lg:w-7"
       >
         <CloseIcon />
       </button>
