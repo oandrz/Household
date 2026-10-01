@@ -148,7 +148,10 @@ describe("CurrencyPanel", () => {
   it("says nothing about a lock to a limited member, who cannot change the currency anyway", async () => {
     stubFetchRoutes({
       [`GET ${ME_URL}`]: { status: 200, body: meFixture("limited") },
-      [`GET ${HOUSEHOLD_URL}`]: { status: 200, body: householdFixture() },
+      // The server never sends true to a limited member. The flag is true here
+      // on purpose: with false, this test would pass whether or not the panel
+      // checks who is looking.
+      [`GET ${HOUSEHOLD_URL}`]: { status: 200, body: householdFixture({ primaryCurrencyLocked: true }) },
       [`GET ${CURRENCIES_URL}`]: { status: 200, body: currenciesFixture() },
     });
     renderPanel();
