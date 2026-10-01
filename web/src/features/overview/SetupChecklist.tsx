@@ -14,14 +14,10 @@
 // unticked step whose link showed no trace of the invite they sent.
 import { Link } from "@tanstack/react-router";
 import type { ReactNode } from "react";
+import { useHouseholdZone } from "../auth/useHouseholdZone";
+import { monthNameIn } from "../../lib/householdDate";
 import { OVERVIEW_COPY } from "./copy";
 import type { PartnerStep } from "./partnerStep";
-
-// Read at render time -- a household that opens the app in August must not be
-// told to budget for July.
-function monthName(): string {
-  return new Date().toLocaleString(undefined, { month: "long" });
-}
 
 // inline-flex items-center min-h-11 sm:min-h-0: BudgetCard.tsx's own comment
 // on this identical pattern has the reason.
@@ -36,6 +32,9 @@ export function SetupChecklist({
   hasBudget: boolean;
   partner: PartnerStep;
 }) {
+  // The household's month, read on every render: a household that opens the
+  // app on its own 1 August must not be told to budget for July.
+  const monthName = monthNameIn(useHouseholdZone());
   const steps: { label: string; done: boolean; link: ReactNode }[] = [
     // Always done: reaching this page at all required creating one. It is
     // listed anyway so the first thing a new household sees is something
@@ -51,7 +50,7 @@ export function SetupChecklist({
       ),
     },
     {
-      label: OVERVIEW_COPY.setupBudget(monthName()),
+      label: OVERVIEW_COPY.setupBudget(monthName),
       done: hasBudget,
       link: (
         <Link to="/money/budget" className={GO_LINK}>

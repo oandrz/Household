@@ -150,7 +150,7 @@ func handleListGoals(deps Deps) http.HandlerFunc {
 		scope, _ := RequestScope(r)
 		includeArchived := r.URL.Query().Get("include_archived") == "true"
 
-		view, err := deps.Goals.List(r.Context(), scope.HouseholdID, includeArchived, deps.Clock.Now())
+		view, err := deps.Goals.List(r.Context(), scope.HouseholdID, includeArchived, scope.Today)
 		if err != nil {
 			MapDomainError(w, r, err)
 			return
@@ -198,10 +198,9 @@ func handleCreateGoal(deps Deps) http.HandlerFunc {
 		if !decodeJSONBody(w, r, &req) {
 			return
 		}
-		// Read once and thread through: createdOn (Create) and the re-read
-		// below (writeGoal) must agree on "now" within this request -- the
-		// same single-read convention handleBudgetHistory's "today" follows.
-		today := deps.Clock.Now()
+		// The household's day, read once: createdOn (Create) and the re-read
+		// below (writeGoal) must agree on the date within this request.
+		today := scope.Today
 
 		currency := strings.TrimSpace(req.Currency)
 		if currency == "" {
@@ -251,7 +250,7 @@ func handleUpdateGoal(deps Deps) http.HandlerFunc {
 			return
 		}
 		id := chi.URLParam(r, "id")
-		today := deps.Clock.Now()
+		today := scope.Today
 
 		if req.Currency != nil {
 			// A goal that is not in this household is MapDomainError's own
@@ -310,12 +309,13 @@ func setGoalArchived(deps Deps, archived bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		scope, _ := RequestScope(r)
 		id := chi.URLParam(r, "id")
-		today := deps.Clock.Now()
-		if _, err := deps.Goals.SetArchived(r.Context(), scope.HouseholdID, id, archived, today); err != nil {
+		// Two times, two jobs: archived_at is stamped with an instant, and the
+		// card this answers with is judged by the household's day.
+		if _, err := deps.Goals.SetArchived(r.Context(), scope.HouseholdID, id, archived, deps.Clock.Now()); err != nil {
 			MapDomainError(w, r, err)
 			return
 		}
-		writeGoal(w, r, deps, scope.HouseholdID, id, today, http.StatusOK)
+		writeGoal(w, r, deps, scope.HouseholdID, id, scope.Today, http.StatusOK)
 	}
 }
 
@@ -332,7 +332,7 @@ func handleAddGoalContribution(deps Deps) http.HandlerFunc {
 		if req.Currency != nil {
 			// A goal that is not in this household is MapDomainError's own
 			// 404 NOT_FOUND, the same body this check always answered.
-			current, err := deps.Goals.View(r.Context(), scope.HouseholdID, goalID, deps.Clock.Now())
+			current, err := deps.Goals.View(r.Context(), scope.HouseholdID, goalID, scope.Today)
 			if err != nil {
 				MapDomainError(w, r, err)
 				return
@@ -357,7 +357,7 @@ func handleAddGoalContribution(deps Deps) http.HandlerFunc {
 			AmountMinor: req.AmountMinor,
 			OccurredOn:  occurredOn,
 			Note:        req.Note,
-		})
+		}, scope.Today)
 		if err != nil {
 			MapDomainError(w, r, err)
 			return

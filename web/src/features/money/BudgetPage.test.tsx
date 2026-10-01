@@ -3,15 +3,15 @@
 // the same harness every other money-feature test uses keeps this file
 // consistent with its siblings) plus stubFetchRoutes for every request.
 //
-// BudgetPage derives its initial month from the real calendar
-// (currentMonth()), so every test here fakes `Date` to a fixed day in July
-// 2026 -- the same pattern AccountModal.test.tsx's own today() tests use --
-// so the page always requests "GET /api/v1/budgets/2026-07" and this file
-// never has to guess which month the test runner's real clock would land on.
+// BudgetPage opens on the household's current month (lib/householdDate.ts),
+// so every test here fakes `Date` to a fixed day in the middle of July 2026.
+// The page then requests "GET /api/v1/budgets/2026-07" in any time zone, and
+// this file never has to guess which month the real clock would land on.
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { renderWithRouter } from "../../test/renderWithRouter";
 import { stubFetchRoutes, type RouteResponse } from "../../test/fetchStub";
+import { meRoute } from "../../test/meFixture";
 import { BudgetPage } from "./BudgetPage";
 import type { BudgetMonthResponse } from "./budgetSchemas";
 
@@ -140,9 +140,13 @@ beforeEach(() => {
   vi.setSystemTime(new Date("2026-07-15T12:00:00Z"));
 });
 
+const ORIGINAL_TZ = process.env.TZ;
+
 afterEach(() => {
   vi.useRealTimers();
   vi.unstubAllGlobals();
+  if (ORIGINAL_TZ === undefined) delete process.env.TZ;
+  else process.env.TZ = ORIGINAL_TZ;
 });
 
 describe("BudgetPage", () => {
@@ -763,5 +767,21 @@ describe("BudgetPage rollover card", () => {
 
     expect(await screen.findByTestId("budget-load-error")).toHaveTextContent("Couldn't load your budget.");
     expect(screen.queryByTestId("budget-owner-only")).not.toBeInTheDocument();
+  });
+
+  // The page opens on "this month", and the month is the household's. Only
+  // October's budget is registered here, so the page can only show a budget
+  // at all by asking for the household's month.
+  it("opens on the household's month, whatever zone the browser is in", async () => {
+    // 23:00 UTC on 30 September: 16:00 that day in Los Angeles, where the
+    // browser is, and 07:00 on 1 October in Singapore, where the household is.
+    process.env.TZ = "America/Los_Angeles";
+    vi.setSystemTime(new Date("2026-09-30T23:00:00Z"));
+    renderPage(budgetFixture(), {
+      ...meRoute("Asia/Singapore"),
+      "GET /api/v1/budgets/2026-10": { status: 200, body: budgetFixture({ month: "2026-10" }) },
+    });
+
+    expect(await screen.findByText("October 2026")).toBeInTheDocument();
   });
 });

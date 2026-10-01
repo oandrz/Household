@@ -26,23 +26,23 @@ LIMIT 1;
 
 -- name: GetHousehold :one
 SELECT id, name, family_name, primary_currency, show_secondary_currency,
-       secondary_currency, fx_rate_mode
+       secondary_currency, fx_rate_mode, timezone, created_at
 FROM households WHERE id = $1;
 
 -- name: UpdateHousehold :one
 UPDATE households
 SET name = $2, family_name = $3, primary_currency = $4, show_secondary_currency = $5,
-    secondary_currency = $6, fx_rate_mode = $7
+    secondary_currency = $6, fx_rate_mode = $7, timezone = $8
 WHERE id = $1
 RETURNING id, name, family_name, primary_currency, show_secondary_currency,
-          secondary_currency, fx_rate_mode;
+          secondary_currency, fx_rate_mode, timezone, created_at;
 
 -- name: CreateHousehold :one
 INSERT INTO households (name, family_name, primary_currency,
-                        show_secondary_currency, secondary_currency)
-VALUES ($1, $2, $3, $4, $5)
+                        show_secondary_currency, secondary_currency, timezone)
+VALUES ($1, $2, $3, $4, $5, $6)
 RETURNING id, name, family_name, primary_currency,
-          show_secondary_currency, secondary_currency, fx_rate_mode;
+          show_secondary_currency, secondary_currency, fx_rate_mode, timezone, created_at;
 
 -- name: ListMemberships :many
 SELECT m.id, m.household_id, m.user_id, m.role, m.capabilities,

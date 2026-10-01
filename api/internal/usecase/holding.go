@@ -150,9 +150,9 @@ func (s *HoldingService) SetArchived(ctx context.Context, householdID, holdingID
 }
 
 // RecordEvent validates an acquisition or disposal against its holding and
-// the household's primary currency, then refuses it if it would leave the
-// position oversold. today is a parameter for the same reason as
-// SetArchived's.
+// the household's primary currency, then refuses it if it would break
+// holdingRule. today is the household's calendar day, passed in by the
+// caller so that this service reads no clock.
 func (s *HoldingService) RecordEvent(ctx context.Context, e domain.HoldingEvent, today time.Time) (domain.HoldingEvent, error) {
 	if err := refuseFutureDate(e.OccurredOn, today); err != nil {
 		return domain.HoldingEvent{}, err
@@ -172,21 +172,43 @@ func (s *HoldingService) RecordEvent(ctx context.Context, e domain.HoldingEvent,
 		return domain.HoldingEvent{}, err
 	}
 
-	// Overselling is caught at recording time: an unfoldable ledger is a
-	// screen that can't render. The fold runs INSIDE the write's own
-	// transaction, not a separate read before it -- two sales of 30 from a
-	// holding of 50 are legal alone, illegal together, and check-then-write
-	// lets both through. InsertWithFold supplies the lock.
-	return s.d.Events.InsertWithFold(ctx, e, func(withThisOne []domain.HoldingEvent) error {
-		_, err := holding.Position(withThisOne, primaryCurrency)
-		return err
-	})
+	// The rule runs INSIDE the write's own transaction, not as a separate
+	// read before it -- two sales of 30 from a holding of 50 are legal alone,
+	// illegal together, and check-then-write lets both through.
+	// InsertWithFold supplies the lock.
+	return s.d.Events.InsertWithFold(ctx, e, holdingRule(holding, primaryCurrency))
 }
 
-// DeleteEvent refuses a delete that would leave the REMAINING events unable to
-// fold -- removing a purchase a later sale depended on. The alternative is a
-// holding whose page throws every time it loads, which the household cannot
-// fix without the very screen that is broken.
+// holdingRule is the one rule every write to a holding's events or prices
+// must pass, as the HoldingFold the repository runs under its lock.
+// It is handed the holding as it WOULD be after the write and refuses it if:
+//
+//   - the events no longer fold: a sale of more than is held
+//     (domain.ErrHoldingOversold). An unfoldable ledger is a page that
+//     cannot render, and the household could only fix it from that page.
+//   - the holding would be worth more than the amount ceiling at any price
+//     it has (domain.ErrHoldingValueTooLarge): every portfolio read
+//     multiplies a quantity by a price, and that product has to fit.
+//
+// One builder for RecordEvent, DeleteEvent and RecordValuation, on purpose.
+// Each of the three can break either half -- a purchase, deleting a sale and
+// a price all raise what the holding is worth -- so a write with its own
+// copy of the rule is a write that can miss half of it.
+func holdingRule(holding domain.Holding, primaryCurrency string) HoldingFold {
+	return func(events []domain.HoldingEvent, prices []domain.Valuation) error {
+		position, err := holding.Position(events, primaryCurrency)
+		if err != nil {
+			return err
+		}
+		return domain.CheckHoldingValueWithinLimit(position.PeakHeld, prices)
+	}
+}
+
+// DeleteEvent refuses a delete that would leave the REMAINING events breaking
+// holdingRule: removing a purchase a later sale depended on, or removing a
+// sale so that the holding was once larger than its prices allow. The
+// alternative is a holding whose page throws every time it loads, which the
+// household cannot fix without the very screen that is broken.
 func (s *HoldingService) DeleteEvent(ctx context.Context, householdID, holdingID, eventID string) error {
 	holding, err := s.d.Holdings.Get(ctx, householdID, holdingID)
 	if err != nil {
@@ -199,15 +221,15 @@ func (s *HoldingService) DeleteEvent(ctx context.Context, householdID, holdingID
 	if err != nil {
 		return err
 	}
-	// Same reasoning as RecordEvent: the remainder is folded inside the
+	// Same reasoning as RecordEvent: the remainder is checked inside the
 	// delete's own transaction, so a concurrent write cannot slip between the
 	// check and the removal.
-	return s.d.Events.DeleteWithFold(ctx, householdID, holdingID, eventID, func(remaining []domain.HoldingEvent) error {
-		_, err := holding.Position(remaining, primaryCurrency)
-		return err
-	})
+	return s.d.Events.DeleteWithFold(ctx, householdID, holdingID, eventID, holdingRule(holding, primaryCurrency))
 }
 
+// RecordValuation stores one day's price, replacing any price already
+// recorded for that day, unless it would break holdingRule. today is the
+// household's calendar day, as for RecordEvent.
 func (s *HoldingService) RecordValuation(ctx context.Context, v domain.Valuation, today time.Time) (domain.Valuation, error) {
 	if err := refuseFutureDate(v.AsOf, today); err != nil {
 		return domain.Valuation{}, err
@@ -226,7 +248,10 @@ func (s *HoldingService) RecordValuation(ctx context.Context, v domain.Valuation
 	if err := v.Validate(holding.Currency, primaryCurrency); err != nil {
 		return domain.Valuation{}, err
 	}
-	return s.d.Valuations.Upsert(ctx, v)
+	// Refused BEFORE it is stored, under the same lock an event write takes.
+	// Don't check after writing: a stored price the reads cannot multiply
+	// fails every portfolio read, including the response to this write.
+	return s.d.Valuations.UpsertWithFold(ctx, v, holdingRule(holding, primaryCurrency))
 }
 
 func (s *HoldingService) ListEvents(ctx context.Context, householdID, holdingID string) ([]domain.HoldingEvent, error) {
@@ -318,18 +343,6 @@ func (s *HoldingService) primaryCurrency(ctx context.Context, householdID string
 	return household.PrimaryCurrency, nil
 }
 
-// refuseFutureDate compares CALENDAR DAYS, not instants: a household
-// recording this morning's purchase must not be refused because the clock
-// reads a later hour. This project has shipped that off-by-one three times.
-func refuseFutureDate(date, today time.Time) error {
-	d := time.Date(date.Year(), date.Month(), date.Day(), 0, 0, 0, 0, time.UTC)
-	t := time.Date(today.Year(), today.Month(), today.Day(), 0, 0, 0, 0, time.UTC)
-	if d.After(t) {
-		return fmt.Errorf("%w: %s", domain.ErrHoldingDateInFuture, d.Format(time.DateOnly))
-	}
-	return nil
-}
-
 // maxReportPeriods is how far back the report will go in one response.
 //
 // It is a drawing limit, not a storage one: twelve quarters against four
@@ -361,8 +374,8 @@ type PortfolioReportView struct {
 	Holdings        []HoldingReportRow
 }
 
-// RecordIncome stores one dividend, coupon or charge. today is a parameter
-// for the same reason as SetArchived's.
+// RecordIncome stores one dividend, coupon or charge. today is the
+// household's calendar day, as for RecordEvent.
 func (s *HoldingService) RecordIncome(ctx context.Context, i domain.HoldingIncome, today time.Time) (domain.HoldingIncome, error) {
 	if err := refuseFutureDate(i.ReceivedOn, today); err != nil {
 		return domain.HoldingIncome{}, err

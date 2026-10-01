@@ -322,9 +322,10 @@ const (
 
 // startOfMonth returns midnight UTC on the first of t's month, reading the
 // year and month in t's own location, exactly like the usecase package's
-// startOfMonth. occurred_on is a date column and this product stores no
-// timezone per household, so a month is a calendar month and not a range of
-// instants.
+// startOfMonth. occurred_on is a date column, so a month is a calendar month
+// and not a range of instants. Which month is "this month" for a household
+// is decided before a value reaches here, from the household's time zone
+// (domain.TodayIn); this function only rounds the date it is given.
 func startOfMonth(t time.Time) time.Time {
 	return time.Date(t.Year(), t.Month(), 1, 0, 0, 0, 0, time.UTC)
 }

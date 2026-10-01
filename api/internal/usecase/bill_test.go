@@ -948,6 +948,60 @@ func TestUpdateValidatesNameAndAmountAndCadence(t *testing.T) {
 
 // --- MarkPaid / UndoPayment ----------------------------------------------
 
+// afterEveryPayment is a household today later than any paid-on date the
+// tests below use, so the future-date rule plays no part in a test about
+// something else.
+var afterEveryPayment = day("2026-12-31")
+
+// A payment is a recorded fact: it may not be dated after the household's
+// today. The expense it writes is dated the same day and goes straight to
+// the repository, so this is the only check that expense ever gets. A
+// refused payment writes nothing, and the bill keeps its due date.
+func TestMarkPaidRefusesAPaymentDatedAfterTheHouseholdsToday(t *testing.T) {
+	repo := &fakeBillRepo{}
+	svc := newBillService(t, repo)
+	repo.add(bill("SP utilities", "2026-08-08", 14230))
+	today := day("2026-08-08")
+
+	_, err := svc.MarkPaid(context.Background(), usecase.MarkPayment{
+		HouseholdID: "h1", BillID: "bill-1", PaidOn: day("2026-08-09"),
+	}, today)
+	if !errors.Is(err, domain.ErrDateInFuture) {
+		t.Fatalf("paid tomorrow: err = %v, want ErrDateInFuture", err)
+	}
+	if len(repo.payments) != 0 {
+		t.Fatalf("%d payment(s) written by a refused mark-paid", len(repo.payments))
+	}
+	if got := repo.records[0].Bill.NextDue; got == nil || !got.Equal(day("2026-08-08")) {
+		t.Fatalf("next due = %v after a refused mark-paid, want it unchanged", got)
+	}
+
+	if _, err := svc.MarkPaid(context.Background(), usecase.MarkPayment{
+		HouseholdID: "h1", BillID: "bill-1", PaidOn: today,
+	}, today); err != nil {
+		t.Fatalf("paid today: %v", err)
+	}
+}
+
+// The due date is a plan and may be ahead of today: paying a bill a week
+// early is ordinary. Only the day it was paid on is the fact.
+func TestMarkPaidAllowsPayingABillBeforeItIsDue(t *testing.T) {
+	repo := &fakeBillRepo{}
+	svc := newBillService(t, repo)
+	repo.add(bill("SP utilities", "2026-08-15", 14230))
+	today := day("2026-08-08")
+
+	if _, err := svc.MarkPaid(context.Background(), usecase.MarkPayment{
+		HouseholdID: "h1", BillID: "bill-1", PaidOn: today,
+	}, today); err != nil {
+		t.Fatalf("paid a week early: %v", err)
+	}
+	if !repo.lastWrite.PaidOn.Equal(today) || !repo.lastWrite.DueOn.Equal(day("2026-08-15")) {
+		t.Fatalf("paid_on = %v, due_on = %v; want paid today for the occurrence due on the 15th",
+			repo.lastWrite.PaidOn, repo.lastWrite.DueOn)
+	}
+}
+
 // The expense a bill payment writes must carry the ACCOUNT's currency, the
 // same rule TransactionService.validate applies: the currency comes from
 // the account, never the request. If these two ever disagree, a household's
@@ -959,7 +1013,7 @@ func TestMarkPaidWritesTheExpenseInTheAccountsCurrency(t *testing.T) {
 
 	if _, err := svc.MarkPaid(context.Background(), usecase.MarkPayment{
 		HouseholdID: "h1", BillID: "bill-1", AmountMinor: int64Ptr(50_000_000), PaidOn: day("2026-08-15"),
-	}); err != nil {
+	}, afterEveryPayment); err != nil {
 		t.Fatalf("MarkPaid: %v", err)
 	}
 	if got := repo.lastWrite.Currency; got != "IDR" {
@@ -980,7 +1034,7 @@ func TestMarkPaidAdvancesNextDueByTheCadenceFromTheDueDate(t *testing.T) {
 	// Paid three days late.
 	if _, err := svc.MarkPaid(context.Background(), usecase.MarkPayment{
 		HouseholdID: "h1", BillID: "bill-1", AmountMinor: int64Ptr(14230), PaidOn: day("2026-08-11"),
-	}); err != nil {
+	}, afterEveryPayment); err != nil {
 		t.Fatalf("MarkPaid: %v", err)
 	}
 	// 2026-09-08, NOT 2026-09-11: paying late must not move the bill's day,
@@ -1009,7 +1063,7 @@ func TestMarkPaidAdvancesNextDueFromTheDueDateAcrossAMonthBoundary(t *testing.T)
 
 	if _, err := svc.MarkPaid(context.Background(), usecase.MarkPayment{
 		HouseholdID: "h1", BillID: "bill-1", AmountMinor: int64Ptr(250000), PaidOn: day("2026-09-02"),
-	}); err != nil {
+	}, afterEveryPayment); err != nil {
 		t.Fatalf("MarkPaid: %v", err)
 	}
 	if got := repo.lastWrite.NextDue; got == nil || !got.Equal(day("2026-09-28")) {
@@ -1024,7 +1078,7 @@ func TestMarkPaidSettlesAOneOffWithNoNextDate(t *testing.T) {
 
 	if _, err := svc.MarkPaid(context.Background(), usecase.MarkPayment{
 		HouseholdID: "h1", BillID: "bill-1", AmountMinor: int64Ptr(7000), PaidOn: day("2026-08-20"),
-	}); err != nil {
+	}, afterEveryPayment); err != nil {
 		t.Fatalf("MarkPaid: %v", err)
 	}
 	if repo.lastWrite.NextDue != nil {
@@ -1046,7 +1100,7 @@ func TestMarkPaidSettlesAOneOffAsNeitherDueSoonNorLater(t *testing.T) {
 
 	if _, err := svc.MarkPaid(context.Background(), usecase.MarkPayment{
 		HouseholdID: "h1", BillID: "bill-1", AmountMinor: int64Ptr(7000), PaidOn: day("2026-08-20"),
-	}); err != nil {
+	}, afterEveryPayment); err != nil {
 		t.Fatalf("MarkPaid: %v", err)
 	}
 
@@ -1095,7 +1149,7 @@ func TestMarkPaidRefusesAnArchivedBill(t *testing.T) {
 
 	_, err := svc.MarkPaid(context.Background(), usecase.MarkPayment{
 		HouseholdID: "h1", BillID: "bill-1", AmountMinor: int64Ptr(8000), PaidOn: day("2026-08-09"),
-	})
+	}, afterEveryPayment)
 	markPaidReason(t, err, domain.BillArchived)
 }
 
@@ -1106,7 +1160,7 @@ func TestMarkPaidRefusesAnArchivedPayFromAccount(t *testing.T) {
 
 	_, err := svc.MarkPaid(context.Background(), usecase.MarkPayment{
 		HouseholdID: "h1", BillID: "bill-1", AmountMinor: int64Ptr(14230), PaidOn: day("2026-08-09"),
-	})
+	}, afterEveryPayment)
 	markPaidReason(t, err, domain.PayFromAccountArchived)
 }
 
@@ -1119,7 +1173,7 @@ func TestMarkPaidRefusesASettledOneOff(t *testing.T) {
 
 	_, err := svc.MarkPaid(context.Background(), usecase.MarkPayment{
 		HouseholdID: "h1", BillID: "bill-1", AmountMinor: int64Ptr(7000), PaidOn: day("2026-08-25"),
-	})
+	}, afterEveryPayment)
 	markPaidReason(t, err, domain.BillSettled)
 }
 
@@ -1135,7 +1189,7 @@ func TestMarkPaidRefusesANonPositiveAmount(t *testing.T) {
 	for _, amount := range []int64{0, -100} {
 		_, err := svc.MarkPaid(context.Background(), usecase.MarkPayment{
 			HouseholdID: "h1", BillID: "bill-1", AmountMinor: int64Ptr(amount), PaidOn: day("2026-08-08"),
-		})
+		}, afterEveryPayment)
 		if !errors.Is(err, domain.ErrBillAmountNotPositive) {
 			t.Fatalf("MarkPaid(amount=%d) = %v, want domain.ErrBillAmountNotPositive", amount, err)
 		}
@@ -1155,7 +1209,7 @@ func TestMarkPaidWithNoAmountPaysTheBillsOwnAmount(t *testing.T) {
 
 	if _, err := svc.MarkPaid(context.Background(), usecase.MarkPayment{
 		HouseholdID: "h1", BillID: "bill-1", PaidOn: day("2026-08-08"),
-	}); err != nil {
+	}, afterEveryPayment); err != nil {
 		t.Fatalf("MarkPaid: %v", err)
 	}
 	if got := repo.lastWrite.AmountMinor; got != 14230 {
@@ -1172,7 +1226,7 @@ func TestMarkPaidWithAnAmountPaysThatAmount(t *testing.T) {
 
 	if _, err := svc.MarkPaid(context.Background(), usecase.MarkPayment{
 		HouseholdID: "h1", BillID: "bill-1", AmountMinor: int64Ptr(15990), PaidOn: day("2026-08-08"),
-	}); err != nil {
+	}, afterEveryPayment); err != nil {
 		t.Fatalf("MarkPaid: %v", err)
 	}
 	if got := repo.lastWrite.AmountMinor; got != 15990 {
@@ -1240,27 +1294,52 @@ func TestSetArchivedReturnsAViewWithNoSecondGet(t *testing.T) {
 	repo.add(bill("Old gym", "2026-07-01", 8000))
 	svc := newBillService(t, repo)
 
-	at := day("2026-08-09")
-	view, err := svc.SetArchived(context.Background(), "h1", "bill-1", true, at)
+	today := day("2026-08-09")
+	view, err := svc.SetArchived(context.Background(), "h1", "bill-1", true, today, today)
 	if err != nil {
 		t.Fatalf("SetArchived: %v", err)
 	}
 	if !view.Bill.IsArchived() {
 		t.Fatal("bill not archived")
 	}
-	// Overdue relative to `at`, computed by SetArchived itself with no second
-	// Get -- BillRepository.SetArchived's own doc comment is why one is not
-	// needed.
+	// Overdue relative to today, computed by SetArchived itself with no
+	// second Get -- BillRepository.SetArchived's own doc comment is why one
+	// is not needed.
 	if !view.Overdue {
-		t.Error("overdue = false, want true (due 2026-07-01, archived at 2026-08-09)")
+		t.Error("overdue = false, want true (due 2026-07-01, archived on 2026-08-09)")
 	}
 
-	restored, err := svc.SetArchived(context.Background(), "h1", "bill-1", false, at)
+	restored, err := svc.SetArchived(context.Background(), "h1", "bill-1", false, today, today)
 	if err != nil {
 		t.Fatalf("SetArchived (restore): %v", err)
 	}
 	if restored.Bill.IsArchived() {
 		t.Fatal("bill still archived after restore")
+	}
+}
+
+// Archiving needs two different times and used to be handed one. The stamp
+// is an instant; "today", for the returned row's Overdue, is the household's
+// calendar day. At 23:00 UTC on 30 September those are different days for a
+// household in Singapore, where it is already 1 October: a bill due on the
+// 30th is overdue there, though the instant alone says it is still the 30th.
+func TestSetArchivedStampsTheInstantAndJudgesOverdueByTheHouseholdsDay(t *testing.T) {
+	repo := &fakeBillRepo{}
+	repo.add(bill("Old gym", "2026-09-30", 8000))
+	svc := newBillService(t, repo)
+
+	at := time.Date(2026, 9, 30, 23, 0, 0, 0, time.UTC)
+	householdToday := day("2026-10-01")
+
+	view, err := svc.SetArchived(context.Background(), "h1", "bill-1", true, at, householdToday)
+	if err != nil {
+		t.Fatalf("SetArchived: %v", err)
+	}
+	if view.Bill.ArchivedAt == nil || !view.Bill.ArchivedAt.Equal(at) {
+		t.Errorf("archived at %v, want the instant %s", view.Bill.ArchivedAt, at)
+	}
+	if !view.Overdue {
+		t.Error("overdue = false, want true: due 30 September, and it is 1 October for the household")
 	}
 }
 

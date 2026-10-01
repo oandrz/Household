@@ -143,16 +143,19 @@ export const OVERVIEW_COPY = {
   // that is still a draft.
   nextRetroActions: (count: number, monthName: string) =>
     `${count} action${count === 1 ? "" : "s"} for ${monthName}`,
+  // The way from the card to a retro that is still a draft, this month's or
+  // last month's. A finished retro gets no link: there is nothing left in it
+  // to continue.
+  nextRetroContinue: (monthName: string) => `Continue ${monthName} retro`,
   nextRetroNone: "No retro yet this month",
   // Mirrors RETRO_COPY.startRetro's own "Start X retro" wording -- same
   // local-duplicate trade-off as nextRetroInProgress above.
   nextRetroStart: (monthName: string) => `Start ${monthName} retro`,
-  // startMonth is nullable (both candidate months already have a retro is
-  // the ordinary reason, but retrosResponseSchema also allows it to be null
-  // with no current-month retro either -- a shape this schema permits even
-  // though RetroService.List should never actually produce it). This is
-  // the fail-closed fallback for that state: a plain way in, never a
-  // "Start null retro" string built from a month that was not there.
+  // startMonth is null when there is no month left to start: each of last
+  // month and this month either has a retro already or is before the month
+  // the household was created in. With no retro this month either, that
+  // leaves nothing to name, so this is the plain way in, never a "Start null
+  // retro" string built from a month that was not there.
   nextRetroGo: "Go to Retros",
 
   // VisionCard.tsx. Local duplicates of VISION_COPY's own themeLabel/

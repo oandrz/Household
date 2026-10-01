@@ -14,6 +14,11 @@ import (
 // future" is a fact about the input rather than about when the suite ran.
 var fixedNow = time.Date(2026, 7, 28, 9, 0, 0, 0, time.UTC)
 
+// accountToday is the household's calendar day these tests pass to the
+// account service: the day fixedNow falls on, as midnight UTC, the shape
+// domain.TodayIn produces.
+var accountToday = time.Date(2026, 7, 28, 0, 0, 0, 0, time.UTC)
+
 func newAccountService(t *testing.T) (*usecase.AccountService, *fakeAccountRepo) {
 	t.Helper()
 	repo := newFakeAccountRepo()
@@ -62,14 +67,14 @@ func newAccountServiceWithHoldings(t *testing.T, count int64) (*usecase.AccountS
 // a type that refuses to accept it. The counter port exists for this check.
 func TestAccountTypeCannotChangeWhileTheAccountHoldsInvestments(t *testing.T) {
 	svc, repo := newAccountServiceWithHoldings(t, 1)
-	created, err := svc.Create(context.Background(), investmentAccountInput())
+	created, err := svc.Create(context.Background(), investmentAccountInput(), accountToday)
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 	_ = repo
 
 	cash := "cash"
-	_, err = svc.Update(context.Background(), "h-1", created.ID, usecase.AccountUpdate{Type: &cash})
+	_, err = svc.Update(context.Background(), "h-1", created.ID, usecase.AccountUpdate{Type: &cash}, accountToday)
 	if !errors.Is(err, domain.ErrAccountHasHoldings) {
 		t.Fatalf("error = %v, want ErrAccountHasHoldings", err)
 	}
@@ -79,13 +84,13 @@ func TestAccountTypeCannotChangeWhileTheAccountHoldsInvestments(t *testing.T) {
 // renaming a brokerage that holds something must still work.
 func TestAnAccountWithHoldingsCanStillBeRenamed(t *testing.T) {
 	svc, _ := newAccountServiceWithHoldings(t, 1)
-	created, err := svc.Create(context.Background(), investmentAccountInput())
+	created, err := svc.Create(context.Background(), investmentAccountInput(), accountToday)
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 
 	name := "Moomoo SG"
-	updated, err := svc.Update(context.Background(), "h-1", created.ID, usecase.AccountUpdate{Nickname: &name})
+	updated, err := svc.Update(context.Background(), "h-1", created.ID, usecase.AccountUpdate{Nickname: &name}, accountToday)
 	if err != nil {
 		t.Fatalf("Update nickname: %v", err)
 	}
@@ -97,13 +102,13 @@ func TestAnAccountWithHoldingsCanStillBeRenamed(t *testing.T) {
 // And an account with NO holdings changes type freely, as it always has.
 func TestAccountTypeStillChangesWhenNothingIsHeld(t *testing.T) {
 	svc, _ := newAccountServiceWithHoldings(t, 0)
-	created, err := svc.Create(context.Background(), investmentAccountInput())
+	created, err := svc.Create(context.Background(), investmentAccountInput(), accountToday)
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 
 	cash := "cash"
-	updated, err := svc.Update(context.Background(), "h-1", created.ID, usecase.AccountUpdate{Type: &cash})
+	updated, err := svc.Update(context.Background(), "h-1", created.ID, usecase.AccountUpdate{Type: &cash}, accountToday)
 	if err != nil {
 		t.Fatalf("Update type: %v", err)
 	}
@@ -148,7 +153,7 @@ func TestCreateRefusesABlankNickname(t *testing.T) {
 	in := validNewAccount()
 	in.Nickname = "   "
 
-	_, err := svc.Create(context.Background(), in)
+	_, err := svc.Create(context.Background(), in, accountToday)
 	if !errors.Is(err, domain.ErrAccountNicknameRequired) {
 		t.Fatalf("err = %v, want ErrAccountNicknameRequired", err)
 	}
@@ -159,7 +164,7 @@ func TestCreateTrimsTheNickname(t *testing.T) {
 	in := validNewAccount()
 	in.Nickname = "  DBS Everyday  "
 
-	got, err := svc.Create(context.Background(), in)
+	got, err := svc.Create(context.Background(), in, accountToday)
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
@@ -173,7 +178,7 @@ func TestCreateRefusesAnUnknownType(t *testing.T) {
 	in := validNewAccount()
 	in.Type = "crypto"
 
-	_, err := svc.Create(context.Background(), in)
+	_, err := svc.Create(context.Background(), in, accountToday)
 	if !errors.Is(err, domain.ErrUnknownAccountType) {
 		t.Fatalf("err = %v, want ErrUnknownAccountType", err)
 	}
@@ -189,7 +194,7 @@ func TestCreateRefusesACurrencyTheMoneyPathRendersWrong(t *testing.T) {
 		in := validNewAccount()
 		in.OpeningBalanceCurrency = code
 
-		if _, err := svc.Create(context.Background(), in); !errors.Is(err, domain.ErrInvalidMoney) {
+		if _, err := svc.Create(context.Background(), in, accountToday); !errors.Is(err, domain.ErrInvalidMoney) {
 			t.Errorf("%s: err = %v, want ErrInvalidMoney", code, err)
 		}
 	}
@@ -198,28 +203,112 @@ func TestCreateRefusesACurrencyTheMoneyPathRendersWrong(t *testing.T) {
 func TestCreateRefusesAFutureOpeningBalanceDate(t *testing.T) {
 	svc, _ := newAccountService(t)
 	in := validNewAccount()
-	in.OpeningBalanceAsOf = fixedNow.AddDate(0, 0, 7)
+	in.OpeningBalanceAsOf = accountToday.AddDate(0, 0, 7)
 
-	_, err := svc.Create(context.Background(), in)
+	_, err := svc.Create(context.Background(), in, accountToday)
 	if !errors.Is(err, domain.ErrOpeningBalanceInFuture) {
 		t.Fatalf("err = %v, want ErrOpeningBalanceInFuture", err)
 	}
 }
 
-// TestCreateAcceptsTodayFromAnyTimezone: households store no timezone, so
-// from 16:00 UTC it is already tomorrow in Singapore (UTC+8), and without
-// slack a household there could not enter today's balance for eight hours
-// a day. The clock reads 09:00 UTC on the 28th and the input is the 29th,
-// 15 hours ahead: inside the one day of slack that covers every real zone
-// (UTC-12 to UTC+14).
-func TestCreateAcceptsTodayFromAnyTimezone(t *testing.T) {
+// The opening balance is a fact, so it may be dated up to the household's
+// today and no later. "Today" is passed in as the household's calendar day,
+// worked out from its time zone at the edge.
+//
+// This replaces TestCreateAcceptsTodayFromAnyTimezone. That test pinned a day
+// of slack past the server's clock, which existed only because a household
+// stored no time zone and the server could not know its today. With the zone
+// stored the slack is gone, and tomorrow is refused.
+func TestCreateAcceptsTheHouseholdsTodayAndRefusesItsTomorrow(t *testing.T) {
+	svc, _ := newAccountService(t)
+
+	today := validNewAccount()
+	today.OpeningBalanceAsOf = accountToday
+	if _, err := svc.Create(context.Background(), today, accountToday); err != nil {
+		t.Fatalf("Create dated today: %v", err)
+	}
+
+	tomorrow := validNewAccount()
+	tomorrow.Nickname = "OCBC 360"
+	tomorrow.OpeningBalanceAsOf = accountToday.AddDate(0, 0, 1)
+	if _, err := svc.Create(context.Background(), tomorrow, accountToday); !errors.Is(err, domain.ErrOpeningBalanceInFuture) {
+		t.Fatalf("Create dated tomorrow: err = %v, want ErrOpeningBalanceInFuture", err)
+	}
+}
+
+// The service reads no clock for this rule. With its own clock late in the
+// evening and the household's day still passed in as the 28th, the 29th is
+// refused all the same: the answer comes from the argument.
+func TestTheOpeningBalanceRuleReadsTheDayItIsGivenNotTheClock(t *testing.T) {
+	repo := newFakeAccountRepo()
+	households := newHouseholdDouble()
+	households.put(domain.Household{ID: "h-1", PrimaryCurrency: "SGD"})
+	svc := usecase.NewAccountService(usecase.AccountDeps{
+		Accounts: repo, Households: households, FX: newFXDouble(),
+		// A whole week ahead of the day passed in below.
+		Clock:    &fixedClock{now: accountToday.AddDate(0, 0, 7)},
+		Holdings: holdingCounterDouble{},
+	})
+
+	in := validNewAccount()
+	in.OpeningBalanceAsOf = accountToday.AddDate(0, 0, 1)
+	if _, err := svc.Create(context.Background(), in, accountToday); !errors.Is(err, domain.ErrOpeningBalanceInFuture) {
+		t.Fatalf("err = %v, want ErrOpeningBalanceInFuture", err)
+	}
+}
+
+func TestUpdateRefusesMovingTheOpeningBalanceIntoTheFuture(t *testing.T) {
+	svc, _ := newAccountService(t)
+	created, err := svc.Create(context.Background(), validNewAccount(), accountToday)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	tomorrow := accountToday.AddDate(0, 0, 1)
+	_, err = svc.Update(context.Background(), "h-1", created.ID,
+		usecase.AccountUpdate{OpeningBalanceAsOf: &tomorrow}, accountToday)
+	if !errors.Is(err, domain.ErrOpeningBalanceInFuture) {
+		t.Fatalf("err = %v, want ErrOpeningBalanceInFuture", err)
+	}
+}
+
+// A stored date is checked only when a patch changes it. An account can be
+// dated after the household's today without anyone typing a future date: an
+// owner moves the household to a zone further west, and yesterday's "today"
+// is now tomorrow. Renaming that account must still work, or the owner meets
+// "That date is in the future" on a field they did not touch.
+func TestUpdateLeavesAStoredOpeningDateAloneWhenThePatchDoesNotChangeIt(t *testing.T) {
 	svc, _ := newAccountService(t)
 	in := validNewAccount()
-	in.OpeningBalanceAsOf = time.Date(2026, 7, 29, 0, 0, 0, 0, time.UTC)
-
-	if _, err := svc.Create(context.Background(), in); err != nil {
-		t.Fatalf("Create: %v -- a household in UTC+8 cannot enter today's balance", err)
+	in.OpeningBalanceAsOf = accountToday
+	created, err := svc.Create(context.Background(), in, accountToday)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
 	}
+
+	// The household's day is now the day BEFORE the stored date.
+	yesterday := accountToday.AddDate(0, 0, -1)
+	renamed := "DBS Multiplier"
+
+	t.Run("a patch that does not mention the date", func(t *testing.T) {
+		got, err := svc.Update(context.Background(), "h-1", created.ID,
+			usecase.AccountUpdate{Nickname: &renamed}, yesterday)
+		if err != nil {
+			t.Fatalf("Update: %v", err)
+		}
+		if got.Nickname != renamed || !got.OpeningBalanceAsOf.Equal(accountToday) {
+			t.Fatalf("account = %+v, want it renamed with its date untouched", got)
+		}
+	})
+
+	// The edit form sends every field back, changed or not.
+	t.Run("a patch that sends the same date back", func(t *testing.T) {
+		same := accountToday
+		if _, err := svc.Update(context.Background(), "h-1", created.ID,
+			usecase.AccountUpdate{Nickname: &renamed, OpeningBalanceAsOf: &same}, yesterday); err != nil {
+			t.Fatalf("Update: %v", err)
+		}
+	})
 }
 
 func TestCreateRefusesANegativeDebt(t *testing.T) {
@@ -228,7 +317,7 @@ func TestCreateRefusesANegativeDebt(t *testing.T) {
 	in.Type = "loan"
 	in.OpeningBalanceMinor = -1_450_000
 
-	_, err := svc.Create(context.Background(), in)
+	_, err := svc.Create(context.Background(), in, accountToday)
 	if !errors.Is(err, domain.ErrLiabilityBalanceNegative) {
 		t.Fatalf("err = %v, want ErrLiabilityBalanceNegative", err)
 	}
@@ -241,7 +330,7 @@ func TestCreateAllowsANegativeAsset(t *testing.T) {
 	in := validNewAccount()
 	in.OpeningBalanceMinor = -12_000
 
-	if _, err := svc.Create(context.Background(), in); err != nil {
+	if _, err := svc.Create(context.Background(), in, accountToday); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 }
@@ -256,7 +345,7 @@ func TestCreateRefusesAnOwnerFromAnotherHousehold(t *testing.T) {
 	in := validNewAccount()
 	in.OwnerMembershipID = "m-other"
 
-	_, err := svc.Create(context.Background(), in)
+	_, err := svc.Create(context.Background(), in, accountToday)
 	if !errors.Is(err, domain.ErrAccountOwnerNotInHousehold) {
 		t.Fatalf("err = %v, want ErrAccountOwnerNotInHousehold", err)
 	}
@@ -267,7 +356,7 @@ func TestCreateAcceptsAnEmptyOwnerAsShared(t *testing.T) {
 	in := validNewAccount()
 	in.OwnerMembershipID = ""
 
-	got, err := svc.Create(context.Background(), in)
+	got, err := svc.Create(context.Background(), in, accountToday)
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
@@ -281,7 +370,7 @@ func TestCreateAcceptsAnEmptyOwnerAsShared(t *testing.T) {
 // zero.
 func TestUpdateIsARealPatch(t *testing.T) {
 	svc, _ := newAccountService(t)
-	created, err := svc.Create(context.Background(), validNewAccount())
+	created, err := svc.Create(context.Background(), validNewAccount(), accountToday)
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
@@ -289,7 +378,7 @@ func TestUpdateIsARealPatch(t *testing.T) {
 	nickname := "DBS Salary"
 	got, err := svc.Update(context.Background(), "h-1", created.ID, usecase.AccountUpdate{
 		Nickname: &nickname,
-	})
+	}, accountToday)
 	if err != nil {
 		t.Fatalf("Update: %v", err)
 	}
@@ -311,7 +400,7 @@ func TestUpdateCanClearTheOwnerToShared(t *testing.T) {
 	svc, _ := newAccountService(t)
 	in := validNewAccount()
 	in.OwnerMembershipID = "m-1"
-	created, err := svc.Create(context.Background(), in)
+	created, err := svc.Create(context.Background(), in, accountToday)
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
@@ -319,7 +408,7 @@ func TestUpdateCanClearTheOwnerToShared(t *testing.T) {
 	shared := ""
 	got, err := svc.Update(context.Background(), "h-1", created.ID, usecase.AccountUpdate{
 		OwnerMembershipID: &shared,
-	})
+	}, accountToday)
 	if err != nil {
 		t.Fatalf("Update: %v", err)
 	}
@@ -335,13 +424,13 @@ func TestUpdateRefusesANegativeBalanceWhenTheTypeBecomesADebt(t *testing.T) {
 	svc, _ := newAccountService(t)
 	in := validNewAccount()
 	in.OpeningBalanceMinor = -12_000 // legal for cash
-	created, err := svc.Create(context.Background(), in)
+	created, err := svc.Create(context.Background(), in, accountToday)
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 
 	loan := "loan"
-	_, err = svc.Update(context.Background(), "h-1", created.ID, usecase.AccountUpdate{Type: &loan})
+	_, err = svc.Update(context.Background(), "h-1", created.ID, usecase.AccountUpdate{Type: &loan}, accountToday)
 	if !errors.Is(err, domain.ErrLiabilityBalanceNegative) {
 		t.Fatalf("err = %v, want ErrLiabilityBalanceNegative", err)
 	}
@@ -349,7 +438,7 @@ func TestUpdateRefusesANegativeBalanceWhenTheTypeBecomesADebt(t *testing.T) {
 
 func TestListExcludesArchivedAccountsByDefault(t *testing.T) {
 	svc, _ := newAccountService(t)
-	created, err := svc.Create(context.Background(), validNewAccount())
+	created, err := svc.Create(context.Background(), validNewAccount(), accountToday)
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}

@@ -95,6 +95,25 @@ describe("AdminHouseholdsPage", () => {
     expect(screen.getByText("Showing 1 of 1")).toBeInTheDocument();
   });
 
+  // QA ISSUE-010. Below md the member count is spelled out in the row's second
+  // line, and a household of one read "1 members".
+  it("spells a single member in the singular on the phone layout's line", async () => {
+    stubFetchRoutes({
+      [`GET ${adminHouseholdsPath("", 50)}`]: {
+        status: 200,
+        body: response([
+          listing({ id: "h1", name: "Solo", memberCount: 1 }),
+          listing({ id: "h2", name: "Crowd", memberCount: 4 }),
+        ]),
+      },
+    });
+    renderPage();
+
+    expect(await screen.findByText("1 member ·")).toBeInTheDocument();
+    expect(screen.getByText("4 members ·")).toBeInTheDocument();
+    expect(screen.queryByText(/1 members/)).not.toBeInTheDocument();
+  });
+
   it("names the matched member under a row that matched through a member", async () => {
     stubFetchRoutes({
       [`GET ${adminHouseholdsPath("christine@", 50)}`]: {

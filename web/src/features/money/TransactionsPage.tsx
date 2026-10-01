@@ -31,6 +31,8 @@ import {
 } from "./useTransactions";
 import type { Account } from "./schemas";
 import { monthLabel } from "./month";
+import { useHouseholdZone } from "../auth/useHouseholdZone";
+import { todayIn } from "../../lib/householdDate";
 
 // Owned here, not by TransactionFilters.tsx: that component holds no state of
 // its own (see its own file comment), and a value export sitting alongside a
@@ -68,16 +70,14 @@ async function fetchOlderPage(
   return transactionsResponseSchema.parse(body);
 }
 
-function formatDateHeading(occurredOn: string): string {
+// today is the household's today as "YYYY-MM-DD" (lib/householdDate.ts), the
+// same shape occurredOn has, so "is this row today's" is a string comparison
+// with no clock and no time zone in it.
+function formatDateHeading(occurredOn: string, today: string): string {
   const [year, month, day] = occurredOn.split("-").map(Number);
   const date = new Date(year, month - 1, day);
   const label = date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
-  const now = new Date();
-  const isToday =
-    date.getFullYear() === now.getFullYear() &&
-    date.getMonth() === now.getMonth() &&
-    date.getDate() === now.getDate();
-  return isToday ? `Today · ${label}` : label;
+  return occurredOn === today ? `Today · ${label}` : label;
 }
 
 // Assumes the server's own order is already day-grouped (keyset pagination
@@ -230,6 +230,7 @@ function TransactionRow({
 }
 
 export function TransactionsPage() {
+  const householdToday = todayIn(useHouseholdZone());
   const [filters, setFilters] = useState<TransactionFilterValues>(EMPTY_TRANSACTION_FILTERS);
   const [addOpen, setAddOpen] = useState(false);
   // Phones only: at `sm` and up the filters are always shown and this is unused.
@@ -575,7 +576,7 @@ export function TransactionsPage() {
             {groups.map((group, index) => (
               <div key={`${group.date}-${index}`}>
                 <p className="pb-1.5 pt-3.5 text-[11px] uppercase tracking-[0.08em] text-muted">
-                  {formatDateHeading(group.date)}
+                  {formatDateHeading(group.date, householdToday)}
                 </p>
                 {group.items.map((t) => (
                   <TransactionRow

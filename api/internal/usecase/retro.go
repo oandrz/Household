@@ -46,10 +46,34 @@ type RetroView struct {
 type RetroService struct {
 	retros  RetroRepository
 	actions RetroActionRepository
+	// households answers when a household was created and which zone it
+	// keeps its calendar in: together, the month a retro may not start
+	// before (householdCreatedOn).
+	households HouseholdRepository
 }
 
-func NewRetroService(retros RetroRepository, actions RetroActionRepository) *RetroService {
-	return &RetroService{retros: retros, actions: actions}
+func NewRetroService(retros RetroRepository, actions RetroActionRepository, households HouseholdRepository) *RetroService {
+	return &RetroService{retros: retros, actions: actions, households: households}
+}
+
+// householdCreatedOn is the household's calendar day on which it was
+// created: the creation instant read in the zone the household keeps now.
+// domain.StartableMonth takes it as the floor below which no retro starts.
+//
+// The zone is the stored one, not the zone at sign-up, which is not kept.
+// A household that moves its zone can therefore move its creation day by
+// one, and its floor by a month if it signed up within hours of a month
+// boundary. Accepted: the floor then still agrees with every other date the
+// household sees.
+//
+// An unloadable zone is an error, never a fallback to UTC, for the reason
+// domain.TodayIn gives.
+func (s *RetroService) householdCreatedOn(ctx context.Context, householdID string) (time.Time, error) {
+	household, err := s.households.Get(ctx, householdID)
+	if err != nil {
+		return time.Time{}, err
+	}
+	return domain.TodayIn(household.CreatedAt, household.Timezone)
 }
 
 // monthKey turns a month into a value safe to use as a map key. Two
@@ -71,6 +95,10 @@ func monthKey(t time.Time) int { return t.Year()*12 + int(t.Month()) }
 // deterministic in tests. Each derived figure below follows the spec's
 // formulas table (docs/superpowers/specs/2026-08-16-hearth-retros-design.md).
 func (s *RetroService) List(ctx context.Context, householdID string, today time.Time) (RetrosView, error) {
+	createdOn, err := s.householdCreatedOn(ctx, householdID)
+	if err != nil {
+		return RetrosView{}, err
+	}
 	records, err := s.retros.List(ctx, householdID)
 	if err != nil {
 		return RetrosView{}, err
@@ -137,9 +165,10 @@ func (s *RetroService) List(ctx context.Context, householdID string, today time.
 	}
 
 	// "Startable month": the earlier of {previous month, current month}
-	// with no retro row; nil when both already have one.
+	// with no retro row, never before the month the household was created
+	// in; nil when there is no such month.
 	var startMonth *time.Time
-	if sm, ok := domain.StartableMonth(today, currentExists, previousExists); ok {
+	if sm, ok := domain.StartableMonth(today, createdOn, currentExists, previousExists); ok {
 		startMonth = &sm
 	}
 
@@ -186,12 +215,20 @@ func (s *RetroService) Month(ctx context.Context, householdID string, month time
 }
 
 // Start creates a new draft for the month domain.StartableMonth picks -- the
-// earlier of {previous, current} that has none yet. It never falls back to
-// "today's month anyway": a stale tab open across a month boundary could
-// otherwise file a retro against a month the button never offered. Both
-// already having a retro is domain.ErrRetroNothingToStart, not an invented
-// third month.
+// earlier of {previous, current} that has none yet and is not before the
+// month the household was created in. It never falls back to "today's month
+// anyway": a stale tab open across a month boundary could otherwise file a
+// retro against a month the button never offered. No such month is
+// domain.ErrRetroNothingToStart, not an invented third month.
+//
+// The month is never the caller's to name, so the creation-month floor holds
+// for every channel that can reach this method, not only for a page that
+// hides the button.
 func (s *RetroService) Start(ctx context.Context, householdID string, today time.Time) (RetroRecord, error) {
+	createdOn, err := s.householdCreatedOn(ctx, householdID)
+	if err != nil {
+		return RetroRecord{}, err
+	}
 	current := startOfMonth(today)
 	previous := current.AddDate(0, -1, 0)
 
@@ -204,7 +241,7 @@ func (s *RetroService) Start(ctx context.Context, householdID string, today time
 		return RetroRecord{}, err
 	}
 
-	month, ok := domain.StartableMonth(today, currentExists, previousExists)
+	month, ok := domain.StartableMonth(today, createdOn, currentExists, previousExists)
 	if !ok {
 		return RetroRecord{}, domain.ErrRetroNothingToStart
 	}

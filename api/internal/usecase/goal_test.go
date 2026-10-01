@@ -664,7 +664,7 @@ func TestGoalAddContributionRefusesZeroAndArchivedGoals(t *testing.T) {
 	t.Run("zero amount refused", func(t *testing.T) {
 		_, err := f.svc.AddContribution(ctx, usecase.NewContribution{
 			HouseholdID: "house-1", GoalID: idrGoal.ID, AmountMinor: 0, OccurredOn: createdOn,
-		})
+		}, createdOn)
 		if !errors.Is(err, domain.ErrContributionAmountZero) {
 			t.Fatalf("err = %v, want ErrContributionAmountZero", err)
 		}
@@ -683,7 +683,7 @@ func TestGoalAddContributionRefusesZeroAndArchivedGoals(t *testing.T) {
 		}
 		_, err = f.svc.AddContribution(ctx, usecase.NewContribution{
 			HouseholdID: "house-1", GoalID: archivable.ID, AmountMinor: 1000, OccurredOn: createdOn,
-		})
+		}, createdOn)
 		if !errors.Is(err, domain.ErrGoalArchived) {
 			t.Fatalf("err = %v, want ErrGoalArchived", err)
 		}
@@ -692,7 +692,7 @@ func TestGoalAddContributionRefusesZeroAndArchivedGoals(t *testing.T) {
 	t.Run("valid contribution written in the goal's own currency", func(t *testing.T) {
 		got, err := f.svc.AddContribution(ctx, usecase.NewContribution{
 			HouseholdID: "house-1", GoalID: idrGoal.ID, AmountMinor: 500000, OccurredOn: createdOn, Note: "Bonus",
-		})
+		}, createdOn)
 		if err != nil {
 			t.Fatalf("AddContribution: %v", err)
 		}
@@ -703,6 +703,44 @@ func TestGoalAddContributionRefusesZeroAndArchivedGoals(t *testing.T) {
 			t.Fatalf("Amount.Amount = %d, want 500000", got.Amount.Amount)
 		}
 	})
+}
+
+// A contribution is a recorded fact: money that has gone into the goal. It
+// may not be dated after the household's today, or a goal would read as
+// further along than it is, since a goal's total sums every contribution with
+// no upper bound on the date. Today itself is allowed, and so is a withdrawal
+// (a negative amount): the rule is about the date, not the direction.
+func TestGoalAddContributionRefusesADateAfterTheHouseholdsToday(t *testing.T) {
+	f := newGoalFixture(t)
+	ctx := context.Background()
+	today := time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC)
+	tomorrow := today.AddDate(0, 0, 1)
+
+	goal, err := f.svc.Create(ctx, usecase.NewGoal{
+		HouseholdID: "house-1", Name: "Bali trip", TargetMinor: 600000, Currency: "SGD",
+		PlannedMonthlyMinor: 60000,
+	}, today)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	for name, amount := range map[string]int64{"a contribution": 60000, "a withdrawal": -20000} {
+		_, err := f.svc.AddContribution(ctx, usecase.NewContribution{
+			HouseholdID: "house-1", GoalID: goal.ID, AmountMinor: amount, OccurredOn: tomorrow,
+		}, today)
+		if !errors.Is(err, domain.ErrDateInFuture) {
+			t.Fatalf("%s dated tomorrow: err = %v, want ErrDateInFuture", name, err)
+		}
+	}
+	if got := len(f.goals.contributions[goal.ID]); got != 0 {
+		t.Fatalf("%d contribution(s) written by a refused add", got)
+	}
+
+	if _, err := f.svc.AddContribution(ctx, usecase.NewContribution{
+		HouseholdID: "house-1", GoalID: goal.ID, AmountMinor: 60000, OccurredOn: today,
+	}, today); err != nil {
+		t.Fatalf("dated today: %v", err)
+	}
 }
 
 // TestGoalAddContributionRefusesCrossHouseholdGoal: InsertGoalContribution's
@@ -731,7 +769,7 @@ func TestGoalAddContributionRefusesCrossHouseholdGoal(t *testing.T) {
 
 	_, err = f.svc.AddContribution(ctx, usecase.NewContribution{
 		HouseholdID: "house-2", GoalID: victimGoal.ID, AmountMinor: 999999, OccurredOn: createdOn, Note: "stolen",
-	})
+	}, createdOn)
 	if !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("err = %v, want domain.ErrNotFound -- a goal from another household must be indistinguishable from one that doesn't exist", err)
 	}

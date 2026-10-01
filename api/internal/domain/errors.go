@@ -49,6 +49,21 @@ var (
 	// (AccountType.SignedNetWorthAmount). It is always refused, never
 	// wrapped around silently.
 	ErrAmountOverflow = errors.New("amount overflows a signed 64-bit integer")
+	// ErrAmountTooLarge is CheckAmountWithinLimit's refusal: an amount a
+	// person supplied is further from zero than MaxAmountMinor. It is the
+	// caller's mistake (a 422), unlike ErrAmountOverflow above, which means
+	// arithmetic on figures already stored went wrong (a 500). This refusal
+	// at the door is what keeps that one from being reachable by a typo.
+	ErrAmountTooLarge = errors.New("amount is larger than Hearth records")
+	// ErrHoldingValueTooLarge is CheckHoldingValueWithinLimit's refusal: the
+	// most a holding has ever held, at one of its recorded prices, would be
+	// worth more than MaxAmountMinor. It is the caller's mistake (a 422).
+	//
+	// Don't reuse ErrAmountTooLarge for it. There one typed figure is past
+	// the ceiling; here every typed figure is inside it and only the two
+	// multiplied together are not, so "check it for extra digits" would
+	// point at a field that may be right.
+	ErrHoldingValueTooLarge = errors.New("holding would be worth more than Hearth records")
 	// ErrNoRate: there is no rate between two currencies. An FXRateProvider
 	// returns it, wrapped, for a pair it doesn't cover. It's the ONLY
 	// conversion failure a screen may answer by leaving an amount out of a
@@ -128,14 +143,27 @@ var (
 	// and categories rule.
 	ErrHoldingNameTaken    = errors.New("a holding with that name already exists in this account")
 	ErrHoldingNameRequired = errors.New("a holding name is required")
-	// ErrHoldingDateInFuture is the sibling of ErrOpeningBalanceInFuture, and
-	// matters more here: latest-price lookups order by as_of, so a price
-	// mistyped as 2030 outranks every real one forever and pins the holding's
-	// market value to a figure nobody can explain. Today is not the future --
-	// this project has shipped an off-by-one at exactly that boundary three
-	// times (see LEARNING's timezone pattern), so the comparison is on the
-	// calendar day, not the instant.
-	ErrHoldingDateInFuture = errors.New("that date is in the future")
+	// ErrDateInFuture is a recorded fact dated after the household's today.
+	// A fact is something that has happened: a holding's purchase, sale,
+	// price or income row, a transaction, a bill payment, a goal
+	// contribution. A plan may be dated ahead: a bill's next due date, a
+	// goal's target month, a budget month (ADR 12).
+	//
+	// Why it is refused: a balance, a goal's total and a holding's latest
+	// price are all read with no upper bound on the date, so a row mistyped
+	// as 2030 counts today. A 2099 expense lowers today's balance, and a
+	// 2030 price outranks every real one and pins the holding's value to a
+	// figure nobody can explain.
+	//
+	// Today is not the future, and "today" is the household's calendar day
+	// (TodayIn), not the server's: this project has shipped an off-by-one at
+	// exactly that boundary several times (LEARNING pattern 1). The
+	// comparison is on the calendar day, never the instant (IsAfterDay).
+	//
+	// ErrOpeningBalanceInFuture is the same rule for an account's opening
+	// balance. It is a separate sentinel only because it answers with a
+	// separate wire code, INVALID_AS_OF, named after the field it refuses.
+	ErrDateInFuture = errors.New("that date is in the future")
 	// ErrHoldingAccountNotInvestment fails closed on the account's type rather
 	// than trusting a screen to have offered only the right accounts. The
 	// sibling rule lives in AccountService: an account holding live holdings
@@ -169,6 +197,11 @@ var (
 	// holds something. usecase/account.go patches Type freely, so without this
 	// a cash account could end up holding 300g of gold.
 	ErrAccountHasHoldings = errors.New("that account holds investments and cannot change type")
+
+	// ErrInvalidTimezone is a household time zone that is not an IANA name
+	// this build can load. It also covers "" and "Local", which Go would load
+	// as UTC and as the server's own zone -- see ParseTimezone.
+	ErrInvalidTimezone = errors.New("that time zone is not recognised")
 
 	ErrUnknownAccountType         = errors.New("unknown account type")
 	ErrAccountNicknameRequired    = errors.New("an account nickname is required")
@@ -307,11 +340,12 @@ var (
 	// other person's paragraph is the failure this guard exists to prevent.
 	ErrRetroChanged = errors.New("this retro changed while you were editing it")
 
-	// ErrRetroNothingToStart is returned when both candidate months -- the
-	// current one and the previous one -- already have a retro, so there is
-	// nothing left for "Start retro" to create (domain.StartableMonth's own
-	// `ok == false` case). The HTTP layer maps this to 409.
-	ErrRetroNothingToStart = errors.New("both candidate months already have a retro")
+	// ErrRetroNothingToStart is returned when neither candidate month can be
+	// started: each of the previous month and the current one either already
+	// has a retro or is before the month the household was created in. There
+	// is nothing left for "Start retro" to create (domain.StartableMonth's
+	// own `ok == false` case). The HTTP layer maps this to 409.
+	ErrRetroNothingToStart = errors.New("there is no month left to start a retro for")
 
 	// ErrRetroActionBodyRequired is returned when an action's body is empty
 	// or whitespace-only. A blank row on the retro detail is indistinguishable

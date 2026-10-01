@@ -23,23 +23,32 @@ func ParseMood(n int) (Mood, error) {
 }
 
 // StartableMonth answers which month the "Start retro" button begins: the
-// EARLIER of {previous month, current month} that has no retro row yet.
+// EARLIER of {previous month, current month} that has no retro row yet and is
+// not before the month the household was created in.
 //
 // A couple doing July's retro on 2 August means July, not August, and August
 // stays available afterwards. With both months already covered there is
 // nothing to start, and the page opens what exists instead.
 //
-// today is a parameter, never time.Now() reached for in here: every other
-// date rule in this codebase takes its clock from the caller, which is what
-// makes them testable without freezing time globally.
-func StartableMonth(today time.Time, currentExists, previousExists bool) (time.Time, bool) {
+// The creation month is a floor: a household did not exist the month before
+// it signed up, so it is never asked to look back on it. A household created
+// on 1 October is offered October. Once October has a retro it is offered
+// nothing until November, never September.
+//
+// today and createdOn are both the household's calendar days (TodayIn), so
+// "previous", "current" and the creation month are the household's months and
+// not the server's. They are parameters, never time.Now() reached for in
+// here: every other date rule in this codebase takes its clock from the
+// caller, which is what makes them testable without freezing time globally.
+func StartableMonth(today, createdOn time.Time, currentExists, previousExists bool) (time.Time, bool) {
 	current := time.Date(today.Year(), today.Month(), 1, 0, 0, 0, 0, time.UTC)
 	previous := current.AddDate(0, -1, 0)
+	floor := time.Date(createdOn.Year(), createdOn.Month(), 1, 0, 0, 0, 0, time.UTC)
 
 	switch {
-	case !previousExists:
+	case !previousExists && !previous.Before(floor):
 		return previous, true
-	case !currentExists:
+	case !currentExists && !current.Before(floor):
 		return current, true
 	default:
 		return time.Time{}, false

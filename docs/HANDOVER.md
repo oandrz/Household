@@ -10,6 +10,92 @@ in three months or someone new.
 
 ## 1. Where things stand
 
+> **One calendar per household is built, on branch `fix/qa-2026-10-01`, since
+> 2026-10-01. Not pushed, not merged, not deployed.** It fixes QA ISSUE-002 to
+> ISSUE-006: a household stores an IANA time zone and both the server and the
+> frontend work out "today" in it ([ADR 12](adr/0012-one-calendar-per-household.md),
+> spec `docs/superpowers/specs/2026-10-01-hearth-household-calendar-design.md`,
+> build-order steps 1 to 7). Walked in a real browser on a separate stack.
+>
+> **Step 8 of that spec, the three owner-decided rules, is built on the same
+> branch, also 2026-10-01, also not pushed.** A transaction, a bill payment
+> and a goal contribution dated after the household's today are refused
+> (`422 INVALID_DATE`; the date half of QA ISSUE-013); a retro can never be
+> started for a month before the household was created; and Overview's "Next
+> retro" card shows last month's draft while it is still open and this month
+> has no retro. Each was a ⬜ row in `docs/FEATURE_TRACKER.md` and is ✅ now.
+> Walked in a real browser on a separate stack.
+>
+> **A holding's worth is held to the amount ceiling, on the same branch, also
+> 2026-10-01, also not pushed.** This closes the first gap of the amount
+> ceiling (QA ISSUE-001): 100,000 units and a price of S$1 trillion each
+> passed the per-amount ceiling, the price was stored, and `GET /holdings`
+> answered 500 for the household from then on. Every write to a holding's
+> events or prices is now checked before it is stored, under one row lock:
+> the most the holding ever held × every recorded price must stay within
+> `domain.MaxAmountMinor`, or the write answers 422 `HOLDING_VALUE_TOO_LARGE`.
+> Design and build order:
+> `docs/superpowers/specs/2026-10-01-hearth-holding-value-limit-design.md`
+> (steps 1 to 4 built; no migration). Walked in a real browser on a separate
+> stack, in both orders.
+>
+> **Before that is deployed: run the audit SQL at the end of that design,
+> read-only, against production, and expect zero rows.** A holding already
+> past the limit would refuse every write except the repair (delete the
+> purchase, or re-enter that day's price lower), and the audit is how to
+> know none exists. It has only been run against a local dev database.
+> **Not built, on purpose:** step 5 of the design, the database CHECK
+> constraints for the per-amount ceiling. It ships in a later release, after
+> that audit. The Portfolio does not get a per-holding "value unavailable"
+> state either; the owner declined it unless the audit finds a row the
+> operator cannot correct.
+>
+> **Left from QA ISSUE-013:** a transaction description takes 600 characters
+> without complaint, and unknown JSON fields in a request body are ignored
+> rather than refused. Neither is started.
+>
+> **QA ISSUE-007 to ISSUE-012 are fixed on the same branch, also 2026-10-01,
+> also not pushed.** Six small ones from the same QA run: the Spaces card's
+> audience counts the kids who hold Money; a household whose second currency
+> is its primary one is no longer offered an equivalents switch; the holding
+> entries dialog shows the unit as a label; "1 member" on the admin list's
+> phone layout; no literal "--" in copy; and an owner is told the primary
+> currency is locked before Save (`primaryCurrencyLocked` on
+> `GET /household`, owner only). Walked in a real browser on a separate stack
+> at 1280px and 375px.
+>
+> **Found while fixing those, and left for a decision:**
+>
+> - **Is a holding's unit singular or plural?** The presets and the
+>   placeholder are singular ("share", "gram", "unit"); the hint under the
+>   field suggests plurals ("shares, grams, units"); the portfolio card and
+>   each entry row print the count followed by the unit as typed, so a
+>   default holding reads "10 share" and a typed plural reads "1 grams". The
+>   dialog's labels no longer depend on the answer. Recommended: keep the
+>   unit singular, and print the count through a small table for the three
+>   presets ("1 share", "10 shares"), leaving any other unit as typed.
+> - **An account's Type is still refused only after Save** when the account
+>   holds investments (`ACCOUNT_HAS_HOLDINGS`), the same shape ISSUE-012 had.
+>   `AccountModal.tsx`'s Type select is always enabled.
+> - **`PATCH /household` accepts `showSecondaryCurrency: true`** for a
+>   household whose second currency is its primary one. Nothing renders
+>   equivalents anywhere yet, so nothing shows; it wants a rule when the
+>   second-currency chooser is built.
+>
+> **One thing to know when this branch meets `tablet-touch-targets`.**
+> `NextRetroCard.tsx` gained a second link that copies its neighbour's
+> `min-h-11 … sm:min-h-0`. That branch moves the touch-size reset to `lg:`
+> and has a test that fails on any `sm:` reset, so the new link needs the
+> same one-word change when the two are merged.
+>
+> **Before this is deployed:** migration `00022_household_timezone.sql` sets
+> every existing household to `Asia/Singapore`. That is the owner's decision
+> for the households that exist today. Run it against a restored production
+> dump first, as `00011`'s comment asks of any migration that touches a table
+> holding real rows, and check no household on the box belongs somewhere
+> else. The sign-up form and the API must be deployed together: the server
+> now refuses a sign-up that sends no time zone.
+
 > **Hearth is in production, since 2026-08-15.**
 > <https://oink.mywire.org> — one Hetzner CX23 in Falkenstein, `5.75.239.188`,
 > running the Compose stack behind Caddy. A real household exists on it and was
@@ -581,9 +667,11 @@ two. **No PR is open.** What is deliberately NOT in it:
   does its API need a locally-running gateway process. That one can kill the
   milestone and costs nothing to find out.
 - Two known gaps are recorded in `docs/FEATURE_TRACKER.md` rather than fixed:
-  `DELETE /holdings/{id}/valuations/{id}` has no screen, and the report's chart
-  puts every holding on one linear axis, so a holding of a wildly different
-  size flattens the rest.
+  a recorded price cannot be deleted (there is no
+  `DELETE /holdings/{id}/valuations/{id}` route and no screen; a wrong price is
+  corrected by posting the same date again), and the report's chart puts every
+  holding on one linear axis, so a holding of a wildly different size flattens
+  the rest.
 
 **The build order changed once already: self-serve sign-up shipped ahead of
 slice 2.** The original four-slice order below (Money, then Marriage, then

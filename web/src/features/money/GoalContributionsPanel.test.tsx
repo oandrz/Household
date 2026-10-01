@@ -21,6 +21,7 @@ import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { renderWithRouter } from "../../test/renderWithRouter";
 import { stubFetchRoutes, type RouteResponse } from "../../test/fetchStub";
+import { meRoute } from "../../test/meFixture";
 import { GoalContributionsPanel } from "./GoalContributionsPanel";
 import { GoalsPage } from "./GoalsPage";
 import type { Goal, GoalContribution, GoalsResponse } from "./goalSchemas";
@@ -30,9 +31,13 @@ beforeEach(() => {
   vi.setSystemTime(new Date("2026-08-15T12:00:00Z"));
 });
 
+const ORIGINAL_TZ = process.env.TZ;
+
 afterEach(() => {
   vi.useRealTimers();
   vi.unstubAllGlobals();
+  if (ORIGINAL_TZ === undefined) delete process.env.TZ;
+  else process.env.TZ = ORIGINAL_TZ;
 });
 
 const CURRENCIES = {
@@ -175,6 +180,29 @@ describe("GoalContributionsPanel", () => {
 
     expect(await screen.findByRole("alert")).toHaveTextContent("Enter an amount other than zero.");
     expect(mutatingCalls(fetchMock)).toEqual([]);
+  });
+
+  // The server refuses a contribution dated after the household's today.
+  // The panel has no rule of its own for that: it shows the server's
+  // sentence and keeps what was typed, so only the date needs fixing. A
+  // refused add must not clear the form the way a saved one does.
+  it("shows the server's own sentence when the date is refused, and keeps what was typed", async () => {
+    renderPanel(undefined, {
+      "GET /api/v1/goals/goal-1/contributions": { status: 200, body: { contributions: [] } },
+      "POST /api/v1/goals/goal-1/contributions": {
+        status: 422,
+        body: { error: { code: "INVALID_DATE", message: "That date is in the future." } },
+      },
+    });
+
+    await screen.findByTestId("goal-contributions-empty");
+    fireEvent.change(screen.getByLabelText("Amount"), { target: { value: "400.00" } });
+    fireEvent.change(screen.getByLabelText("Date"), { target: { value: "2099-01-01" } });
+    fireEvent.click(screen.getByRole("button", { name: "Add" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("That date is in the future.");
+    expect(screen.getByLabelText("Amount")).toHaveValue("400.00");
+    expect(screen.getByLabelText("Date")).toHaveValue("2099-01-01");
   });
 
   // The other half of the same spec decision: a negative amount is a
@@ -421,5 +449,21 @@ describe("GoalCard's Add contribution control", () => {
 
     await waitFor(() => expect(screen.getByTestId("goal-card")).toHaveTextContent("75%"));
     expect(screen.getByTestId("goal-card")).toHaveTextContent("S$3,000.00 of S$10,000.00");
+  });
+
+  // QA ISSUE-006, the browser's half: "Actual this month" is summed over the
+  // household's month, so a contribution's default date is the household's
+  // today.
+  it("defaults the date to the household's today, whatever zone the browser is in", async () => {
+    // 23:00 UTC on 30 September: 16:00 that day in Los Angeles, where the
+    // browser is, and 07:00 on 1 October in Singapore, where the household is.
+    process.env.TZ = "America/Los_Angeles";
+    vi.setSystemTime(new Date("2026-09-30T23:00:00Z"));
+    renderPanel(undefined, {
+      ...meRoute("Asia/Singapore"),
+      "GET /api/v1/goals/goal-1/contributions": { status: 200, body: { contributions: [] } },
+    });
+
+    await waitFor(() => expect(screen.getByLabelText("Date")).toHaveValue("2026-10-01"));
   });
 });

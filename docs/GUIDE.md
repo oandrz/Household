@@ -135,10 +135,33 @@ Calendar access sees Family and nothing else.
 **Members** — everyone in the household, their role, and their four access
 switches. Children show their age. Email addresses are visible to owners only.
 
-**Spaces** — the spaces in the sidebar and who each is for.
+**Spaces** — the spaces in the sidebar and who each is for. Money reads
+"Parents" until a child is given the Money switch in **Members**; then it
+counts them: "Parents and 1 kid", "Parents and 2 kids".
 
 **Currency & region** — your primary currency, whether to show a second currency
-alongside it, and how the exchange rate is obtained.
+alongside it, how the exchange rate is obtained, and your household's **time
+zone**.
+
+The primary currency can be changed until you add your first investment
+holding. From then on it is shown as text with the line "Can't be changed
+while you hold investments": every holding records what it cost in the
+currency you kept books in at the time, and Hearth cannot restate that in
+another one. Archiving the holding does not unlock it.
+
+A household has a second currency only if one was set for it; there is no
+control to choose one yet. Without one, the row reads "Second currency: None
+set" and there is no switch.
+
+The time zone decides which day is "today" for everyone in the household. It
+is set from your browser when you create the household, and an owner can
+change it here; the line under the control shows today's date in the zone you
+have picked, so you can check it before you save. Every date Hearth works out
+follows it: the date a new transaction or payment starts on, which month the
+ledger and the budget open on, which bills count as paid this month, which
+month a retro is for. A member who is travelling sees the household's date,
+not their own: one household, one calendar. Changing the zone does not alter
+anything already saved.
 
 **Notifications** — four reminders: bills due, overspending, the monthly
 check-in, and the weekly summary.
@@ -166,7 +189,7 @@ for dollars, `1200` for yen. Put the category after `#` and the account
 after `@`; quote a name with spaces. Leave `@account` out and the bot uses
 your only cash account — if you have more than one it asks which. The bot
 answers with what it saved, and the row appears in Transactions dated today
-with you as the payer.
+(by your household's time zone, see Settings) with you as the payer.
 
 If the install has a language model configured (an open-weight model
 through OpenRouter), you can also just say it —
@@ -229,6 +252,41 @@ unique within a household.
 
 **An invite will not send.** If the address already belongs to a member, Hearth
 refuses rather than sending a link that could never be accepted.
+
+**"That date is in the future."** Anything that has already happened cannot be
+dated after today: a transaction, a bill payment ("paid on"), a contribution
+to a goal, a holding purchase, sale, price or dividend, and an account's
+starting balance. Plans can be dated ahead: a bill's next due date, a goal's
+target month, a budget for a coming month. "Today" is your household's, by
+the time zone in Settings. If today's date is being refused, the time zone is
+probably wrong: check the date shown under it.
+
+An entry saved earlier with a later date is left as it is, and you can still
+correct its description or amount. Only changing its date to another future
+day is refused.
+
+**"That would make this holding worth more than Hearth can record."** A
+holding's worth is how many units you hold times the price of one. Hearth
+records at most 1,000,000,000,000 (a trillion) of any currency for one
+holding, counting the most you have ever held of it against every price you
+have recorded for it. You can meet this message when saving a price, when
+recording a purchase, or when removing a sale (removing a sale puts those
+units back). It almost always means extra digits: check whether the price is
+for one unit rather than the whole holding, and whether the quantity is
+right. Nothing was saved, so there is nothing to undo. To correct a price
+that is already saved, save that same day's price again with the right
+figure.
+
+**The Retros page has no "Start retro" button.** There is no month left to
+start. A retro can be started for last month or this month, whichever is
+earlier and has none yet, and never for a month before your household was
+created. A household created in October starts with October's retro; once
+that exists, the next one is November's.
+
+**Overview shows last month's retro.** That is on purpose. When this month has
+no retro yet and last month's is still unfinished, the "Next retro" card shows
+last month's as "In progress" with a link to it, because finishing it comes
+first. The Retros page still lets you start this month's.
 
 **Nothing loads at all.** Check the stack is up with `make ps`, and the logs with
 `make logs`.

@@ -145,9 +145,9 @@ export const GOAL_COPY = {
 // own targetMonthLabel and BudgetHistoryModal.tsx's own monthNameOnly:
 // anchored on day 2, not day 1, for the identical UTC-offset reason both of
 // those already document. Kept private to this file rather than imported
-// from either sibling -- a small duplicated four-line function is the
-// established trade-off here (TransactionModal.tsx's own today() makes the
-// same call), not a shared date-formatting module.
+// from either sibling -- a small duplicated four-line formatter is the
+// established trade-off here, not a shared date-formatting module. (Which
+// month it is NOW is a different matter and is shared: lib/householdDate.ts.)
 function monthNameOnly(month: string): string {
   const [year, monthNum] = month.split("-").map(Number);
   return new Date(year, monthNum - 1, 2).toLocaleDateString("en-US", { month: "long" });

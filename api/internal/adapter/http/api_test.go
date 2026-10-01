@@ -39,12 +39,14 @@ var invitePreAuthRoutes = map[string]bool{
 	"POST /api/v1/invites/{token}/accept": true,
 }
 
-// movableClock is a controllable usecase.Clock, with two callers:
+// movableClock is a controllable usecase.Clock. Its callers:
 // TestSessionCookiesSlideWhenExtended fast-forwards time to prove cookies
-// slide near expiry, and TestOwnerSeesTheTwelveMonthTrend pins it to a
-// stable instant for an exact twelve-month window.
+// slide near expiry, TestOwnerSeesTheTwelveMonthTrend pins it to a stable
+// instant for an exact twelve-month window, and the household-calendar
+// tests (household_day_api_test.go) stop it at 23:00 UTC on a day, month,
+// quarter or year boundary.
 //
-// Both anchor on real now, and a third must too: session expiry is enforced
+// All of them anchor on real now or later, and a new one must too: session expiry is enforced
 // by Postgres's now() in GetLiveSession's WHERE clause, not by this clock.
 // Pinning it to an absolute past date still signs in against real wall time
 // and fails one SessionTTL later -- this has happened.
@@ -323,7 +325,6 @@ func newTestEnvWith(t *testing.T, clk usecase.Clock, outbox usecase.MailOutbox) 
 		Accounts:     accountRepo,
 		Households:   households,
 		FX:           fxProvider,
-		Clock:        clk,
 	})
 	goalRepo := postgres.NewGoalRepo(db)
 	holdingSvc := usecase.NewHoldingService(usecase.HoldingDeps{
@@ -359,12 +360,12 @@ func newTestEnvWith(t *testing.T, clk usecase.Clock, outbox usecase.MailOutbox) 
 		Accounts:   accountRepo,
 		Categories: categoryRepo,
 	})
-	retroSvc := usecase.NewRetroService(postgres.NewRetroRepo(db), postgres.NewRetroActionRepo(db))
+	retroSvc := usecase.NewRetroService(postgres.NewRetroRepo(db), postgres.NewRetroActionRepo(db), households)
 	// goalRepo doubles as the GoalProgressReader, the same reasoning
 	// cmd/api/main.go's own wiring comment gives: Vision needs one
 	// percentage from Goals and the narrow port is what keeps it from
 	// depending on GoalRepository's whole surface.
-	visionSvc := usecase.NewVisionService(postgres.NewVisionRepo(db), goalRepo, clk)
+	visionSvc := usecase.NewVisionService(postgres.NewVisionRepo(db), goalRepo)
 	agreementSvc := usecase.NewAgreementService(postgres.NewAgreementRepo(db), memberships)
 
 	platformAdminRepo := postgres.NewPlatformAdminRepo(db)
@@ -449,7 +450,8 @@ func newTestEnvWith(t *testing.T, clk usecase.Clock, outbox usecase.MailOutbox) 
 
 	ctx := context.Background()
 	h, err := households.Create(ctx, domain.Household{
-		Name: "Andreas & Christine", FamilyName: "Oentoro",
+		Timezone: "UTC",
+		Name:     "Andreas & Christine", FamilyName: "Oentoro",
 		PrimaryCurrency: "SGD", ShowSecondaryCurrency: true, SecondaryCurrency: "IDR",
 	})
 	if err != nil {

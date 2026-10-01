@@ -24,6 +24,7 @@ import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { renderWithRouter } from "../../test/renderWithRouter";
 import { stubFetchRoutes, type RouteResponse } from "../../test/fetchStub";
+import { meRoute } from "../../test/meFixture";
 import { GoalModal, type GoalModalMode } from "./GoalModal";
 import type { Goal } from "./goalSchemas";
 
@@ -32,9 +33,13 @@ beforeEach(() => {
   vi.setSystemTime(new Date("2026-08-15T12:00:00Z"));
 });
 
+const ORIGINAL_TZ = process.env.TZ;
+
 afterEach(() => {
   vi.useRealTimers();
   vi.unstubAllGlobals();
+  if (ORIGINAL_TZ === undefined) delete process.env.TZ;
+  else process.env.TZ = ORIGINAL_TZ;
 });
 
 const CURRENCIES = [
@@ -351,5 +356,24 @@ describe("GoalModal", () => {
 
     expect(await screen.findByRole("alert")).toHaveTextContent("Enter a target greater than zero.");
     expect(mutatingCalls(fetchMock)).toEqual([]);
+  });
+
+  // The suggestion divides by the months left, counted from the household's
+  // month. On the household's 1 October a goal due in October has one month
+  // left, so the whole S$10,000 is this month's; counted from the browser's
+  // September it would be two months and half the figure.
+  it("counts the months left from the household's month, whatever zone the browser is in", async () => {
+    // 23:00 UTC on 30 September: 16:00 that day in Los Angeles, where the
+    // browser is, and 07:00 on 1 October in Singapore, where the household is.
+    process.env.TZ = "America/Los_Angeles";
+    vi.setSystemTime(new Date("2026-09-30T23:00:00Z"));
+    renderModal(undefined, meRoute("Asia/Singapore"));
+
+    fireEvent.change(await screen.findByLabelText("Target amount"), { target: { value: "10000.00" } });
+    fireEvent.change(screen.getByLabelText("Target month"), { target: { value: "2026-10" } });
+
+    await waitFor(() =>
+      expect(screen.getByTestId("goal-modal-suggestion")).toHaveTextContent("save ~S$10,000.00/mo"),
+    );
   });
 });

@@ -160,8 +160,8 @@ func NewBillService(deps BillDeps) *BillService {
 // carrying Overdue/DueSoon), the paid-this-month list and the page summary,
 // in four repository calls regardless of how many bills or payments exist.
 // today is always a parameter -- see BillDeps' own comment -- so every
-// figure is deterministic in tests and driven by the clock port in
-// production.
+// figure is deterministic in tests. In production it is the household's
+// calendar day, so "this month" is the household's month.
 //
 // ExcludedNoRate counts once per BILL, even one that would otherwise touch
 // two totals, plus once per PAYMENT not already counted that way -- a
@@ -455,6 +455,9 @@ func (s *BillService) Create(ctx context.Context, in NewBill, today time.Time) (
 	if in.AmountMinor <= 0 {
 		return BillView{}, domain.ErrBillAmountNotPositive
 	}
+	if err := domain.CheckAmountWithinLimit(in.AmountMinor); err != nil {
+		return BillView{}, err
+	}
 	cadence, err := domain.ParseCadence(string(in.Cadence))
 	if err != nil {
 		return BillView{}, err
@@ -551,6 +554,9 @@ func (s *BillService) Update(ctx context.Context, householdID, billID string, pa
 		if *patch.AmountMinor <= 0 {
 			return BillView{}, domain.ErrBillAmountNotPositive
 		}
+		if err := domain.CheckAmountWithinLimit(*patch.AmountMinor); err != nil {
+			return BillView{}, err
+		}
 		b.Amount.Amount = *patch.AmountMinor
 	}
 	if patch.Cadence != nil {
@@ -626,18 +632,22 @@ func (s *BillService) Update(ctx context.Context, householdID, billID string, pa
 	return s.toView(updated, today), nil
 }
 
-// SetArchived archives or restores a bill, stamping ArchivedAt with at --
-// the same caller-supplied convention AccountRepository.SetArchived and
-// GoalRepository.SetArchived use. BillRepository.SetArchived already
-// returns the full record, so no second Get is needed. at also doubles as
-// "today" for the returned view's Overdue/DueSoon, since BillDeps carries
-// no Clock.
-func (s *BillService) SetArchived(ctx context.Context, householdID, billID string, archived bool, at time.Time) (BillView, error) {
+// SetArchived archives or restores a bill. BillRepository.SetArchived
+// already returns the full record, so no second Get is needed.
+//
+// It takes two times because it does two jobs. at is the instant stamped
+// into ArchivedAt, the same caller-supplied convention
+// AccountRepository.SetArchived and GoalRepository.SetArchived use. today is
+// the household's calendar day, which decides Overdue and DueSoon on the
+// returned view. Don't pass one value for both: late in the UTC day the
+// instant is still yesterday for a household east of Greenwich, and the row
+// would come back with yesterday's Overdue.
+func (s *BillService) SetArchived(ctx context.Context, householdID, billID string, archived bool, at, today time.Time) (BillView, error) {
 	rec, err := s.deps.Bills.SetArchived(ctx, householdID, billID, archived, at)
 	if err != nil {
 		return BillView{}, err
 	}
-	return s.toView(rec, at), nil
+	return s.toView(rec, today), nil
 }
 
 // MarkPaid writes the payment, the expense and the advanced due date,
@@ -662,9 +672,24 @@ func (s *BillService) SetArchived(ctx context.Context, householdID, billID strin
 // pay-from account each mean something different to the household. Reason
 // is what the HTTP layer switches on to answer each with its own message,
 // without disturbing an errors.Is(err, domain.ErrForbidden) caller.
-func (s *BillService) MarkPaid(ctx context.Context, in MarkPayment) (BillPaymentView, error) {
+//
+// in.PaidOn may not be after today, the household's calendar day: a payment
+// is a recorded fact (refuseFutureDate). The check is here and not left to
+// TransactionService: the expense RecordPayment writes is dated PaidOn and
+// never passes through that service, so this is the only date check it
+// gets. The bill's due date is a plan and is not checked: paying a bill
+// before it is due is ordinary.
+func (s *BillService) MarkPaid(ctx context.Context, in MarkPayment, today time.Time) (BillPaymentView, error) {
 	if in.AmountMinor != nil && *in.AmountMinor <= 0 {
 		return BillPaymentView{}, domain.ErrBillAmountNotPositive
+	}
+	if in.AmountMinor != nil {
+		if err := domain.CheckAmountWithinLimit(*in.AmountMinor); err != nil {
+			return BillPaymentView{}, err
+		}
+	}
+	if err := refuseFutureDate(in.PaidOn, today); err != nil {
+		return BillPaymentView{}, err
 	}
 	rec, err := s.deps.Bills.Get(ctx, in.HouseholdID, in.BillID)
 	if err != nil {

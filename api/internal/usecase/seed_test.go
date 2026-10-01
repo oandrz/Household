@@ -112,6 +112,11 @@ func TestSeedCreatesExactlyOneHousehold(t *testing.T) {
 	if h.Name != "Andreas & Christine" {
 		t.Fatalf("household name = %q, want %q", h.Name, "Andreas & Christine")
 	}
+	// The design's household lives in Singapore, which is what makes the
+	// seeded data show the right day on a developer's screen there.
+	if h.Timezone != "Asia/Singapore" {
+		t.Fatalf("household time zone = %q, want Asia/Singapore", h.Timezone)
+	}
 }
 
 func TestSeedCreatesAndreasAsAFullyCapableOwner(t *testing.T) {

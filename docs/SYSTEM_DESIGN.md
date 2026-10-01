@@ -246,6 +246,20 @@ held outside this machine, and on 2026-08-15 a restore was run from that paper
 copy alone (`docs/INFRASTRUCTURE.md`, "The escrow envelope"). §8's Backups row
 carries the detail.
 
+**A household keeps one calendar, since 2026-10-01**
+([ADR 12](adr/0012-one-calendar-per-household.md)). `households.timezone`
+stores an IANA zone, and both the server and the frontend work out "today"
+in it, so they cannot disagree about the date or the month the way a UTC
+server and a browser in Singapore did for eight hours of every day. §4 has
+the middleware step, §5 "The household's calendar" the flow, §6 the column
+and §7 the frontend helper. Three rules ride on it, all built: a recorded
+fact (a transaction, a bill payment, a goal contribution, a holding's rows,
+an opening balance) may not be dated after the household's today (§5 "The
+household's calendar"); a retro can never be started for a month before the
+household was created (§5 "Retros"); and Overview's "Next retro" card shows
+last month's draft while it is still open and this month has no retro (§5
+"What the frontend loads").
+
 ---
 
 ## 1 · Containers
@@ -717,7 +731,7 @@ graph TD
     end
 
     subgraph domain["internal/domain/ — rules, stdlib only"]
-        Rules["Money · Rate · Currency · Role · Capability<br/>Membership · Space · LockoutPolicy<br/>PlatformAdmin · Flag/FlagSet<br/>ColumnIsRedacted · typed errors"]
+        Rules["Money · Rate · Currency · Role · Capability<br/>Membership · Space · LockoutPolicy<br/>PlatformAdmin · Flag/FlagSet<br/>ColumnIsRedacted · TodayIn (the household's day) · typed errors"]
     end
 
     Main --> HTTP
@@ -888,9 +902,9 @@ in one file.
 | `BudgetRepository` | `adapter/postgres` | Fourteenth. `Get` returns `domain.ErrNotFound` for an unbudgeted month, which the service turns into the empty state, not an error; `Upsert` replaces one household-month wholesale in a single transaction — parent row upserted on `(household_id, month)`, every existing line deleted, every new line inserted, category ownership validated first — never a merge, so a category the caller left out of the payload is unambiguously gone after the call; `History` returns the closed months in range that actually have a budget row, never zero-filled; `RollOverToGoal` writes a `goal_contributions` row **and** stamps `budgets.rolled_over_at`/`rollover_goal_id` in one transaction — the stamp is a conditional `UPDATE ... WHERE rolled_over_at IS NULL`, so a second concurrent call finds no row to update and answers `ErrRolloverAlreadyDone` rather than writing a second contribution (§5) |
 | `GoalRepository` | `adapter/postgres` | Fifteenth. `List`/`Get` return each goal's stored fields plus the one figure only SQL can cheaply supply — the summed `contributed` — leaving percent, status and required-monthly to `domain.` arithmetic in the service; `Create` writes the goal and, when a starting balance is given, its opening contribution in one transaction, so a goal with a missing opening contribution cannot exist; `DeleteContribution` clears a rolled-over month's stamp in the same transaction as the delete when the row being removed is that month's rollover (§5). The port's own doc comment carries a warning no other repository needs: `goal_contributions.household_id` has no database-level constraint tying it to its own `goal_id`'s household, so every method that reads or writes a contribution filters by `household_id` **and** `goal_id` together, never by contribution id alone |
 | `BillRepository` | `adapter/postgres` | Sixteenth. `List`'s `includeArchived` is the same UNION-not-filter-swap contract as `AccountRepository`/`GoalRepository`. `RecordPayment` writes the expense (`transactions`), the payment (`bill_payments`) and the advanced `next_due` in one transaction — a bill left advanced with no payment, or a payment with no expense, is not a state this port can produce; `UndoPayment` reverses all three the same way, refusing any payment that is not the bill's most recent with `*domain.BillPaymentNotLatestError`. `MonthTotals` cannot come from `bills` alone — a bill already paid this month has `next_due` in the *next* one — so it unions `bill_payments` (by `due_on`) with still-unpaid live bills (by `next_due`); the two halves filter archived bills differently on purpose (§5). `bill_payments.household_id` carries the same unenforced-by-the-database warning as `goal_contributions`: every method filters by `household_id` **and** `bill_id` together, never by payment id alone (§6) |
-| `HoldingRepository`, `HoldingEventRepository`, `HoldingValuationRepository` | `adapter/postgres` (all three in `holding_repo.go`) | Seventeenth to nineteenth — three narrow ports over three tables rather than one object with fifteen methods, the same interface-segregation rule the nine before them follow. `HoldingRepository.List`'s `includeArchived` is the UNION-not-filter-swap contract again. **`HoldingEventRepository` is the one worth reading twice.** `ListByHolding` returns events ordered `(occurred_on, created_at, id)` and the port's doc comment calls that a CONTRACT, not a preference: `occurred_on` is a date, so buying and selling the same morning is a tie, and `domain.Holding.Position` sorts *stably* — it keeps whatever order it is handed. On identical same-day events, buy-then-sell realises 750 where sell-then-buy realises 1000, so the repository's ORDER BY is what makes a household's realised gain deterministic. `InsertWithFold`/`DeleteWithFold` exist because reading, folding and writing as three calls is not equivalent to doing them atomically: they take a row lock on the holding, list its events inside the same transaction, and hand them to the caller's fold, writing only if it accepts. The fold stays in the domain; the port owns the transaction and the lock, never the rule (§5) |
+| `HoldingRepository`, `HoldingEventRepository`, `HoldingValuationRepository` | `adapter/postgres` (all three in `holding_repo.go`) | Seventeenth to nineteenth — three narrow ports over three tables rather than one object with fifteen methods, the same interface-segregation rule the nine before them follow. `HoldingRepository.List`'s `includeArchived` is the UNION-not-filter-swap contract again. **`HoldingEventRepository` is the one worth reading twice.** `ListByHolding` returns events ordered `(occurred_on, created_at, id)` and the port's doc comment calls that a CONTRACT, not a preference: `occurred_on` is a date, so buying and selling the same morning is a tie, and `domain.Holding.Position` sorts *stably* — it keeps whatever order it is handed. On identical same-day events, buy-then-sell realises 750 where sell-then-buy realises 1000, so the repository's ORDER BY is what makes a household's realised gain deterministic. `InsertWithFold`/`DeleteWithFold` exist because reading, folding and writing as three calls is not equivalent to doing them atomically: they take a row lock on the holding, read its events **and its prices** inside the same transaction, and hand both to the caller's rule, a `usecase.HoldingFold`, writing only if it accepts. **`HoldingValuationRepository` has no plain `Upsert`.** Its one write is `UpsertWithFold`, which takes the *same* row lock and calls the same kind of fold, so a price write and an event write on one holding never overlap and there is no unguarded way to store a price. `HoldingFold`'s doc comment is the contract, written once: both arguments are the holding's rows as they *would be* after the write (a new event appended, a deleted one taken out, a new price in place of the row for the same calendar day), and the fold does no I/O because it runs holding the lock and a pool connection. The rule stays in the service and the domain; the ports own the transaction and the lock, never the rule (§5) |
 | `HoldingIncomeRepository` | `adapter/postgres` (`holding_repo.go`) | Twentieth. The dividends a holding paid and the charges made against it. **It has no ordering contract and no fold-inside-the-write**, and the contrast with `HoldingEventRepository` directly above is the point: income enters no average-cost pool, so no invariant spans two rows, no order changes the answer, and there is nothing for a lock to protect. Addition is commutative; the event fold is not |
-| `HoldingCounter` | `adapter/postgres` (`*HoldingRepo` already satisfies it) | Unnumbered, like `AccountLookup`/`GoalProgressReader` — a narrow port for one question asked in the opposite direction. It now answers two: whether an ACCOUNT still holds anything (which stops an account's type changing under its holdings), and whether a HOUSEHOLD does (which stops its primary currency changing under them — every holding event records its cost in the currency the books were kept in at the time, and nothing in the data can restate it). `AccountService` patches an account's `Type` freely, so without this an owner could turn a brokerage into a cash account while it still held 300g of gold, leaving holdings anchored to a type `HoldingService` would never have accepted. One method: does this account still hold anything. `AccountDeps.Holdings` is **required, not optional** — a nil there would silently disable the guard, and a guard you can switch off by forgetting a field is not a guard |
+| `HoldingCounter` | `adapter/postgres` (`*HoldingRepo` already satisfies it) | Unnumbered, like `AccountLookup`/`GoalProgressReader` — a narrow port for one question asked in the opposite direction. It now answers two: whether an ACCOUNT still holds anything (which stops an account's type changing under its holdings), and whether a HOUSEHOLD does (which stops its primary currency changing under them — every holding event records its cost in the currency the books were kept in at the time, and nothing in the data can restate it). `HouseholdService.PrimaryCurrencyLocked` is the one reader of that second answer: `Update` refuses a currency change on it, and `GET /household` reports it to an owner so Settings can say so before Save. `AccountService` patches an account's `Type` freely, so without this an owner could turn a brokerage into a cash account while it still held 300g of gold, leaving holdings anchored to a type `HoldingService` would never have accepted. One method: does this account still hold anything. `AccountDeps.Holdings` is **required, not optional** — a nil there would silently disable the guard, and a guard you can switch off by forgetting a field is not a guard |
 | `AccountLookup`, `CategoryLookup` | `adapter/postgres` (`*AccountRepo` and `*CategoryRepo` already satisfy them) | Narrower ports `TransactionService` depends on instead of the full repositories above — interface segregation: it needs an account's currency and household, and whether a category id belongs to this household and what kind it is, never `List` or `EnsureSeeded`. `BillService.MarkPaid` depends on this same `AccountLookup`, for the same reason and to the same effect: the pay-from account's currency, not a value Bills stores of its own (§5). `BillService.Create`/`Update` depend on the same `CategoryLookup` too: a bill's category is copied onto the real expense `MarkPaid` writes, so it has to satisfy the ledger's own rule — this household's, and an expense category — or the spend lands in Budget's `Spent` and in no category row at all |
 | `RetroRepository` | `adapter/postgres` | Seventeenth. `Create` answers `ErrAlreadyExists` on the `UNIQUE(household_id, month)` clash; `Update` takes the caller-normalised month and version it loaded, and tells "the retro is gone" (`ErrNotFound`, from a recheck read) from "someone saved first" (`ErrRetroChanged`, from a zero-row `UPDATE ... WHERE version = $n`) apart — never merges (§5); `Complete` is idempotent on the caller's own `at`; `DeleteDraft` puts `WHERE completed_at IS NULL` in the SQL itself, not a service `if`, so a zero-row match on a finished retro is `ErrNotFound`, not a silent no-op (`docs/LEARNING.md`'s Bills `SetBillNextDue` entry is the same defect shape this port was built to avoid) |
 | `RetroActionRepository` | `adapter/postgres` | Eighteenth. `Add` writes the action and its assignees in one transaction, so a bad assignee id leaves no orphan action; `carriedFrom` is validated through a join back to `retros` requiring the same household before it is trusted, and a malformed id is refused rather than silently read as SQL NULL (`docs/LEARNING.md`) — "fail closed on values you did not construct" applied to a field the client supplies directly. `OpenInMonth` backs both the modal's "Still open from July" offer and Overview's `openActionCount` |
@@ -914,7 +928,7 @@ in one file.
 | `MailOutbox` | `adapter/mail` (`MailpitOutbox`, its only implementation) | Reads what `Mailer` sent, rather than what it is about to — the operator's outbound message inspector, added 2026-09-04. `Recent(ctx, limit) (OutboxPage, error)` and `Message(ctx, id) (OutboxMessage, error)` hand back the body exactly as Mailpit holds it, unprocessed: extraction is `AdminOutboxService`'s job (§2), not the adapter's, so "which strings are links" stays testable without an HTTP server. Two Mailpit endpoints only, `GET /api/v1/messages` and `GET /api/v1/message/{id}` — a test asserts no third path is ever requested, because `GET /api/v1/message/{id}/link-check` looks like the obvious third and is not: it issues a real HTTP request to every URL it finds, and every URL in a Hearth email is a live single-use token. `Message` reports `domain.ErrNotFound` for an id Mailpit's own store no longer holds (it keeps no volume, so a restart empties it) and both methods report `usecase.ErrOutboxUnavailable` — a distinct error, because an operator needs different advice for "no such message" than for "Mailpit is down" — when the upstream cannot be reached, times out, or answers a body the adapter cannot map (a message with no recipient, since every Hearth template addresses exactly one). A 5-second timeout and no retries, the same reasoning `TokenGenerator`'s neighbours use for a same-host dependency: a slow answer means something is wrong, not far away |
 | `DatabaseBrowser` | `adapter/postgres` — **two** implementations: `BrowseRepo` (live) and `UnavailableBrowse` (a stand-in) | The operator's read-only database browse, added 2026-09-04. `Tables(ctx)` and `Rows(ctx, table, limit, offset)`. Every **cell** comes back already rendered as text — no driver type, no `any`, nothing a caller could write through; the counts beside them (`TableInfo.RowCount`, `RowPage.Total`/`Limit`/`Offset`) are plain `int64`/`int`, because a number the screen formats is not data read out of a household's row. That is not only the clean-architecture rule: it is what lets the implementation render a redacted column as a literal *inside its own `SELECT` list*, so the secret bytes never leave Postgres (spec decision 7). The contract is three clauses and all three are load-bearing: `domain.ErrNotFound` for a table this role cannot see — whether it does not exist or the role has no privilege on it, which is one answer on purpose, since the role's privileges are the guard and probing them would be the leak; `usecase.ErrBrowseUnavailable` for a failure of the *connection* rather than of the request; and never write, never be reachable through a connection that could. `BrowseRepo` is the one hand-written pgx repository in a package otherwise generated by sqlc, because sqlc turns *fixed* SQL into typed Go and this repository's whole job is a `SELECT` list and a `FROM` clause chosen at call time from `information_schema`. Its constructor takes a `*ReadOnlyDB` and nothing else, so it cannot be built over the application pool; every table name is matched against the catalogue first and quoted with `pgx.Identifier` second, never concatenated from a request, and **schema-qualified** as `public.<table>` — the lookup pins `table_schema = 'public'`, so a read that resolved through `search_path` instead could name a different relation from the one just validated, and the symptom would be an `ORDER BY` on a column that relation does not have; `ColumnInfo.DataType` is a name for a human to read rather than a catalogue value to branch on (`citext`, `text[]`, not `USER-DEFINED` and `ARRAY` — see `displayType`), while redaction is decided separately on the raw `data_type` **and** `udt_name`; and paging is `ORDER BY` the primary key, falling back to `ctid` — `OFFSET` without `ORDER BY` silently repeats and skips rows the moment anything writes between two pages (spec decision 10). **`UnavailableBrowse` is the second implementation and exists so that two different failures stay two different answers**: `DATABASE_READONLY_URL` unset leaves `Deps.AdminBrowse` nil and answers `DB_BROWSE_NOT_CONFIGURED`, while a variable that *is* set over a pool that could not be opened is wired with this stand-in and answers `DB_BROWSE_UNAVAILABLE`, carrying the boot failure so the log can say why. Without it an operator restoring onto a fresh box would be told to set a variable already in their `.env` (§4, and `cmd/api/main.go`'s `openBrowse`). It is Liskov-honest rather than a stub: `ErrBrowseUnavailable` is the port's own contract for "the store is there, I could not reach it", so no caller special-cases it |
 | `AgreementRepository` | `adapter/postgres` — one implementation across **two files**, `agreement_repo.go` (the pool-backed reads and the section writes) and `agreement_write_repo.go` (the two transactional writes) | **Twenty-seventh.** `Document` composes the whole screen in four list queries — sections, live agreements, open proposals, accepted proposals — and never a per-proposal round trip; the version, the `01..N` numbering and the awaiting lists are all derived above it, in `AgreementService`, from those four slices. Two methods run transactions and both do so because they write more than one row: `CreateProposal` writes the proposal **and** the proposer's own implicit signature (decision 5) — a proposal without it is one nobody has agreed to, including its author — and `Sign` reads the proposal's status, locks the *target agreement* row (decision 12, not the proposal: locking the proposal serialises two signatures on that proposal and nothing else, so an edit and a remove aimed at the same agreement would both pass their checks and both land), upserts the signature, applies the change when the signature completes the live owner set, and stamps the status, all on the transaction's own connection. Reaching back to the pool from inside either would ask for a second connection while holding the first — the defect `VisionRepository.Save` already carries a note about. A target that has moved since the proposal was written answers `domain.ErrAgreementChanged` and writes nothing; the section unique key is mapped by constraint name to `domain.ErrAgreementSectionNameTaken`, because a generic `ErrAlreadyExists` leaves the screen unable to say which collision happened |
-| `Clock` | `adapter/clock` | So lockout windows and expiry are deterministic in tests |
+| `Clock` | `adapter/clock` | So lockout windows and expiry are deterministic in tests. It answers **instants** only: a session's lifetime, an `archived_at` stamp, a lockout window. Which calendar day it is for a household is not a clock read. It is `domain.TodayIn(clock.Now(), household.Timezone)`, computed once at each inbound edge (§4, §5 "The household's calendar") — there is no port for it, on purpose ([ADR 12](adr/0012-one-calendar-per-household.md)) |
 | `FXRateProvider` | `adapter/fx` | Static table today (SGD↔IDR only); a live provider drops in behind it. Returns a `domain.Rate` (an exact fraction). A pair it has no rate for is an error wrapping `domain.ErrNoRate`; any other error means the lookup itself failed. No service calls it for arithmetic directly: each builds a `usecase.Converter` (`usecase/converter.go`) per request from its own `FX` dependency, and the Converter skips the provider for an amount already in primary, looks each currency up once per Converter (remembering a rate or a "no rate" answer, never a failed lookup), and applies the rate. Callers are net worth (`AccountService`), month summary (`TransactionService`), `BudgetService`, `GoalService` and `BillService` (§5) |
 
 **`telegram.StartHandler` (and, the same way, `CallerResolver` and
@@ -997,8 +1011,8 @@ graph TD
     PublicLimit --> Handler
     Public -->|"sign-up*, telegram/start"| PublicFeature["requireFeature(flag)<br/>no Scope yet — resolves the<br/>GLOBAL flag set only; 404 if off"]
     PublicFeature --> Handler
-    Public -->|no| Session["requireSession<br/>reads hearth_session cookie,<br/>re-reads membership, resolves this<br/>household's flags, extends when<br/>under a day remains, then touches<br/>last_seen_at when it is null or older<br/>than an hour — best-effort, like the extend"]
-    Public -->|"no, and an Authorization<br/>header is present"| Token["requireToken<br/>Bearer hearth_… only; resolves a live<br/>api_tokens row, same membership and<br/>flags lookup, AuthVia = token.<br/>Never falls back to the cookie;<br/>no admin grant on the context"]
+    Public -->|no| Session["requireSession<br/>reads hearth_session cookie,<br/>re-reads membership, resolves this<br/>household's flags and its calendar<br/>day (Scope.Today), extends when<br/>under a day remains, then touches<br/>last_seen_at when it is null or older<br/>than an hour — best-effort, like the extend"]
+    Public -->|"no, and an Authorization<br/>header is present"| Token["requireToken<br/>Bearer hearth_… only; resolves a live<br/>api_tokens row, same membership, flags<br/>and calendar-day lookups, AuthVia = token.<br/>Never falls back to the cookie;<br/>no admin grant on the context"]
     Token --> RouteKind
 
     Session --> RouteKind{"/admin subtree?"}
@@ -1093,6 +1107,28 @@ through the domain-error table would let a wrapped `ErrNotFound` someday turn
 a database outage into the same clean `404` a disabled flag answers, telling
 every caller the whole product had been switched off rather than reporting a
 fault.
+
+**Both auth middlewares also work out the household's calendar day on every
+authenticated request, and put it on `Scope.Today`**
+([ADR 12](adr/0012-one-calendar-per-household.md)). One helper,
+`householdToday` (`adapter/http/household_today.go`), does it for
+`requireSession` and `requireToken` alike: it reads the household row and
+calls `domain.TodayIn(clock.Now(), household.Timezone)`. The answer is the
+household's date stamped midnight UTC, and it is what every handler passes
+wherever a service asks for "today": a default month, a due date, a
+not-in-the-future check. A browser and `hearthctl` therefore cannot disagree
+about the date, and neither can two handlers in one request. `deps.Clock` is
+still read directly, but only for instants: `archived_at`, a retro's
+`completed_at`, a session's expiry.
+
+It is one more indexed read per request, uncached for the reason the flags
+are: an owner who changes the zone in Settings must see the new date on the
+next request. A household whose stored zone cannot be loaded answers `500`
+through `logAndWriteInternal`, on every authenticated route, never a date
+worked out some other way. The API refuses such a zone on both writes that
+can set one, so that state only arises from a row edited around the API —
+and it also locks the Settings control that would fix it, which is behind the
+same middleware. The fix for that row is a database edit.
 
 **`requireFeature` answers `404`, never `403`, and runs in two different
 places for two different reasons.** On the public routes above it — the ones
@@ -1330,7 +1366,7 @@ rows, and a link redemption writes neither.
 | POST | `/auth/magic-link/consume` | none — the token is the credential. No per-IP limit: it runs no argon2, sends nothing, and the token is 256 bits. The web screen that calls it waits for a click (§5, "Magic link") |
 | POST | `/auth/sign-up` | none, plus a per-IP token bucket (5/hour) and `requireFeature(signups_open)` (global set — no session exists) — always 202, the same silent contract as magic-link |
 | GET | `/auth/sign-up/{token}` | none, plus `requireFeature(signups_open)` — a half-finished sign-up must not be completable once registration closes |
-| POST | `/auth/sign-up/{token}/complete` | none, plus `requireFeature(signups_open)`, same group as the row above |
+| POST | `/auth/sign-up/{token}/complete` | none, plus `requireFeature(signups_open)`, same group as the row above. The body carries `timezone` beside `primaryCurrency`: the browser's IANA zone, required, `422 INVALID_TIMEZONE` when missing or unknown — never replaced with UTC ([ADR 12](adr/0012-one-calendar-per-household.md)) |
 | POST | `/auth/telegram/start` | none, plus its **own** per-IP token bucket (20/hour), separate from sign-up's, and `requireFeature(telegram_sign_in)` (global set) — takes no body and no identifier, so there is nothing to probe; **`404`** both when no bot is configured and when the flag is off, the same answer any unrouted path gets, so an install without Telegram gives nothing away and the frontend hides the control on that response (§7) |
 | GET | `/auth/telegram` | session · `requireFeature(telegram_sign_in)` · CSRF · **cookie** session (`requireCookieSession`) — one group of five routes carries all four guards, `tl.Use` in that order, including the two reads: `requireCSRF` returns early for `GET`/`HEAD`/`OPTIONS` (`middleware_csrf.go`) so the polling route needs no header and the router needs no second group. This user's own binding — connected (chat, `linkedAt`) or not; a member with no chat bound gets `200 {"connected":false}`, not a `404`, because that is the ordinary case for most members reaching Settings. `Deps.TelegramLink` nil (no bot configured) answers `404`, distinct from `Deps.Telegram` above — the sign-in route and the five link/unlink routes are gated on two different `Deps` fields, wired from the same `cfg.TelegramEnabled()` check in `main.go`, so "no bot" still answers identically on both |
 | POST | `/auth/telegram/link` | same group as the row above — mints a link nonce carrying this session's `user_id`, returns `{id, url, expiresAt}`; **`429`** on the fourth mint inside an hour (`CountMintsSince`, decision 12: per-**user**, table-growth control, not a security one — the session is already authenticated) |
@@ -1345,8 +1381,8 @@ rows, and a link redemption writes neither.
 | GET | `/invites/{token}` | none — the token is the credential |
 | POST | `/invites/{token}/accept` | none |
 | GET | `/currencies` | none — read before a session exists (sign-up's currency select) and after one (Settings) |
-| GET | `/household`, `/household/members`, `/spaces`, `/notification-preferences` | session |
-| PATCH | `/household`, `/notification-preferences` | session · CSRF · owner |
+| GET | `/household`, `/household/members`, `/spaces`, `/notification-preferences` | session. `GET /household` answers the household plus `primaryCurrencyLocked`: `true` when a `PATCH` that changes `primaryCurrency` would be refused with `422 PRIMARY_CURRENCY_HELD_BY_HOLDINGS`. The handler works it out **for an owner only** (`HouseholdService.PrimaryCurrencyLocked`, the same method `Update` refuses on); a limited member always gets `false`, because for them "locked" would only say that the household holds investments. The household inside `GET /auth/me` does not carry the field |
+| PATCH | `/household`, `/notification-preferences` | session · CSRF · owner. `PATCH /household` also takes `timezone` (an IANA name; `422 INVALID_TIMEZONE` for anything `domain.ParseTimezone` refuses, including `""` and `"Local"`). Like every field on it, an omitted `timezone` is left as it was |
 | POST | `/spaces` | session · CSRF · owner |
 | POST | `/household/members/invite` | session · CSRF · owner · **cookie** session (`requireCookieSession`) — required since milestone 2: a leaked API token must not be able to mint a permanent co-owner (spec decision 12, the reason behind [ADR 7](adr/0007-personal-api-tokens.md) rule 2). Body now carries a required `channel` (`"email"` \| `"telegram"`), parsed with a `default` that refuses. `201 {id, expiresAt, link?}` — `link` only for `channel: "telegram"`, shown once and never recoverable a second time. `409 EMAIL_INVITES_DISABLED` while `email_invites` is off; `409 TELEGRAM_INVITES_UNAVAILABLE` while Telegram is off or unconfigured; `422 INVITE_REQUIRES_EMAIL` for an email-channel body with no address. The kid-profile path (limited, no sign-in) is unchanged and needs no channel |
 | PATCH · DELETE | `/household/members/{id}` | session · CSRF · owner · **cookie** session (`requireCookieSession`) — same requirement as the row above, since changing a role or removing a member is also a way into or out of the household (spec decision 12) |
@@ -1392,8 +1428,7 @@ rows, and a link redemption writes neither.
 | POST | `/holdings/{id}/archive`, `/holdings/{id}/restore` | session · money · owner · CSRF |
 | POST | `/holdings/{id}/events` | session · money · owner · CSRF |
 | DELETE | `/holdings/{id}/events/{eventId}` | session · money · owner · CSRF |
-| POST | `/holdings/{id}/valuations` | session · money · owner · CSRF — POST but it **upserts**, and answers **200, never 201**: one price per holding per day, so a second write for the same date is a correction rather than a new thing |
-| DELETE | `/holdings/{id}/valuations/{valuationId}` | session · money · owner · CSRF — routed, but no screen calls it yet (`docs/FEATURE_TRACKER.md` names the gap) |
+| POST | `/holdings/{id}/valuations` | session · money · owner · CSRF — POST but it **upserts**, and answers **200, never 201**: one price per holding per day, so a second write for the same date is a correction rather than a new thing. **There is no route that deletes a price**: `HoldingValuationRepository.Delete` exists and nothing calls it, so a wrong price is corrected by posting the same date again, and a price recorded against the wrong day cannot be removed (`docs/FEATURE_TRACKER.md` names the gap) |
 | GET | `/holdings/report` | session · money · owner — `?kind=quarter\|half\|year`, `?count=` optional. **Registered before the `/holdings/{id}/…` routes and not shadowed by them**: chi prefers a static segment over a parameter, and a test says so rather than a comment hoping so. The window length defaults on the SERVER (6 quarters, 4 halves, 3 years) because the browser holding a second copy of that rule would be free to drift from the one the chart's bar budget was chosen against |
 | GET | `/holdings/{id}/income` | session · money · owner |
 | POST | `/holdings/{id}/income` | session · money · owner · CSRF — 201, and it does **not** upsert the way a valuation does: two dividends in one quarter are two payments, not a correction of each other |
@@ -1663,7 +1698,7 @@ sequenceDiagram
 
     B->>S: POST /auth/sign-up/{token}/complete
     S->>R: ByTokenHash, then TokenLifecycle
-    S->>S: validate household name, display name,<br/>currency, password
+    S->>S: validate household name, display name,<br/>currency, time zone, password
     S->>S: hash password
     S->>R: Provision(...)
     R->>DB: BEGIN
@@ -1695,6 +1730,18 @@ from the moment it existed. Delete `SelectableCurrencies` and
 `ParseSelectableCurrency` only once `Money` itself knows about minor units;
 until then they are what keeps the sign-up path from offering a currency the
 money path cannot render.
+
+**The time zone in that step is the browser's, and it is required.** The form
+has no field for it: `SignUpCompleteScreen` reads the device's IANA zone
+(`lib/browserTimeZone.ts`) and sends it beside the currency, and
+`NewSignupBlueprint` validates it with `domain.ParseTimezone`. A missing or
+unknown zone is refused with `422 INVALID_TIMEZONE` rather than replaced with
+UTC, because a household quietly placed on UTC is the defect the stored zone
+exists to remove ([ADR 12](adr/0012-one-calendar-per-household.md)). So that
+the refusal is not a dead end, the form shows a "Time zone" select in exactly
+two cases: the browser cannot name its zone, or the server answered
+`INVALID_TIMEZONE`. The seeded development household is given
+`Asia/Singapore` through the same blueprint.
 
 **The `bind telegram_accounts` step is conditional on the claimed row, not on a
 parameter, and it is inside this transaction rather than after it.** A signup
@@ -1769,6 +1816,7 @@ sequenceDiagram
     R-->>C: Membership (or ErrNotFound → "link your account")
     C->>C: owner AND money? else "only an owner with Money…"
     C->>S: LogSpend{household, membership, update 91, expense, "84.50", …}
+    S->>S: today = TodayIn(clock, household zone)
     S->>S: resolve account (sole cash, or @name), category (expense kind only)
     S->>S: ParseAmount("84.50", places for the account's currency)
     S->>T: CreateOrReplay(key = telegram-update-91)
@@ -1790,6 +1838,13 @@ membership it never questions. The update id is the idempotency key, so
 the poller's known redelivery-after-restart becomes a replay rather than a
 second row. Walked live on 2026-09-08 against a development bot, after the
 first attempt with the production token went to the production poller.
+
+**The row is dated the household's today.** A chat has no browser to say what
+day it is, so `TelegramCommandService` reads the household's zone and calls
+`domain.TodayIn` itself, the same function the HTTP middleware uses
+([ADR 12](adr/0012-one-calendar-per-household.md)). These are the only two
+callers. A zone that cannot be loaded writes nothing and the bot gives its
+generic, logged reply.
 
 **Since the partner-invite lobby's milestone 2 (2026-09-20), `ParseCommand`
 answers only a private chat, the same gate `ParseStart` uses below.** Before
@@ -2296,6 +2351,123 @@ fails, the change stays made and the caller gets
 `ErrSessionRevocationFailed` (a 200 with a `warning`). The comments in
 `usecase/member.go` explain why it is not rolled back.
 
+### The household's calendar — one day, worked out at each edge
+
+```mermaid
+sequenceDiagram
+    participant B as Browser or hearthctl
+    participant M as "requireSession / requireToken"
+    participant HS as HouseholdService
+    participant D as "domain.TodayIn"
+    participant H as Handler
+    participant S as Service
+
+    B->>M: any authenticated request
+    M->>HS: Get(householdID)
+    HS-->>M: household, with its IANA time zone
+    M->>D: TodayIn(clock.Now(), zone)
+    alt the zone cannot be loaded
+        D-->>M: ErrInvalidTimezone
+        M-->>B: 500 INTERNAL, logged
+    else
+        D-->>M: the household's date, stamped midnight UTC
+        M->>H: Scope{ ..., Today }
+        H->>S: "List / Month / Start / RecordEvent ...(…, scope.Today)"
+        S-->>H: figures for the household's day and month
+        H-->>B: 200
+    end
+```
+
+A household keeps one calendar ([ADR 12](adr/0012-one-calendar-per-household.md)).
+`households.timezone` holds an IANA name, and **which day "today" is** for
+that household is worked out in exactly two places: the HTTP auth
+middleware, drawn above, and `TelegramCommandService` for a chat command.
+Both call `domain.TodayIn`. Nothing else in the backend turns an instant into
+a day.
+
+**The day travels inward as a date, not as a zoned instant.** `TodayIn`
+returns the household's calendar day stamped midnight UTC. That shape is
+load-bearing: Hearth's date rules read a day in two ways — periods and retros
+read a value in its own location (`Period`, `StartableMonth`), Bills convert
+to UTC first (`NextDue`, `IsOverdue`) — and `now.In(zone)` gives those two
+families different days for eight hours a day in Singapore. A date stamped
+midnight UTC is the one shape both read alike. Two domain tests pin this, one
+for the shape that works and one for the shape that does not.
+
+**Services take the day as a parameter and read no clock for it.** Bills,
+Goals, Budget, Retros, Holdings and the accounts summary already took
+`today`; what changed is what the edge passes. `AccountService.Create` and
+`Update` and `VisionService.CurrentYear` take it now too, and Vision no
+longer holds a `Clock` at all.
+
+**An instant is still an instant.** `archived_at`, a retro's `completed_at`,
+a session's expiry and a lockout window come from `usecase.Clock` as before.
+Archiving a bill or a goal needs both, and takes both: the stamp from the
+clock, and the household's day for the row it answers with.
+`BillService.SetArchived(at, today)` used to take one value for the two jobs.
+
+**A recorded fact may not be dated after the household's today; a plan
+may.** Facts are a transaction, a bill payment's `paidOn`, a goal
+contribution, a holding's purchase, sale, price and income row, and an
+account's opening balance. Plans are a bill's next due date, a goal's target
+month and a budget month. Every fact goes through one comparison,
+`domain.IsAfterDay`, which compares calendar days so that today itself is
+always allowed, and through one helper, `refuseFutureDate`
+(`usecase/fact_date.go`), which answers `domain.ErrDateInFuture`: `422
+INVALID_DATE`, "That date is in the future." (The opening balance keeps its
+own `ErrOpeningBalanceInFuture`, only because it answers with its own wire
+code, `INVALID_AS_OF`, named after the field. The sentence is the same.)
+
+```mermaid
+flowchart LR
+    Web["Browser form"] --> HTTP
+    CLI["hearthctl add / CSV import"] --> HTTP
+    HTTP["HTTP handler<br/>passes scope.Today"] --> TS["TransactionService<br/>Create / CreateOrReplay / Update"]
+    HTTP --> BS["BillService.MarkPaid"]
+    HTTP --> GS["GoalService.AddContribution"]
+    HTTP --> HS["HoldingService<br/>RecordEvent / RecordValuation / RecordIncome"]
+    TG["Telegram /spend and free text"] --> TC["TelegramCommandService<br/>works out today, dates the row today"]
+    TC --> TS
+    TS --> R["refuseFutureDate(date, today)"]
+    BS --> R
+    GS --> R
+    HS --> R
+    R -->|"date after today"| E["ErrDateInFuture<br/>422 INVALID_DATE"]
+    R -->|"today or earlier"| W["the write"]
+```
+
+Three things about it are not obvious from the picture.
+
+- **The check is in the service, never in a handler or a form**, so every
+  channel gets it: a browser, `hearthctl` and its CSV import (the same
+  `POST /transactions`), and Telegram. No frontend form has a rule of its
+  own; each shows the server's sentence as it arrives.
+- **A bill payment needs its own check.** `MarkPaid` writes an expense dated
+  `paidOn` through `BillRepository.RecordPayment`, which never passes through
+  `TransactionService`. Without the check in `BillService` that expense would
+  be the one ledger row with no date rule at all. The bill's due date is a
+  plan and is not checked: paying a bill before it is due is ordinary.
+- **An edit is checked only when it changes the date.** A stored date can be
+  after today without anyone typing a future date: the row was saved before
+  this rule, or the household's zone was moved west afterwards. The edit form
+  sends the date back with every save, so `TransactionService.Update` and
+  `AccountService.Update` compare the patch with the stored day and check
+  only a day that differs. Such a row can still have its description
+  corrected. That is why the date rule is not inside the shared `validate`,
+  which runs on every edit.
+
+Balances, a goal's total and the net worth trend still sum with no upper
+bound on the date (`AccountRepository.MonthlyMovements`' own comment): the
+rule is at the write, and a stored row dated after today counts in all of
+them alike.
+
+The opening balance used to allow a day past the server's clock, because the
+server could not know the household's today; that slack is gone.
+
+**The frontend computes the same day from the same zone** (§5 "What the
+frontend loads"), so a form's default date is a date the server accepts, and
+the month a page names is the month the server summed.
+
 ### Accounts — net worth is composed on read, not stored
 
 ```mermaid
@@ -2516,9 +2688,13 @@ describe the same rows and a second endpoint risks them disagreeing.
 same rule and through the same `usecase.Converter` as net worth above. The
 budget's Spent (`BudgetService.Month`) reuses this rule exactly.
 
-**An absent `month` parameter means the current month, for both halves.**
-`parseTransactionFilter` sets the summary's month *and* `filter.Month` from the
-same default, so the ledger and the figures above it always describe the same
+**An absent `month` parameter means the household's current month, for both
+halves.** The default is `Scope.Today`, the household's calendar day (§4),
+not the server's clock: the handler used to read `time.Now().UTC()` here,
+and on the 1st of a month in Singapore the ledger opened on the month just
+ended while the Add form dated the new row today, so the saved row was not on
+screen. `parseTransactionFilter` sets the summary's month *and* `filter.Month`
+from the same default, so the ledger and the figures above it always describe the same
 month. They did not always: the default set only the summary's month and left
 `filter.Month` zero — which `TransactionFilter` documents as "every month" — so
 the screen read "0 in August 2026" above ten July rows. `month=all` is the one
@@ -2869,57 +3045,108 @@ bill autopaying with no named person makes that the common case, not the
 exception, so the grouping now emits an explicit `Unattributed` row rather
 than silently under-counting the month's spend.
 
-### Portfolio — the position is folded on read, and the fold runs inside the write
+### Portfolio — the position is folded on read, and the rule runs inside the write
 
 A holding stores no running total. What it holds, what that cost and what
 selling has realised are all folded from its events on every read, the same
 "composed on read, not stored" choice Accounts makes for net worth — and for the
 same reason: a stored total is a second source of truth that drifts.
 
+Three writes can change what a holding is: recording a purchase or sale,
+deleting one, and recording a price. All three follow the sequence below. The
+diagram shows a price; an event write differs only in the repository it calls
+(`HoldingEventRepo.InsertWithFold` or `DeleteWithFold`) and the statement it
+ends with.
+
 ```mermaid
 sequenceDiagram
     participant W as Web
     participant H as "HTTP: money + owner"
     participant S as HoldingService
-    participant R as "HoldingEventRepo"
+    participant R as "HoldingValuationRepo"
     participant DB as Postgres
 
-    W->>H: "POST /holdings/{id}/events"
-    H->>S: "RecordEvent(event, today)"
-    S->>S: "refuse a future date"
+    W->>H: "POST /holdings/{id}/valuations"
+    H->>S: "RecordValuation(price, today)"
+    S->>S: "refuse a date after the household's today"
     S->>S: "Validate against the holding's currency<br/>and the household's primary"
-    S->>R: "InsertWithFold(event, fold)"
+    S->>R: "UpsertWithFold(price, holdingRule)"
     R->>DB: BEGIN
     R->>DB: "SELECT ... FROM holdings FOR UPDATE"
-    Note over R,DB: A second writer blocks HERE, before it<br/>can fold a position the first is consuming
+    Note over R,DB: A second writer of this holding's events OR prices<br/>blocks HERE, before it can read what the first is changing
     R->>DB: "SELECT events ORDER BY (occurred_on, created_at, id)"
-    R-->>S: "fold(existing + this one)"
-    S->>S: "domain.Holding.Position — refuses an oversell"
-    R->>DB: "INSERT the event, then COMMIT"
-    R-->>W: "the whole holding, re-folded"
+    R->>DB: "SELECT prices"
+    R-->>S: "holdingRule(events, prices as they would be)"
+    S->>S: "domain.Holding.Position — refuses an oversell,<br/>reports the most ever held"
+    S->>S: "domain.CheckHoldingValueWithinLimit —<br/>most ever held x every price, at most MaxAmountMinor"
+    alt the rule refuses
+        R->>DB: ROLLBACK
+        R-->>W: "422, nothing stored"
+    else the rule accepts
+        R->>DB: "upsert the price, then COMMIT"
+        R-->>W: "the whole holding, re-folded"
+    end
 ```
 
-**Three things in that diagram are the feature, and each looks like a detail.**
+**Four things in that diagram are the feature, and each looks like a detail.**
 
-**The lock is not decoration.** Reading the events, folding them and inserting as
-three separate calls is not equivalent to doing them atomically: two sales of 30
-from a holding of 50 are each legal alone and illegal together, so both would
-fold the same starting position and both commit — leaving events that cannot be
-folded at all, which is a page that throws every time it loads and can only be
-fixed from the page that is broken. `InsertWithFold` holds the row lock from
-before the fold until after the insert. `DeleteWithFold` does the same in the
-other direction, for removing a purchase a later sale was costed against.
+**The lock is not decoration, and it is one lock for both tables.** Reading the
+events, folding them and inserting as three separate calls is not equivalent to
+doing them atomically: two sales of 30 from a holding of 50 are each legal alone
+and illegal together, so both would fold the same starting position and both
+commit — leaving events that cannot be folded at all, which is a page that
+throws every time it loads and can only be fixed from the page that is broken.
+The same is true across the two tables: a purchase of 100,000 units and a price
+of S$10 billion a unit are each legal alone and together make a holding worth
+more than the ceiling. So `InsertWithFold`, `DeleteWithFold` and
+`UpsertWithFold` all lock the same `holdings` row before they read anything,
+and hold it until their write has committed. One lock per transaction, always
+taken first, so there is no lock order to get wrong and nothing to deadlock on.
 
-**The fold stays in the domain.** The repository owns the transaction and the
-lock; the rule it enforces is the caller's own closure, which is
-`domain.Holding.Position`. An adapter that decided what "oversold" means would
-be authorisation's mistake in a different costume.
+**The rule runs before the write, on the rows as they would be.** The
+repository hands the service's rule (`holdingRule`, a `usecase.HoldingFold`)
+the events and prices as they will read once the write lands: the new event
+appended, the deleted one gone, the new price in place of that day's old one.
+If the rule refuses, the transaction rolls back and nothing is stored. Checking
+after storing is not equivalent: every holding write answers by re-reading the
+whole portfolio, so a stored row the reads cannot compute fails its own
+response and every read after it.
+
+**The rule stays in the service and the domain.** The repository owns the
+transaction and the lock; the rule is the caller's closure. It has two halves.
+`domain.Holding.Position` folds the events and refuses an oversell.
+`domain.CheckHoldingValueWithinLimit` then takes the largest quantity the
+holding has *ever* held (`Position.PeakHeld`) and multiplies it by *every*
+recorded price, native and household-currency, refusing a product above
+`domain.MaxAmountMinor` with 422 `HOLDING_VALUE_TOO_LARGE`. It uses the peak
+and every price because the period report below multiplies the quantity held
+at each period's end by the latest price inside that period: neither is
+today's figure. It is deliberately stricter than the reads need (it refuses
+some pairs no read multiplies) so that it does not have to repeat the report's
+choice of period and price. An adapter that decided what "oversold" or "too
+valuable" means would be authorisation's mistake in a different costume.
 
 **The ORDER BY is a contract.** `occurred_on` is a date, so buying and selling
 the same morning is a tie, and `Position` sorts *stably* — it keeps whatever
 order it is handed. The repository breaks the tie by the order the events were
 actually recorded, and the answer depends on it: on identical same-day events,
 buy-then-sell realises 750 where sell-then-buy realises 1000.
+
+**"The same day" for a price is the upsert key's day.** A price is unique per
+`(holding_id, as_of)`, and `as_of` is the calendar day the request's value
+shows in its own location (`dateOnly`). `UpsertWithFold` decides which stored
+row the new price replaces with that same conversion on both sides. Compared
+any other way, a corrected, lower price would be judged against the very row
+it is about to replace, and re-entering a day's price is the only repair for a
+price that is too high.
+
+**A holding already past the limit refuses every write except the repair.**
+Nothing in the database stops such a row existing (no constraint mirrors the
+rule yet), so one written before the rule existed would refuse a purchase, a
+sale and a price for any other day. (A dividend or fee is still accepted:
+income never passes through the rule.) The two ways out are deleting the
+purchase that made it too large, or re-entering the offending day's price
+lower.
 
 Reads compose the same way. `GET /holdings` issues three queries — every
 holding, every event, every latest price — and folds each position in memory,
@@ -2983,6 +3210,12 @@ lots of the same US stock bought at different exchange rates blend to an SGD
 cost per unit that is neither rate, so no single rate applied to the USD
 realised figure reproduces it. This is also why the household's primary
 currency cannot change while it holds anything (§3, `HoldingCounter`).
+Settings shows that lock before Save: `GET /household` tells an owner
+`primaryCurrencyLocked`, and `CurrencyPanel` then renders the currency as text
+with the reason under it instead of a field. Adding a holding is the write that
+turns the flag on, so `useHoldings`' `invalidateHoldings` also invalidates
+`["household"]`; without it Settings would offer the field for up to the
+30-second `staleTime` after a first holding.
 
 ### Retros — one shared draft, a version guard that a tick deliberately bypasses
 
@@ -2994,11 +3227,13 @@ sequenceDiagram
     participant Svc as RetroService
     participant RRepo as RetroRepository
     participant ARepo as RetroActionRepository
+    participant HRepo as HouseholdRepository
     participant DB as Postgres
 
     B1->>H: POST /api/v1/retros
     H->>Svc: Start(householdID, today)
-    Svc->>Svc: StartableMonth -- earlier of {prev, current}<br/>with no retro row (domain, pure)
+    Svc->>HRepo: Get(householdID) -- created_at and time zone
+    Svc->>Svc: StartableMonth -- earlier of {prev, current}<br/>with no retro row, never before the<br/>household's creation month (domain, pure)
     Svc->>RRepo: Create(householdID, month)
     RRepo->>DB: INSERT retros (version=1) -- ErrAlreadyExists<br/>on the UNIQUE(household_id, month) clash
 
@@ -3037,6 +3272,21 @@ sequenceDiagram
     Svc->>ARepo: Add(in) -- action + assignees, one transaction
     Note over ARepo,DB: July's own row is untouched and stays<br/>unticked (decision 4) -- carriedFrom is<br/>provenance only, ON DELETE SET NULL
 ```
+
+**The month a retro starts on is the server's to choose, and it never
+reaches back before the household existed.** `POST /retros` carries no month.
+`RetroService.Start` picks the earlier of {last month, this month} that has no
+retro yet, both of them the household's months (`Scope.Today`), and skips a
+month before the one the household was created in. For that it reads the
+household through `HouseholdRepository`: `domain.Household.CreatedAt` is the
+creation instant, and `domain.TodayIn(CreatedAt, Timezone)` is the day it
+names in the zone the household keeps now. So a household created on 1
+October is offered October, and after October's retro exists the next `POST`
+answers `409 RETRO_NOTHING_TO_START` rather than filing September, which the
+household was not there for. `GET /retros` computes `startMonth` with the
+same function, so the page's button and the API's refusal cannot disagree.
+Retros that already exist for earlier months are untouched: the floor is on
+starting one, not on reading or editing one.
 
 **The `version` guard exists because a retro is one shared draft with no
 per-line ownership** (decision 1) — either partner can open it and type into
@@ -3367,6 +3617,19 @@ cache entry, reading `openActionCount` rather than `actionCount` — the two
 disagree the moment a retro's actions are partly ticked, and
 `docs/LEARNING.md` carries the gap between them as its own entry.
 
+**Which retro `NextRetroCard` shows is decided in the card, from that one
+list, in this order:** this month's retro if there is one; else last month's
+retro if it is still a draft; else a prompt to start the month the server
+offers (`startMonth`). The second step is why Overview on the 1st of a month
+shows "September retro · In progress" rather than "No retro yet this month"
+while September is unfinished. Only last month's draft is brought forward,
+never an older one, so the card cannot name a month the Retros page is
+offering to *start*. A draft on the card links to `/marriage/retros`. The
+page may offer to start the new month beside that draft; the card names the
+one thing that needs attention and the page offers everything that can be
+done. "This month" and "last month" are the household's
+(`monthIn(useHouseholdZone())`, and `monthBefore` for the one before it).
+
 **`RetrosPage` itself, not just Overview's card, now fires a second request
 of its own.** It mounts `AgreementsToDiscuss` unconditionally (spec decision
 7), which fires `GET /marriage/agreements` — the identical query key
@@ -3377,7 +3640,8 @@ cache entry; agreeing a parked proposal from either page invalidates the one
 key both watch.
 
 `VisionCard` and `NextRetroCard`'s own check-in strip (Vision spec's task
-13) push the pattern one step further: both call `useVision(currentVisionYear())`
+13) push the pattern one step further: both call `useVision` for the
+household's current year (`yearIn(useHouseholdZone())`)
 directly rather than either taking the data as a prop from the other, because
 `useVision` (unlike `useBills`/`useGoals`) was never given an `enabled`
 option — a member without `marriage` must still never be allowed to call it,
@@ -3410,10 +3674,23 @@ another page does it, sitting on Settings does not. Milestone 2's own
 3-second poll (`invitePollInterval`, `usePendingInvites.ts`) runs only while a
 *Telegram* invite in the current list is waiting for a knock, so an emailed
 invite accepted elsewhere still waits for the next navigation — the spec does
-not address that case, and this milestone did not close it either. `Budget`
-and Overview likewise share `currentMonth()` (`features/money/month.ts`),
-which reads the *local* calendar — the two screens must agree on which month
-"this month" is, and the API container's own clock is UTC.
+not address that case, and this milestone did not close it either.
+
+**Every date the frontend works out comes from the household's time zone,
+never the browser's** ([ADR 12](adr/0012-one-calendar-per-household.md)).
+`lib/householdDate.ts` has the pure functions (`todayIn`, `monthIn`, `yearIn`,
+`monthNameIn`, `longDateIn`, each taking a zone), `useHouseholdZone` reads
+`me.household.timezone` off the `['me']` bundle the shell already loaded, and
+`useHouseholdDateInput` is the state behind a date field that starts on the
+household's today. `Budget` and Overview both ask `GET /budgets/{month}`
+about `monthIn(zone)`, so the two screens agree on which month "this month"
+is, and that month is the one the server is in too, because the server works
+out its own day in the same zone (§4). The seven date forms, the ledger's
+"Today" heading, the Bills "All caught up" month, the next-retro card, the
+setup checklist's month and Vision's year all read the same way. There is no
+server-sent `today`: it would go stale at midnight inside a cached query.
+A default is derived on each render rather than stored at mount, so a form is
+on the household's day even where the zone arrives after it mounted.
 
 **A builtin space the map does not name renders nothing at all.** Since
 `110ab0a`, Family is exactly that: it had a single "destination" whose whole
@@ -3519,6 +3796,7 @@ erDiagram
         bool show_secondary_currency
         char secondary_currency
         text fx_rate_mode
+        text timezone "IANA name — NOT NULL DEFAULT 'UTC', CHECK <> ''"
     }
     users {
         uuid id PK
@@ -3684,7 +3962,7 @@ erDiagram
         uuid id PK
         uuid household_id FK
         text kind "expense | income | transfer"
-        date occurred_on "a date, not a timestamptz — a household has no timezone"
+        date occurred_on "a date, not a timestamptz — which day it is comes from households.timezone, before the write"
         text description
         uuid category_id FK "nullable — SET NULL, never on a transfer"
         uuid paid_by_membership_id FK "nullable — SET NULL"
@@ -4139,6 +4417,23 @@ Notes that are not obvious from the shapes:
   and wrong in the flattering direction.
 - **Money is `int64` minor units plus an ISO 4217 code** everywhere. `float64`
   never appears in a monetary path.
+- **An amount a person enters has a ceiling, and it lives in code only.**
+  `domain.MaxAmountMinor` (1e14 minor units) is enforced by every service that
+  takes an amount, through `domain.CheckAmountWithinLimit`; more is a 422
+  `AMOUNT_TOO_LARGE`. It exists because balances and totals are sums of
+  stored rows and have to fit in an int64. Unlike the rules in the bullet
+  above, **no database constraint mirrors it**: the `bigint` columns accept
+  any value, so a row written before the ceiling existed, or by hand, can
+  still make a read fail. The reads fail loudly on purpose rather than show
+  a clamped total.
+- **A holding's worth has the same ceiling, and it is a rule across two
+  tables.** Quantity times unit price is a product of two figures that each
+  pass the per-amount ceiling, so no column check can express it. Every write
+  to `holding_events` or `holding_valuations` checks, under the holding's row
+  lock and before it stores anything, that the most the holding ever held
+  times every recorded price stays within `domain.MaxAmountMinor`
+  (`domain.CheckHoldingValueWithinLimit`, 422 `HOLDING_VALUE_TOO_LARGE`; the
+  Portfolio flow in §5). No database constraint mirrors this one either.
 - **`accounts.owner_membership_id` is nullable and means shared, not unset.**
   There is deliberately no separate `is_shared` boolean — a row that both
   names an owner and claims to be shared would have nothing to resolve that
@@ -4421,6 +4716,20 @@ web/src/
                        pulls no admin code into the main bundle)
   lib/parseEnum.ts     a <select> value checked against the allowed set,
                        falling back rather than casting (fail closed)
+  lib/householdDate.ts the household's calendar: todayIn, monthIn, yearIn,
+                       monthNameIn and longDateIn, each taking an IANA zone.
+                       The one place the app turns "now" into a date. An
+                       unusable zone throws; it never falls back to the
+                       browser's zone (ADR 12)
+  lib/browserTimeZone.ts
+                       the device's own zone. One use only: sign-up sends it
+                       so a new household starts on its creator's calendar
+  lib/timeZoneOptions.ts
+                       the list a time zone <select> offers, each zone with
+                       its current offset. Always contains UTC and whatever
+                       zone the caller says must be there, because a select
+                       whose value is not among its options shows its first
+                       option instead
   features/
     auth/              sign-in, invite, magic-link, sign-up screens and hooks.
                        SignInScreen also carries the "Continue with Telegram"
@@ -4452,13 +4761,36 @@ web/src/
                        the read-only email box -- an empty read-only input
                        reads as a field somebody forgot to fill in, which is
                        the "looks automatic but is not" shape this product
-                       has refused twice before.
+                       has refused twice before. It also sends the device's
+                       time zone with the form, with no field for it; a
+                       "Time zone" select (components/TimeZoneSelect) appears
+                       only when the browser cannot name its zone or the
+                       server refuses the one it named.
+                       useHouseholdZone.ts reads me.household.timezone, and
+                       useHouseholdDateInput.ts is the state behind every
+                       date field that defaults to the household's today
+                       (both used across money/, marriage/ and overview/).
     shell/             AppShell (sidebar + the 1204px content column every
                        page renders inside), Sidebar, MobileTopBar and
                        NavDrawer (the below-lg off-canvas nav; lg:contents
                        restores the desktop grid unchanged), RequireAuth,
                        RequireCapability
-    settings/          members, spaces, currency, notifications,
+    settings/          members, spaces (SpacesPanel.tsx: each space's audience
+                       is worked out by copy.ts's spaceAudienceLabel from the
+                       space's visibility and from who, in the member list
+                       MembersPanel also reads, holds the capability it
+                       requires -- "Parents", "Parents and 2 kids",
+                       "Parents only", "Everyone"), currency (CurrencyPanel.tsx:
+                       an owner edits the primary currency unless GET
+                       /household says primaryCurrencyLocked, in which case
+                       it is text plus the reason; the "Show X equivalents"
+                       switch is offered only when the second currency is
+                       set and differs from the primary) and time zone
+                       (TimeZoneRow.tsx,
+                       the last row of the Currency & region card: an owner
+                       picks a zone and saves it with PATCH /household; under
+                       it, today's date in the zone on screen; a limited
+                       member sees the zone as text), notifications,
                        PendingInvitesList.tsx (inside MembersPanel, owners
                        only: each pending invite's name, role and expiry,
                        fed by PendingInviteCard.tsx -- one card per row,
@@ -4669,8 +5001,10 @@ web/src/
                        the empty-vision response carries "" on the wire,
                        never null. useVision reads and writes
                        /marriage/vision; visionQueryKeys.ts holds its cache
-                       key and currentVisionYear() the same way
-                       retroQueryKeys.ts does for Retros. Mounted at
+                       key the same way retroQueryKeys.ts does for Retros.
+                       Which year is "this year" is the household's
+                       (yearIn(useHouseholdZone())), on the page, in the
+                       modal's year list and on both Overview cards. Mounted at
                        /marriage/vision
 
                        AgreementsPage -- layout and screen states only, no

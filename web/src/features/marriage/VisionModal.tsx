@@ -77,18 +77,18 @@ import { PillarEditor } from "./PillarEditor";
 import type { useVision } from "./useVision";
 import { useVisionDraft } from "./useVisionDraft";
 import { VISION_COPY } from "./visionCopy";
-import { currentVisionYear } from "./visionQueryKeys";
+import { useHouseholdZone } from "../auth/useHouseholdZone";
+import { yearIn } from "../../lib/householdDate";
 
-// The previous, current and next calendar year, anchored on TODAY
-// (currentVisionYear()) rather than on whichever year is currently loaded --
+// The previous, current and next calendar year, anchored on TODAY (the
+// household's current year) rather than on whichever year is currently loaded --
 // the spec's own reasoning: a household setting January's theme in December
 // needs next year, one writing up a year they never recorded needs last
 // year, and nothing in the design asks for 2019. Anchoring on today rather
 // than on `year` also means a household that picks "next year" and reopens
 // this select later still sees the same three options, not a window that
 // keeps sliding with their own pick.
-function yearOptions(): number[] {
-  const current = currentVisionYear();
+function yearOptions(current: number): number[] {
   return [current - 1, current, current + 1];
 }
 
@@ -119,6 +119,7 @@ export function VisionModal({
   const goals = goalsQuery.data?.goals ?? [];
 
   const draft = useVisionDraft({ year, data, saveVision, reload, onClose });
+  const householdYear = yearIn(useHouseholdZone());
 
   const themeId = useId();
   const yearSelectId = useId();
@@ -208,7 +209,7 @@ export function VisionModal({
                 onChange={(event) => onYearChange(Number(event.target.value))}
                 className={FIELD_CONTROL_CLASS}
               >
-                {yearOptions().map((y) => (
+                {yearOptions(householdYear).map((y) => (
                   <option key={y} value={y}>
                     {y}
                   </option>

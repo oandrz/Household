@@ -30,6 +30,10 @@ type FXRateProvider interface {
 // repository, in the account's own currency because every transaction on an
 // account is; nothing here converts.
 //
+// The sum has no upper bound on the date. What keeps "what does this hold
+// now" true is that a transaction may not be dated after the household's
+// today in the first place (domain.ErrDateInFuture).
+//
 // Balance and Account.OpeningBalance are different numbers once an account has
 // a transaction: Balance answers "what does this hold now," OpeningBalance
 // answers "what did someone assert it held on OpeningBalanceAsOf," and
@@ -72,11 +76,15 @@ type AccountRepository interface {
 	// own opening_balance_as_of -- the same filter AccountView.Balance uses,
 	// and the two must stay the same, since the trend walks backwards from
 	// Balance by subtracting these rows, so a one-row difference makes an older
-	// bar wrong and plausible at once. There is deliberately no upper bound on
-	// the transaction date either, matching Balance: a future-dated transaction
-	// already counts in that figure, so it must count here too. Archived
-	// accounts are included; the caller decides what counts, as it does for
-	// Balance.
+	// bar wrong and plausible at once. Neither has an upper bound on the
+	// transaction date, and the two must agree on that too. The rule that
+	// keeps a future date out is at the write: TransactionService and
+	// BillService refuse a transaction or a payment dated after the
+	// household's today (domain.ErrDateInFuture). A row stored after today
+	// all the same (written before that rule, or the household's zone moved
+	// west since) counts in Balance, so it must count here. Don't add an
+	// upper bound to one query alone. Archived accounts are included; the
+	// caller decides what counts, as it does for Balance.
 	MonthlyMovements(ctx context.Context, householdID string, since time.Time) ([]AccountMonthMovement, error)
 	// Get reports domain.ErrNotFound when no account with this id exists in
 	// this household -- including when one exists in a different household,

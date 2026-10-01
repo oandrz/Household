@@ -271,13 +271,24 @@ var domainErrorResponses = []domainErrorResponse{
 		message:   "That feature flag does not exist in this build.",
 	},
 	{
-		// Reaching the HTTP layer means a calculation is wrong, not a bad
-		// request -- nothing on this API surface accepts a caller-supplied
-		// amount that could overflow. Handled like the default branch
-		// (logged, generic 500); it has its own case only so the log names
-		// the cause.
+		// Arithmetic on stored figures did not fit in an int64. It is not a
+		// bad request: every amount a caller sends is refused past
+		// domain.MaxAmountMinor first (the AMOUNT_TOO_LARGE row below), so
+		// one request cannot cause this. What still can: tens of thousands
+		// of rows at that ceiling in one sum, or a row stored before the
+		// ceiling existed. Handled like the default branch (logged, generic
+		// 500); it has its own case only so the log names the cause.
 		sentinels: []error{domain.ErrAmountOverflow},
 		internal:  true,
+	},
+	{
+		// One row for every amount field on every money route, the way
+		// NEGATIVE_AMOUNT is: the message has to read correctly under any of
+		// them, so it names no field and no currency.
+		sentinels: []error{domain.ErrAmountTooLarge},
+		status:    http.StatusUnprocessableEntity,
+		code:      "AMOUNT_TOO_LARGE",
+		message:   "That amount is larger than Hearth can record. Check it for extra digits.",
 	},
 	{
 		// A Money zero value reached arithmetic: a bug here, never input.
@@ -405,6 +416,12 @@ var domainErrorResponses = []domainErrorResponse{
 		message:   "That FX rate mode is not valid.",
 	},
 	{
+		sentinels: []error{domain.ErrInvalidTimezone},
+		status:    http.StatusUnprocessableEntity,
+		code:      "INVALID_TIMEZONE",
+		message:   "That time zone is not recognised.",
+	},
+	{
 		// 502 rather than 500: the failure is upstream of this service, not
 		// a bug in it -- though not always "go look at Mailpit, not here":
 		// a stray path segment in MAILPIT_API_URL surfaces as this same
@@ -496,6 +513,16 @@ var domainErrorResponses = []domainErrorResponse{
 		sentinels: []error{domain.ErrOpeningBalanceInFuture},
 		status:    http.StatusUnprocessableEntity,
 		code:      "INVALID_AS_OF",
+		message:   "That date is in the future.",
+	},
+	{
+		// One row for every recorded fact dated after the household's
+		// today: a holding's purchase, sale, price or income row, a
+		// transaction, a bill payment and a goal contribution. The same code
+		// and sentence on every screen, so a form needs no case of its own.
+		sentinels: []error{domain.ErrDateInFuture},
+		status:    http.StatusUnprocessableEntity,
+		code:      "INVALID_DATE",
 		message:   "That date is in the future.",
 	},
 	{
@@ -638,12 +665,6 @@ var domainErrorResponses = []domainErrorResponse{
 		message:   "This account already has a holding with that name.",
 	},
 	{
-		sentinels: []error{domain.ErrHoldingDateInFuture},
-		status:    http.StatusUnprocessableEntity,
-		code:      "INVALID_DATE",
-		message:   "That date is in the future.",
-	},
-	{
 		sentinels: []error{domain.ErrHoldingNameRequired},
 		status:    http.StatusUnprocessableEntity,
 		code:      "HOLDING_NAME_REQUIRED",
@@ -706,6 +727,19 @@ var domainErrorResponses = []domainErrorResponse{
 		status:    http.StatusUnprocessableEntity,
 		code:      "HOLDING_OVERSOLD",
 		message:   "That would sell more than this holding has ever held.",
+	},
+	{
+		// Three writes reach this, so the sentence names neither a field nor
+		// an action: a price on a large holding, a purchase on a holding with
+		// a high price, and deleting a sale (which makes the holding larger
+		// at every later date). It names both figures because either may be
+		// the mistyped one. Not AMOUNT_TOO_LARGE: every figure in the request
+		// is inside that ceiling, and "check it for extra digits" would point
+		// at a field that may be right.
+		sentinels: []error{domain.ErrHoldingValueTooLarge},
+		status:    http.StatusUnprocessableEntity,
+		code:      "HOLDING_VALUE_TOO_LARGE",
+		message:   "That would make this holding worth more than Hearth can record. Check the quantity and the price for extra digits.",
 	},
 	{
 		sentinels: []error{domain.ErrHoldingEventQuantityNotPositive},
@@ -869,14 +903,16 @@ var domainErrorResponses = []domainErrorResponse{
 		// have different causes and want different copy. RETRO_EXISTS
 		// (handleStartRetro's own case, ahead of MapDomainError) is two
 		// concurrent Create calls racing for the SAME free month. This is
-		// the calm case of both candidate months already being taken -- the
+		// the calm case of no month being left to start -- the
 		// Start-retro button shouldn't even reach it, since
 		// RetrosView.StartMonth would already be nil -- so "someone already
-		// started it" would be actively wrong here.
+		// started it" would be actively wrong here. The message does not
+		// say "last month already has a retro": for a household created
+		// this month, last month has none and is not offered either.
 		sentinels: []error{domain.ErrRetroNothingToStart},
 		status:    http.StatusConflict,
 		code:      "RETRO_NOTHING_TO_START",
-		message:   "Both this month and last month already have a retro.",
+		message:   "There is no retro left to start right now.",
 	},
 	{
 		sentinels: []error{domain.ErrInvalidMood},

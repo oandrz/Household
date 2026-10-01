@@ -12,6 +12,12 @@ import (
 	"os/signal"
 	"syscall"
 	"time"
+	// The zone database, compiled into the binary. Every authenticated
+	// request loads the household's time zone by name; on an image with no
+	// zoneinfo files that load fails and the request is a 500. Don't remove
+	// this because the tests pass without it: a developer's machine has the
+	// files, a minimal container may not.
+	_ "time/tzdata"
 
 	"github.com/andreasoentoro/hearth/api/internal/adapter/clock"
 	"github.com/andreasoentoro/hearth/api/internal/adapter/crypto"
@@ -258,7 +264,6 @@ func run() error {
 		Accounts:   accountRepo,
 		Households: households,
 		FX:         fxProvider,
-		Clock:      sysClock,
 	})
 	goalSvc := usecase.NewGoalService(usecase.GoalDeps{
 		Goals:      goalRepo,
@@ -291,11 +296,11 @@ func run() error {
 		// rule as a hand-entered one (see BillDeps).
 		Categories: categoryRepo,
 	})
-	retroSvc := usecase.NewRetroService(retroRepo, retroActionRepo)
+	retroSvc := usecase.NewRetroService(retroRepo, retroActionRepo, households)
 	// goalRepo doubles as the GoalProgressReader: Vision needs one
 	// percentage from Goals and the narrow port is what keeps it from
 	// depending on GoalRepository's whole surface.
-	visionSvc := usecase.NewVisionService(visionRepo, goalRepo, sysClock)
+	visionSvc := usecase.NewVisionService(visionRepo, goalRepo)
 	agreementSvc := usecase.NewAgreementService(agreementRepo, memberships)
 	adminSvc := usecase.NewAdminService(usecase.AdminDeps{
 		Admins: platformAdminRepo,
@@ -418,6 +423,7 @@ func run() error {
 				Accounts:     accountSvc,
 				Categories:   categorySvc,
 				Transactions: transactionSvc,
+				Households:   households,
 				Clock:        sysClock,
 				Nudges:       nudgeRepoIfEnabled(cfg, nudgeRepo),
 			}),

@@ -10,6 +10,7 @@ import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { renderWithRouter } from "../../test/renderWithRouter";
 import { stubFetchRoutes } from "../../test/fetchStub";
+import { meRoute } from "../../test/meFixture";
 import { HoldingIncomePanel } from "./HoldingIncomePanel";
 import type { Holding } from "./holdingSchemas";
 
@@ -78,8 +79,13 @@ function holdDeletesOpen(routes: Parameters<typeof stubFetchRoutes>[0]) {
   return { deletes, release: () => release() };
 }
 
+const ORIGINAL_TZ = process.env.TZ;
+
 afterEach(() => {
+  vi.useRealTimers();
   vi.restoreAllMocks();
+  if (ORIGINAL_TZ === undefined) delete process.env.TZ;
+  else process.env.TZ = ORIGINAL_TZ;
 });
 
 describe("HoldingIncomePanel", () => {
@@ -148,5 +154,22 @@ describe("HoldingIncomePanel", () => {
     renderWithRouter(<HoldingIncomePanel holding={holding} onClose={() => {}} />);
 
     expect(await screen.findByText(/S\$45\.00/)).toBeInTheDocument();
+  });
+
+  // The date a dividend defaults to is the household's today, in the
+  // household's zone. The browser is put in Los Angeles to prove its own zone
+  // is not read: there it is still 30 September.
+  it("defaults the date to the household's today, whatever zone the browser is in", async () => {
+    process.env.TZ = "America/Los_Angeles";
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-09-30T23:00:00Z"));
+    stubFetchRoutes({
+      ...meRoute("Asia/Singapore"),
+      "GET /api/v1/currencies": { status: 200, body: currencies },
+      "GET /api/v1/holdings/h1/income": { status: 200, body: { income: [] } },
+    });
+    renderWithRouter(<HoldingIncomePanel holding={holding} onClose={() => {}} />);
+
+    await waitFor(() => expect(screen.getByLabelText("On")).toHaveValue("2026-10-01"));
   });
 });

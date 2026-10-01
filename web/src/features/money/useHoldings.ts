@@ -4,6 +4,7 @@
 // by a query parameter), so holdingsQueryKey is modelled on goalsQueryKey.
 import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { apiFetch, fetchAndParse } from "../../api/client";
+import { householdQueryKey } from "../settings/useHousehold";
 import {
   holdingEventsResponseSchema,
   holdingIncomeResponseSchema,
@@ -92,11 +93,16 @@ async function fetchPortfolio(includeArchived: boolean): Promise<PortfolioRespon
 // length: it lists every holding the household has and prints each one's name,
 // so a holding added or renamed here changes what that screen should say even
 // though no figure on it moved.
+//
+// And the household: the first holding locks its primary currency, and
+// Settings shows that lock from GET /household. Without this line an owner who
+// adds a holding and then opens Settings is still offered the currency field.
 function invalidateHoldings(queryClient: QueryClient) {
   return Promise.all([
     queryClient.invalidateQueries({ queryKey: holdingsQueryKey(false) }),
     queryClient.invalidateQueries({ queryKey: holdingsQueryKey(true) }),
     queryClient.invalidateQueries({ queryKey: ["portfolio-report"] }),
+    queryClient.invalidateQueries({ queryKey: householdQueryKey }),
   ]);
 }
 

@@ -2,6 +2,7 @@ package domain
 
 import (
 	"fmt"
+	"math"
 	"sort"
 	"time"
 )
@@ -110,6 +111,9 @@ func (e HoldingEvent) Validate(holdingCurrency, primaryCurrency string) error {
 	if e.Amount.Amount < 0 {
 		return fmt.Errorf("%w: an event amount cannot be negative, got %d", ErrNegativeAmount, e.Amount.Amount)
 	}
+	if err := CheckAmountWithinLimit(e.Amount.Amount); err != nil {
+		return err
+	}
 
 	return validatePrimaryAmount(e.PrimaryAmount, holdingCurrency, primaryCurrency)
 }
@@ -137,7 +141,7 @@ func validatePrimaryAmount(primary *Money, holdingCurrency, primaryCurrency stri
 	if primary.Amount < 0 {
 		return fmt.Errorf("%w: a primary amount cannot be negative, got %d", ErrNegativeAmount, primary.Amount)
 	}
-	return nil
+	return CheckAmountWithinLimit(primary.Amount)
 }
 
 // Valuation is what one unit of a holding was worth on a given day -- the
@@ -163,6 +167,9 @@ func (v Valuation) Validate(holdingCurrency, primaryCurrency string) error {
 	}
 	if v.UnitPrice.Amount < 0 {
 		return fmt.Errorf("%w: a unit price cannot be negative, got %d", ErrNegativeAmount, v.UnitPrice.Amount)
+	}
+	if err := CheckAmountWithinLimit(v.UnitPrice.Amount); err != nil {
+		return err
 	}
 	return validatePrimaryAmount(v.PrimaryUnitPrice, holdingCurrency, primaryCurrency)
 }
@@ -199,6 +206,13 @@ type Position struct {
 	Held     Quantity
 	Cost     Money
 	Realised Money
+
+	// PeakHeld is the most the holding has ever held at any point in its
+	// history, never less than Held. It exists for
+	// CheckHoldingValueWithinLimit: the period report prices the quantity
+	// held at each period's end, so the largest quantity a price can ever be
+	// multiplied by is this, not what is held today.
+	PeakHeld Quantity
 
 	CostPrimary     Money
 	RealisedPrimary Money
@@ -272,6 +286,7 @@ func (h Holding) Position(events []HoldingEvent, primaryCurrency string) (Positi
 	if err != nil {
 		return Position{}, err
 	}
+	peak := held
 	native := costPool{
 		cost:     Money{Amount: 0, Currency: h.Currency},
 		realised: Money{Amount: 0, Currency: h.Currency},
@@ -292,6 +307,14 @@ func (h Holding) Position(events []HoldingEvent, primaryCurrency string) (Positi
 	for _, e := range ordered {
 		switch e.Kind {
 		case HoldingAcquisition:
+			// Checked before adding, not after. Two quantities that each fit
+			// can add up past an int64, and a sum that wraps comes out
+			// negative: NewQuantity would refuse it, but as "a quantity
+			// cannot be negative", which is not what went wrong.
+			if e.Quantity.Nano() > math.MaxInt64-held.Nano() {
+				return Position{}, fmt.Errorf("%w: %d more nano units on top of %d held is more than can be counted",
+					ErrInvalidQuantity, e.Quantity.Nano(), held.Nano())
+			}
 			nextHeld, err := NewQuantity(held.Nano() + e.Quantity.Nano())
 			if err != nil {
 				return Position{}, err
@@ -303,6 +326,10 @@ func (h Holding) Position(events []HoldingEvent, primaryCurrency string) (Positi
 				return Position{}, err
 			}
 			held = nextHeld
+			// Only a purchase can set a new peak; a sale only lowers held.
+			if held.Nano() > peak.Nano() {
+				peak = held
+			}
 
 		case HoldingDisposal:
 			if e.Quantity.Nano() > held.Nano() {
@@ -336,6 +363,7 @@ func (h Holding) Position(events []HoldingEvent, primaryCurrency string) (Positi
 
 	return Position{
 		Held:            held,
+		PeakHeld:        peak,
 		Cost:            native.cost,
 		Realised:        native.realised,
 		CostPrimary:     primary.cost,

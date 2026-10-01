@@ -134,6 +134,6 @@ export const VISION_COPY = {
   // VisionModal.tsx's own header comment for why that's the only honest
   // action to offer here.
   conflictBanner:
-    "Someone else saved this year's vision while you were editing. Nothing has been sent -- but reloading will discard the changes you made here and show their version instead.",
+    "Someone else saved this year's vision while you were editing. Nothing has been sent — but reloading will discard the changes you made here and show their version instead.",
   reloadAndDiscardChanges: "Reload and discard my changes",
 } as const;

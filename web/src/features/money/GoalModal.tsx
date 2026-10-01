@@ -41,21 +41,8 @@ import type { Currency } from "../auth/schemas";
 import { describeAmountError, formatMoney, minorUnitsToInputValue, toMinorUnits } from "./formatMoney";
 import { useGoals, type CreateGoalBody, type UpdateGoalBody } from "./useGoals";
 import type { Goal } from "./goalSchemas";
-
-// currentMonthValue reads the *local* calendar month via getFullYear/
-// getMonth, never toISOString() (which converts to UTC first) -- the same
-// function, and the same reason, as AccountModal.tsx's own today(): a
-// caller at 7am in Singapore (UTC+8) computing "this month" through UTC
-// could still read the previous month. Not imported from AccountModal.tsx
-// (a small duplicated function is a smaller risk than coupling two
-// features' date handling through one import for four lines), the same
-// call TransactionModal.tsx's own today() comment already made.
-function currentMonthValue(): string {
-  const now = new Date();
-  const year = now.getFullYear();
-  const month = String(now.getMonth() + 1).padStart(2, "0");
-  return `${year}-${month}`;
-}
+import { useHouseholdZone } from "../auth/useHouseholdZone";
+import { monthIn } from "../../lib/householdDate";
 
 // targetMonthLabel mirrors GoalCard.tsx's own private helper of the same
 // name ("2026-12" -> "Dec 2026"), duplicated rather than imported because
@@ -129,6 +116,9 @@ export function GoalModal(props: GoalModalProps) {
   // `mode` union, so every use of it below is checked by the compiler.
   const goal = props.mode === "edit" ? props.goal : null;
   const isEditing = goal !== null;
+  // The month the suggestion counts "months left" from: the household's, the
+  // same month the server counts from when it works out a goal's status.
+  const householdMonth = monthIn(useHouseholdZone());
   const { createGoal, updateGoal, restoreGoal } = useGoals({
     // This component only ever calls the mutations below -- it never reads
     // the list itself (every field it needs arrives via props: `goal` in
@@ -190,7 +180,7 @@ export function GoalModal(props: GoalModalProps) {
     // edit mode, so there is nothing else it could be).
     const contributedMinor = goal ? goal.contributedMinor : (toMinorUnits(startingBalanceInput, currency) ?? 0);
     const remainingMinor = Math.max(0, targetMinor - contributedMinor);
-    const monthsLeft = monthsLeftInclusive(targetMonthInput, currentMonthValue());
+    const monthsLeft = monthsLeftInclusive(targetMonthInput, householdMonth);
     const monthlyMinor = suggestedMonthlyMinor(remainingMinor, monthsLeft);
     return monthlyMinor === null ? null : { targetMinor, monthlyMinor };
   })();

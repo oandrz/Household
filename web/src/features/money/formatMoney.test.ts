@@ -42,6 +42,17 @@ describe("toMinorUnits", () => {
     expect(toMinorUnits("85400000.5", "IDR")).toBeNull();
     expect(toMinorUnits("eight", "SGD")).toBeNull();
   });
+
+  // A JavaScript number is exact only up to 2^53 - 1 (9007199254740991). Past
+  // that, the form would send a different figure from the one typed, or one
+  // the server cannot read as a whole number at all.
+  it("refuses a figure too large for the browser to hold exactly", () => {
+    expect(toMinorUnits("90071992547409.91", "SGD")).toBe(9007199254740991);
+    expect(toMinorUnits("90071992547409.92", "SGD")).toBeNull();
+    expect(toMinorUnits("99999999999999999999", "SGD")).toBeNull();
+    expect(toMinorUnits("-99999999999999999999", "SGD")).toBeNull();
+    expect(toMinorUnits("99999999999999999999", "IDR")).toBeNull();
+  });
 });
 
 describe("describeAmountError", () => {
@@ -51,6 +62,18 @@ describe("describeAmountError", () => {
   it("names the currency when a real number has more decimals than it allows", () => {
     expect(describeAmountError("85400000.50", "IDR", "8240.55")).toBe(
       "IDR doesn't use cents. Remove the decimal point.",
+    );
+  });
+
+  // "Enter an amount, like 52.30" would be the wrong thing to say to someone
+  // who did enter an amount. The wording matches the server's own refusal of
+  // a too-large amount, so a person reads one sentence whichever side refuses.
+  it("says a real number is too large rather than asking for an amount", () => {
+    expect(describeAmountError("99999999999999999999", "SGD", "52.30")).toBe(
+      "That amount is larger than Hearth can record. Check it for extra digits.",
+    );
+    expect(describeAmountError("-99,999,999,999,999,999,999", "IDR", "52.30")).toBe(
+      "That amount is larger than Hearth can record. Check it for extra digits.",
     );
   });
 

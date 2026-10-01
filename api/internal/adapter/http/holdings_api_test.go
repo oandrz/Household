@@ -637,7 +637,7 @@ func TestFutureDatedIncomeIsRefusedAtTheWire(t *testing.T) {
 	}, session, csrf)
 	// 422, not 400: the request is well formed and the date is simply not
 	// allowed -- the same answer a future-dated event and valuation already
-	// give (errors.go maps ErrHoldingDateInFuture once, for all three).
+	// give (errors.go maps ErrDateInFuture once, for all three).
 	if rec.Code != http.StatusUnprocessableEntity {
 		t.Fatalf("future-dated income = %d, want 422 (body = %s)", rec.Code, rec.Body.String())
 	}
@@ -673,6 +673,55 @@ func TestAHouseholdHoldingInvestmentsCannotChangeCurrency(t *testing.T) {
 	rec = env.authed(t, http.MethodPatch, "/api/v1/household", map[string]any{"familyName": "Oentoro"}, session, csrf)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("rename = %d, want 200 (body = %s)", rec.Code, rec.Body.String())
+	}
+}
+
+// GET /household tells an owner the currency is locked, so Settings can say so
+// before Save rather than after a 422. It is the same count the refusal above
+// reads, so an archived holding still locks.
+//
+// A limited member is never told. They cannot change the currency at all, and
+// the flag would tell a child without Money that the household holds
+// investments.
+func TestGetHouseholdTellsOnlyAnOwnerThatHoldingsLockTheCurrency(t *testing.T) {
+	env := newTestEnv(t)
+	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
+
+	if env.getHousehold(t, session).PrimaryCurrencyLocked {
+		t.Fatal("primaryCurrencyLocked = true before anything is held, want false")
+	}
+
+	account := newHoldingAccount(t, env, session, csrf, "Brokerage", "investment")
+	rec := env.authed(t, http.MethodPost, "/api/v1/holdings", map[string]any{
+		"accountId": account, "name": "Gold", "instrument": "gold", "unit": "gram",
+	}, session, csrf)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create holding = %d (body = %s)", rec.Code, rec.Body.String())
+	}
+	var created struct {
+		Holding struct {
+			ID string `json:"id"`
+		} `json:"holding"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &created); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	if !env.getHousehold(t, session).PrimaryCurrencyLocked {
+		t.Fatal("primaryCurrencyLocked = false with one holding, want true")
+	}
+
+	rec = env.authed(t, http.MethodPost, "/api/v1/holdings/"+created.Holding.ID+"/archive", nil, session, csrf)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("archive holding = %d (body = %s)", rec.Code, rec.Body.String())
+	}
+	if !env.getHousehold(t, session).PrimaryCurrencyLocked {
+		t.Fatal("primaryCurrencyLocked = false once the only holding is archived, want true: its events still record a cost")
+	}
+
+	limitedSession, _ := env.signIn(t, env.limitedEmail, env.limitedPassword)
+	if env.getHousehold(t, limitedSession).PrimaryCurrencyLocked {
+		t.Fatal("primaryCurrencyLocked = true for a limited member, want false: it would disclose that the household holds investments")
 	}
 }
 

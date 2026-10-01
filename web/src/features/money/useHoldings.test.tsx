@@ -114,6 +114,30 @@ describe("useHoldings write invalidation", () => {
     await waitFor(() => expect(invalidatedTheReport(invalidated)).toBe(true));
   });
 
+  // The first holding locks the household's primary currency, and Settings
+  // shows that lock from GET /household. That screen is on its own query key:
+  // without this, an owner who adds a holding and then opens Settings is
+  // offered a currency field the server will refuse, until the cache goes stale.
+  it("refetches the household after a holding is added, because the first one locks its currency", async () => {
+    stubFetchRoutes({
+      "GET /api/v1/holdings": { status: 200, body: { holdings: [], notInNetWorth: true } },
+      "POST /api/v1/holdings": { status: 201, body: { holding: null } },
+    });
+    const { wrapper, invalidated } = harness();
+    const { result } = renderHook(() => useHoldings({ includeArchived: false }), { wrapper });
+
+    await result.current.createHolding.mutateAsync({
+      accountId: "a1",
+      name: "Gold bar",
+      instrument: "gold",
+      unit: "gram",
+    });
+
+    await waitFor(() =>
+      expect(invalidated.some((key) => key.length === 1 && key[0] === "household")).toBe(true),
+    );
+  });
+
   it("refetches the period report after a holding is renamed", async () => {
     stubFetchRoutes({
       "GET /api/v1/holdings": { status: 200, body: { holdings: [], notInNetWorth: true } },

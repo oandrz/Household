@@ -36,7 +36,9 @@ import { BudgetStatCards } from "./BudgetStatCards";
 import { formatPercentUsed } from "./percentUsedCopy";
 import { resolveTemplatePrefill, type BudgetModalEntry, type BudgetModalState } from "./budgetModalPrefill";
 import { formatMoney } from "./formatMoney";
-import { currentMonth, monthLabel } from "./month";
+import { monthLabel } from "./month";
+import { useHouseholdZone } from "../auth/useHouseholdZone";
+import { monthIn } from "../../lib/householdDate";
 import { useBudget } from "./useBudget";
 import { useBudgetHistory } from "./useBudgetHistory";
 import { useCategories } from "./useTransactions";
@@ -85,7 +87,13 @@ function overCategorySentence(
 }
 
 export function BudgetPage() {
-  const [month, setMonth] = useState(() => currentMonth());
+  // The page opens on the household's current month. null means "nobody has
+  // stepped to another month yet", and the current month is then worked out
+  // on every render rather than stored at mount, so the page is on the
+  // household's month even if the household's zone arrives after it mounts.
+  const householdMonth = monthIn(useHouseholdZone());
+  const [chosenMonth, setChosenMonth] = useState<string | null>(null);
+  const month = chosenMonth ?? householdMonth;
   const budget = useBudget(month);
   const currencies = useCurrencies();
   // Unconditional, not gated behind `data.budget === null`: React's rules of
@@ -232,7 +240,7 @@ export function BudgetPage() {
             <button
               type="button"
               aria-label="Previous month"
-              onClick={() => setMonth((current) => shiftMonth(current, -1))}
+              onClick={() => setChosenMonth(shiftMonth(month, -1))}
               // Height only, no width change: this row (month chip, History,
               // Edit budget) is tight enough at 375px that even a few extra
               // pixels of width on this glyph pushed "Edit budget" into
@@ -252,7 +260,7 @@ export function BudgetPage() {
             <button
               type="button"
               aria-label="Next month"
-              onClick={() => setMonth((current) => shiftMonth(current, 1))}
+              onClick={() => setChosenMonth(shiftMonth(month, 1))}
               className="relative grid h-11 place-items-center text-muted before:absolute before:-inset-x-3 before:inset-y-0 before:content-[''] sm:h-auto"
             >
               ›
@@ -496,7 +504,7 @@ export function BudgetPage() {
             currency={data.currency}
             symbol={symbol}
             onPickMonth={(pickedMonth) => {
-              setMonth(pickedMonth);
+              setChosenMonth(pickedMonth);
               setHistoryOpen(false);
             }}
             onClose={() => setHistoryOpen(false)}

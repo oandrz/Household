@@ -609,11 +609,32 @@ func TestSignUpPreviewAndComplete(t *testing.T) {
 		assertErrorResponse(t, rec, http.StatusUnprocessableEntity, "PASSWORD_TOO_SHORT")
 	})
 
+	// The form has no time zone field, so a refusal here is a client that
+	// forgot to send the browser's zone. It is refused, never replaced with
+	// UTC: see NewSignupBlueprint.
+	t.Run("a missing time zone is 422", func(t *testing.T) {
+		rec := env.do(http.MethodPost, "/api/v1/auth/sign-up/"+token+"/complete", map[string]string{
+			"householdName": "Ade & Kris", "displayName": "Ade", "primaryCurrency": "SGD",
+			"password": "a-long-enough-password",
+		})
+		assertErrorResponse(t, rec, http.StatusUnprocessableEntity, "INVALID_TIMEZONE")
+	})
+
+	t.Run("an unknown time zone is 422", func(t *testing.T) {
+		rec := env.do(http.MethodPost, "/api/v1/auth/sign-up/"+token+"/complete", map[string]string{
+			"householdName": "Ade & Kris", "displayName": "Ade", "primaryCurrency": "SGD",
+			"timezone": "Mars/Olympus_Mons", "password": "a-long-enough-password",
+		})
+		assertErrorResponse(t, rec, http.StatusUnprocessableEntity, "INVALID_TIMEZONE")
+	})
+
 	// Every rejection above left the token usable, which is why this still works.
 	t.Run("completing signs the new owner in", func(t *testing.T) {
 		rec := env.do(http.MethodPost, "/api/v1/auth/sign-up/"+token+"/complete", map[string]string{
 			"householdName": "Ade & Kris", "displayName": "Ade", "primaryCurrency": "SGD",
-			"password": "a-long-enough-password",
+			// Not UTC, the column's default: a zone the handler dropped would
+			// otherwise be indistinguishable from one it stored.
+			"timezone": "Pacific/Auckland", "password": "a-long-enough-password",
 		})
 		if rec.Code != http.StatusOK {
 			t.Fatalf("complete = %d, want 200: %s", rec.Code, rec.Body.String())
@@ -629,6 +650,9 @@ func TestSignUpPreviewAndComplete(t *testing.T) {
 		if body.Household.PrimaryCurrency != "SGD" || body.Household.SecondaryCurrency != "SGD" ||
 			body.Household.ShowSecondaryCurrency {
 			t.Fatalf("currency fields = %+v, want SGD/SGD/false", body.Household)
+		}
+		if body.Household.Timezone != "Pacific/Auckland" {
+			t.Fatalf("timezone = %q, want the zone the browser sent", body.Household.Timezone)
 		}
 		if body.Membership.Role != "owner" {
 			t.Fatalf("role = %q, want owner", body.Membership.Role)
@@ -654,7 +678,7 @@ func TestSignUpPreviewAndComplete(t *testing.T) {
 	t.Run("the token cannot be used twice", func(t *testing.T) {
 		rec := env.do(http.MethodPost, "/api/v1/auth/sign-up/"+token+"/complete", map[string]string{
 			"householdName": "Second household", "displayName": "Ade", "primaryCurrency": "SGD",
-			"password": "a-long-enough-password",
+			"timezone": "Pacific/Auckland", "password": "a-long-enough-password",
 		})
 		assertErrorResponse(t, rec, http.StatusConflict, "SIGNUP_ALREADY_USED")
 	})

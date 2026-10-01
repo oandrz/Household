@@ -1,32 +1,39 @@
 // Overview's "Next retro" tile (design/Household Dashboard.dc.html's own
-// go_retros-linked card): the current month's retro if the household has
-// started one -- draft or finished -- else a prompt to start it. The
-// design's mockup shows a SCHEDULED retro with a countdown ("in 8 days"),
-// but this product has no scheduling concept for a retro -- a retro is
-// created the moment "Start retro" is clicked (handleStartRetro's own
-// comment: the server picks the month, there is no calendar entry for a
-// future one) -- so this card answers a different, real question instead:
-// has this month's check-in been started, and is there anything still on
-// it.
+// go_retros-linked card). It answers one question: what is there to do about
+// retros right now. In order:
+//
+//   1. this month's retro, if the household has started one, draft or
+//      finished;
+//   2. else last month's retro, if it is still a draft: an unfinished retro
+//      is the thing to finish, and a prompt to start the new month would
+//      step over it. This is what the card shows on the 1st of a month
+//      while last month's retro is still open;
+//   3. else a prompt to start the month the server says can be started.
+//
+// "This month" and "last month" are the household's months (ADR 12).
+//
+// A draft shown here carries a link to the Retros page, where it is listed
+// as in progress and can be opened. The page may still offer to start the
+// new month beside it. That is not a disagreement: the card names the one
+// thing that needs attention, and the page offers everything that can be
+// done.
+//
+// The design's mockup shows a SCHEDULED retro with a countdown ("in 8
+// days"), but this product has no scheduling concept for a retro: one is
+// created the moment "Start retro" is clicked, and the server picks the
+// month. So there is no countdown here.
 //
 // Owns its own useRetros() call, the same shape NextBillCard.tsx uses for
-// useBills -- but unlike that card, this one takes no `enabled` prop of its
-// own. NextBillCard needs one because OverviewPage mounts it unconditionally
-// for every owner (Task 16's own pinned "renders nothing while its query is
-// disabled" behaviour). Retros has no such requirement to reach, and
-// useRetros() (Task 9) was not given an `enabled` option to begin with --
-// this task's own file list does not touch useRetros.ts. So the gate lives
-// one level up instead: OverviewPage.tsx only mounts <NextRetroCard /> at
-// all for a member whose capabilities include "marriage". A component that
-// is never mounted never calls the hook inside it, which is what "gate the
-// hook call itself, not just the render" (the brief's own words) actually
-// requires here -- there is no `enabled: false` idle state for this
-// component to sit in.
+// useBills, but takes no `enabled` prop: useRetros() has no such option.
+// The gate lives one level up instead. OverviewPage.tsx only mounts
+// <NextRetroCard /> for a member whose capabilities include "marriage", and
+// a component that is never mounted never calls the hook inside it, so a
+// member without marriage never fires GET /retros at all.
 import { Link } from "@tanstack/react-router";
-import { currentMonth } from "../money/month";
+import { useHouseholdZone } from "../auth/useHouseholdZone";
+import { monthBefore, monthIn, yearIn } from "../../lib/householdDate";
 import { monthNameOnly, nextMonthName } from "../marriage/retroCopy";
 import { useRetros } from "../marriage/useRetros";
-import { currentVisionYear } from "../marriage/visionQueryKeys";
 import { useVision } from "../marriage/useVision";
 import { OVERVIEW_COPY } from "./copy";
 
@@ -34,12 +41,13 @@ export function NextRetroCard() {
   const retros = useRetros();
   // The check-in strip's own data (design's "Vision check-in: 2026 theme —
   // 'Slow down together'", drawn inside this same card). A second,
-  // independent useVision(currentVisionYear()) call rather than one shared
+  // independent useVision call for the household's year rather than one shared
   // with VisionCard.tsx -- VisionCard.tsx's own header comment explains why
   // that hook has to be mounted per-component (no `enabled` option to gate
   // it centrally) and why two independent callers on the same query key cost
   // one request, not two.
-  const vision = useVision(currentVisionYear());
+  const zone = useHouseholdZone();
+  const vision = useVision(yearIn(zone));
 
   // Same three-states-as-one guard NextBillCard.tsx uses: still loading, or
   // errored (a household owner is the only caller this route usually sees,
@@ -51,16 +59,18 @@ export function NextRetroCard() {
   if (!retros.data) return null;
 
   const { data } = retros;
-  // "Current" here is literally this calendar month, not `data.startMonth`
-  // -- those answer different questions. A retro already exists for this
-  // month whenever `retros` (newest-month-first, retro_repo.go's own
-  // ORDER BY) carries a row for it; `startMonth` only ever names a month
-  // with NO retro yet, and StartableMonth (domain/retro.go) can point at
-  // last month instead of this one when a couple is finishing last month's
-  // retro in the first few days of a new one. Reading `data.startMonth`
-  // directly in the empty branch below (rather than re-deriving it here)
-  // is what keeps that priority correct without duplicating it.
-  const current = data.retros.find((r) => r.month === currentMonth());
+  // Both lookups read the list, never `data.startMonth`: startMonth only
+  // ever names a month with NO retro yet, and the two months looked for here
+  // are ones that have one.
+  const thisMonth = monthIn(zone);
+  const current = data.retros.find((r) => r.month === thisMonth);
+  // Last month's retro counts only while it is a draft, and only last
+  // month's: an older draft is not brought forward. Don't widen this to "any
+  // open draft": the Retros page offers last month to start in that case
+  // (domain.StartableMonth), and the card would then name a different month
+  // from the page's button.
+  const lastMonthDraft = data.retros.find((r) => r.month === monthBefore(thisMonth) && !r.finished);
+  const shown = current ?? lastMonthDraft;
 
   return (
     <section
@@ -72,15 +82,15 @@ export function NextRetroCard() {
         {OVERVIEW_COPY.nextRetroHeading}
       </h2>
 
-      {current ? (
+      {shown ? (
         <>
           <p className="mt-1.5 text-[15px] font-semibold text-ink">
-            {OVERVIEW_COPY.nextRetroTitle(monthNameOnly(current.month))}
+            {OVERVIEW_COPY.nextRetroTitle(monthNameOnly(shown.month))}
           </p>
           {/* Draft-only: a finished retro has nothing left to flag as
               unfinished. RetroHistoryList.tsx's own draftInProgress row is
               the same signal, restated for this card. */}
-          {!current.finished && (
+          {!shown.finished && (
             <p className="mt-1 text-[11.5px] font-semibold text-accent">{OVERVIEW_COPY.nextRetroInProgress}</p>
           )}
           {/* The design's "carried from June retro" section under Next
@@ -90,10 +100,21 @@ export function NextRetroCard() {
               OPEN count, not the total: retroSummarySchema.openActionCount,
               never actionCount, or a fully-ticked retro would still read as
               outstanding work here. Omitted at zero, never "0 actions". */}
-          {current.openActionCount > 0 && (
+          {shown.openActionCount > 0 && (
             <p className="mt-1 text-[11.5px] text-muted">
-              {OVERVIEW_COPY.nextRetroActions(current.openActionCount, nextMonthName(current.month))}
+              {OVERVIEW_COPY.nextRetroActions(shown.openActionCount, nextMonthName(shown.month))}
             </p>
+          )}
+          {/* The way to the draft. Without it the card would name an
+              unfinished retro and offer no way to reach it. Same link
+              classes as the prompt below. */}
+          {!shown.finished && (
+            <Link
+              to="/marriage/retros"
+              className="mt-3 inline-flex min-h-11 items-center text-[13px] font-semibold text-accent sm:min-h-0"
+            >
+              {OVERVIEW_COPY.nextRetroContinue(monthNameOnly(shown.month))}
+            </Link>
           )}
         </>
       ) : (

@@ -14,6 +14,9 @@ type StaticProvider struct {
 	// units maps a currency pair to how many units of the second currency one
 	// unit of the first buys. Stored one way only; the inverse is exact because
 	// a Rate is a fraction.
+	//
+	// Keep every value at or below 92,233: domain.MaxAmountMinor, the largest
+	// amount a person may enter, overflows an int64 when multiplied by more.
 	units map[[2]string]int64
 }
 

@@ -8,7 +8,7 @@
 //
 // `closed` arrives as a prop rather than being re-derived here from `month`
 // against the browser's own clock -- an earlier version tried exactly that
-// (comparing `month` to month.ts's own currentMonth()) and it silently
+// (comparing `month` to the current month as the browser saw it) and it silently
 // disagreed with the server's own `daysLeft === 0` in the one case that
 // actually matters: a past month whose `month` value nonetheless equals
 // "now" by the caller's own clock (a real risk under client/server clock

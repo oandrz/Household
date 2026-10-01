@@ -32,6 +32,7 @@ import {
 import { useCreateAccount, useUpdateAccount } from "./useAccounts";
 import { parseEnum } from "../../lib/parseEnum";
 import { accountTypeSchema, type Account, type AccountType } from "./schemas";
+import { useHouseholdDateInput } from "../auth/useHouseholdDateInput";
 
 // AccountFormValues is exactly the POST body the create route accepts, so the
 // modal and useCreateAccount cannot disagree about field names.
@@ -90,21 +91,6 @@ function limitedMembersLine(members: MemberView[] | undefined, isPending: boolea
   return `${list} can see this account exists, not the balance`;
 }
 
-// today() reads the *local* calendar date via getFullYear/getMonth/getDate,
-// never toISOString() (which converts to UTC first). This project has hit
-// exactly that mistake twice already on the backend (dateOnly's
-// UTC().Truncate() -- see docs' "third instance of one mistake" commit): a
-// caller at 7am in Singapore (UTC+8) computing "today" through UTC would get
-// yesterday's date. There is no server round trip to catch that here, so this
-// has to get it right on its own.
-function today(): string {
-  const now = new Date();
-  const year = now.getFullYear();
-  const month = String(now.getMonth() + 1).padStart(2, "0");
-  const day = String(now.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-}
-
 export function AccountModal({
   open,
   onClose,
@@ -149,7 +135,10 @@ export function AccountModal({
   const [balanceTouched, setBalanceTouched] = useState(false);
   const [currency, setCurrency] = useState(() => account?.openingBalance?.currency ?? "");
   const [currencyTouched, setCurrencyTouched] = useState(false);
-  const [asOf, setAsOf] = useState(account?.balanceAsOf ?? today());
+  // A new account's balance is dated the household's today. The server
+  // refuses an opening balance dated after it, so the default must come from
+  // the same calendar.
+  const [asOf, setAsOf] = useHouseholdDateInput(account?.balanceAsOf ?? null);
   const [countTowardNetWorth, setCountTowardNetWorth] = useState(account?.countTowardNetWorth ?? true);
   const [visibleToLimitedMembers, setVisibleToLimitedMembers] = useState(
     account?.visibleToLimitedMembers ?? false,

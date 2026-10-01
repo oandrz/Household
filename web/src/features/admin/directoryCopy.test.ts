@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { relativeTimeLabel } from "./directoryCopy";
+import { memberCountLabel, relativeTimeLabel } from "./directoryCopy";
 
 const now = new Date("2026-09-02T12:00:00Z");
 const ago = (ms: number) => new Date(now.getTime() - ms).toISOString();
@@ -22,5 +22,13 @@ describe("relativeTimeLabel", () => {
   });
   it("reads a future timestamp as just now rather than a negative age", () => {
     expect(relativeTimeLabel(ago(-5 * day), now)).toBe("just now");
+  });
+});
+
+describe("memberCountLabel", () => {
+  it("is singular for exactly one member and plural for every other count", () => {
+    expect(memberCountLabel(1)).toBe("1 member");
+    expect(memberCountLabel(0)).toBe("0 members");
+    expect(memberCountLabel(4)).toBe("4 members");
   });
 });

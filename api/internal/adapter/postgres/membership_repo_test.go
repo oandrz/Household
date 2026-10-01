@@ -28,7 +28,8 @@ func TestMembershipRepoRoundTrip(t *testing.T) {
 	members := postgres.NewMembershipRepo(db)
 
 	h, err := households.Create(ctx, domain.Household{
-		Name: "Andreas & Christine", FamilyName: "Oentoro",
+		Timezone: "UTC",
+		Name:     "Andreas & Christine", FamilyName: "Oentoro",
 		PrimaryCurrency: "SGD", SecondaryCurrency: "IDR", ShowSecondaryCurrency: true,
 	})
 	if err != nil {
@@ -114,7 +115,8 @@ func twoOwnerHousehold(t *testing.T, db *postgres.DB) (householdID, firstID, sec
 	t.Helper()
 	ctx := context.Background()
 	h, err := postgres.NewHouseholdRepo(db).Create(ctx, domain.Household{
-		Name: "Andreas & Christine", FamilyName: "Oentoro",
+		Timezone: "UTC",
+		Name:     "Andreas & Christine", FamilyName: "Oentoro",
 		PrimaryCurrency: "SGD", SecondaryCurrency: "IDR",
 	})
 	if err != nil {

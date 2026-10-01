@@ -124,7 +124,7 @@ func handleListAccounts(deps Deps) http.HandlerFunc {
 			return
 		}
 
-		summary, err := deps.Accounts.Summary(r.Context(), scope.HouseholdID, views, deps.Clock.Now())
+		summary, err := deps.Accounts.Summary(r.Context(), scope.HouseholdID, views, scope.Today)
 		if err != nil {
 			MapDomainError(w, r, err)
 			return
@@ -290,7 +290,7 @@ func handleCreateAccount(deps Deps) http.HandlerFunc {
 			in.VisibleToLimitedMembers = *req.VisibleToLimitedMembers
 		}
 
-		created, err := deps.Accounts.Create(r.Context(), in)
+		created, err := deps.Accounts.Create(r.Context(), in, scope.Today)
 		if err != nil {
 			MapDomainError(w, r, err)
 			return
@@ -327,7 +327,7 @@ func handleUpdateAccount(deps Deps) http.HandlerFunc {
 		}
 
 		id := chi.URLParam(r, "id")
-		if _, err := deps.Accounts.Update(r.Context(), scope.HouseholdID, id, patch); err != nil {
+		if _, err := deps.Accounts.Update(r.Context(), scope.HouseholdID, id, patch, scope.Today); err != nil {
 			MapDomainError(w, r, err)
 			return
 		}

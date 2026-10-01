@@ -279,7 +279,8 @@ func newAccountFixture(t *testing.T) (db *postgres.DB, householdID, membershipID
 	members := postgres.NewMembershipRepo(db)
 
 	h, err := households.Create(ctx, domain.Household{
-		Name: "Test", FamilyName: "Household",
+		Timezone: "UTC",
+		Name:     "Test", FamilyName: "Household",
 		PrimaryCurrency: "SGD", SecondaryCurrency: "IDR", ShowSecondaryCurrency: true,
 	})
 	if err != nil {

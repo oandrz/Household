@@ -50,4 +50,15 @@ describe("meQuerySchema", () => {
     expect(result.isPlatformAdmin).toBe(false);
     expect(result.features).toEqual({});
   });
+
+  // The fixture above also omits household.timezone. A server that old works
+  // out every date in UTC, so UTC is the zone that keeps the frontend's
+  // "today" equal to that server's.
+  it("reads a household with no time zone as UTC, and keeps one that is sent", () => {
+    expect(meQuerySchema.parse(meBodyWithoutNewFields()).household.timezone).toBe("UTC");
+
+    const body = meBodyWithoutNewFields() as { household: Record<string, unknown> };
+    body.household.timezone = "Asia/Singapore";
+    expect(meQuerySchema.parse(body).household.timezone).toBe("Asia/Singapore");
+  });
 });

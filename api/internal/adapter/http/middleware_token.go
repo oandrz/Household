@@ -59,7 +59,15 @@ func requireToken(deps Deps, next http.Handler) http.Handler {
 			logAndWriteInternal(w, r, err)
 			return
 		}
-		scope := Scope{UserID: token.UserID, HouseholdID: token.HouseholdID, Membership: membership, Flags: flags, AuthVia: authViaToken}
+		today, err := householdToday(ctx, deps, token.HouseholdID, now)
+		if err != nil {
+			logAndWriteInternal(w, r, err)
+			return
+		}
+		scope := Scope{
+			UserID: token.UserID, HouseholdID: token.HouseholdID, Membership: membership,
+			Flags: flags, AuthVia: authViaToken, Today: today,
+		}
 		next.ServeHTTP(w, r.WithContext(context.WithValue(ctx, scopeKey{}, scope)))
 	})
 }

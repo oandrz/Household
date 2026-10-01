@@ -36,6 +36,10 @@ func newTestHolding(householdID, accountID, name string) domain.Holding {
 	}
 }
 
+// acceptAnything is the fold for a test about storage, not about a rule: the
+// guarded writes need one, and these tests are not exercising it.
+func acceptAnything([]domain.HoldingEvent, []domain.Valuation) error { return nil }
+
 func testQuantity(t *testing.T, units int64) domain.Quantity {
 	t.Helper()
 	q, err := domain.NewQuantity(units * domain.QuantityScale)
@@ -348,14 +352,14 @@ func TestValuationUpsertReplacesTheSameDayRatherThanAddingASecond(t *testing.T) 
 	h, _ := holdings.Create(ctx, newTestHolding(householdID, accountID, "D05"))
 
 	asOf := july(5)
-	if _, err := valuations.Upsert(ctx, domain.Valuation{
+	if _, err := valuations.UpsertWithFold(ctx, domain.Valuation{
 		HoldingID: h.ID, HouseholdID: householdID, UnitPrice: moneyOf(100), AsOf: asOf,
-	}); err != nil {
+	}, acceptAnything); err != nil {
 		t.Fatalf("Upsert first: %v", err)
 	}
-	if _, err := valuations.Upsert(ctx, domain.Valuation{
+	if _, err := valuations.UpsertWithFold(ctx, domain.Valuation{
 		HoldingID: h.ID, HouseholdID: householdID, UnitPrice: moneyOf(250), AsOf: asOf,
-	}); err != nil {
+	}, acceptAnything); err != nil {
 		t.Fatalf("Upsert correction: %v", err)
 	}
 
@@ -390,10 +394,10 @@ func TestListLatestValuationsSkipsAHoldingWithNoPrice(t *testing.T) {
 		day   int
 		minor int64
 	}{{4, 100}, {6, 300}, {5, 200}} {
-		if _, err := valuations.Upsert(ctx, domain.Valuation{
+		if _, err := valuations.UpsertWithFold(ctx, domain.Valuation{
 			HoldingID: priced.ID, HouseholdID: householdID,
 			UnitPrice: moneyOf(v.minor), AsOf: july(v.day),
-		}); err != nil {
+		}, acceptAnything); err != nil {
 			t.Fatalf("Upsert: %v", err)
 		}
 	}
@@ -455,7 +459,7 @@ func TestTwoRacingDisposalsCannotBothCommit(t *testing.T) {
 	if _, err := events.InsertWithFold(ctx, domain.HoldingEvent{
 		HoldingID: h.ID, HouseholdID: householdID, Kind: domain.HoldingAcquisition,
 		Quantity: testQuantity(t, 50), Amount: moneyOf(5000), OccurredOn: july(1),
-	}, func([]domain.HoldingEvent) error { return nil }); err != nil {
+	}, acceptAnything); err != nil {
 		t.Fatalf("buy: %v", err)
 	}
 
@@ -471,7 +475,7 @@ func TestTwoRacingDisposalsCannotBothCommit(t *testing.T) {
 		_, err := events.InsertWithFold(ctx, domain.HoldingEvent{
 			HoldingID: h.ID, HouseholdID: householdID, Kind: domain.HoldingDisposal,
 			Quantity: testQuantity(t, 30), Amount: moneyOf(4000), OccurredOn: july(2),
-		}, func(existing []domain.HoldingEvent) error {
+		}, func(existing []domain.HoldingEvent, _ []domain.Valuation) error {
 			time.Sleep(300 * time.Millisecond)
 			// The real fold: the service passes exactly this.
 			_, err := h.Position(existing, "SGD")
@@ -654,9 +658,9 @@ func TestValuationsForHouseholdReturnsEveryPriceNotOnlyTheNewest(t *testing.T) {
 
 	for _, day := range []int{5, 9, 1} {
 		price, _ := domain.NewMoney(int64(1000+day), "SGD")
-		if _, err := valuations.Upsert(ctx, domain.Valuation{
+		if _, err := valuations.UpsertWithFold(ctx, domain.Valuation{
 			HoldingID: h.ID, HouseholdID: householdID, UnitPrice: price, AsOf: july(day),
-		}); err != nil {
+		}, acceptAnything); err != nil {
 			t.Fatalf("Upsert %d July: %v", day, err)
 		}
 	}

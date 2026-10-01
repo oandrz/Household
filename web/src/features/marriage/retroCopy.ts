@@ -23,14 +23,14 @@ export const RETRO_COPY = {
 
   // The design's own "Start July retro" -- month name only, no year (this
   // month is always within a year of today, so the year adds nothing a
-  // reader needs). startMonth null means both candidate months already have
-  // a retro -- RetrosPage.tsx renders no button at all in that case, so this
-  // is never called with a null month.
+  // reader needs). startMonth null means there is no month left to start
+  // (retrosResponseSchema) -- RetrosPage.tsx renders no button at all in
+  // that case, so this is never called with a null month.
   startRetro: (monthName: string) => `Start ${monthName} retro`,
 
   emptyHeadline: "No retros yet",
   emptyBody:
-    "A monthly check-in for just the two of you -- what went well, what was hard, and what to try next.",
+    "A monthly check-in for just the two of you — what went well, what was hard, and what to try next.",
   // Distinct copy from the header's own startRetro() button above, both of
   // which render together the first time a household has zero retros and a
   // startable month -- BillsPage.tsx's own "+ Add bill"/"Create your first

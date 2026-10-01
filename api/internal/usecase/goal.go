@@ -319,6 +319,14 @@ func (s *GoalService) Create(ctx context.Context, in NewGoal, createdOn time.Tim
 	if in.PlannedMonthlyMinor < 0 {
 		return domain.Goal{}, domain.ErrGoalPlannedMonthlyNegative
 	}
+	// StartingBalanceMinor has no sign rule (a goal may start in deficit), so
+	// this is the only check it gets: it becomes a stored contribution, and
+	// contributions are summed.
+	for _, minor := range []int64{in.TargetMinor, in.PlannedMonthlyMinor, in.StartingBalanceMinor} {
+		if err := domain.CheckAmountWithinLimit(minor); err != nil {
+			return domain.Goal{}, err
+		}
+	}
 
 	// domain.NewMoney validates the currency through domain.ParseCurrency,
 	// the single reference for what a valid code is -- an unknown currency
@@ -379,11 +387,17 @@ func (s *GoalService) Update(ctx context.Context, householdID, goalID string, pa
 		if *patch.TargetMinor <= 0 {
 			return domain.Goal{}, domain.ErrGoalTargetNotPositive
 		}
+		if err := domain.CheckAmountWithinLimit(*patch.TargetMinor); err != nil {
+			return domain.Goal{}, err
+		}
 		g.Target.Amount = *patch.TargetMinor
 	}
 	if patch.PlannedMonthlyMinor != nil {
 		if *patch.PlannedMonthlyMinor < 0 {
 			return domain.Goal{}, domain.ErrGoalPlannedMonthlyNegative
+		}
+		if err := domain.CheckAmountWithinLimit(*patch.PlannedMonthlyMinor); err != nil {
+			return domain.Goal{}, err
 		}
 		g.PlannedMonthly.Amount = *patch.PlannedMonthlyMinor
 	}
@@ -427,9 +441,23 @@ func (s *GoalService) SetArchived(ctx context.Context, householdID, goalID strin
 // household_id check on the contribution side. Get(...) is the barrier: a
 // goal outside THIS household reads as domain.ErrNotFound, same as one
 // that doesn't exist, refused before anything is written.
-func (s *GoalService) AddContribution(ctx context.Context, in NewContribution) (domain.GoalContribution, error) {
+//
+// in.OccurredOn may not be after today, the household's calendar day: a
+// contribution is a recorded fact (refuseFutureDate). The goal's target
+// month is a plan and is not checked. The two contributions the server
+// writes itself (a new goal's starting balance and a budget rollover) are
+// dated today by construction, so they need no check.
+func (s *GoalService) AddContribution(ctx context.Context, in NewContribution, today time.Time) (domain.GoalContribution, error) {
 	if in.AmountMinor == 0 {
 		return domain.GoalContribution{}, domain.ErrContributionAmountZero
+	}
+	// A contribution may be negative (money taken back out), and a goal's
+	// total is the sum of them, so the limit applies on both sides of zero.
+	if err := domain.CheckAmountWithinLimit(in.AmountMinor); err != nil {
+		return domain.GoalContribution{}, err
+	}
+	if err := refuseFutureDate(in.OccurredOn, today); err != nil {
+		return domain.GoalContribution{}, err
 	}
 
 	rec, err := s.d.Goals.Get(ctx, in.HouseholdID, in.GoalID)

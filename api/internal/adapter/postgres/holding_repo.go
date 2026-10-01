@@ -245,36 +245,30 @@ func (r *HoldingEventRepo) Insert(ctx context.Context, e domain.HoldingEvent) (d
 	})
 }
 
-// InsertWithFold is Insert with the holding's invariant held across the
-// write: it locks the holding row, lists that holding's events in the same
-// transaction, and hands them to fold -- the caller's rule, which is
-// domain.Holding.Position. The insert only happens if fold accepts, and the
+// InsertWithFold is Insert with the holding's rules held across the write:
+// it locks the holding row, reads that holding's events and prices in the
+// same transaction, and hands both to fold -- the caller's rule
+// (usecase.HoldingFold). The insert only happens if fold accepts, and the
 // lock holds until commit, so a second writer blocks and folds against the
 // FIRST writer's result, never a stale copy.
 //
 // Without the lock, two sales of 30 from a holding of 50 could both fold
 // against the same 50 and commit, leaving events that can never be folded
-// again -- a page that throws on every load. The fold itself stays in the
+// again -- a page that throws on every load. The rule itself stays in the
 // domain; this method owns only the transaction and the lock.
 func (r *HoldingEventRepo) InsertWithFold(
 	ctx context.Context,
 	e domain.HoldingEvent,
-	fold func([]domain.HoldingEvent) error,
+	fold usecase.HoldingFold,
 ) (domain.HoldingEvent, error) {
 	var inserted domain.HoldingEvent
 	err := pgx.BeginFunc(ctx, r.pool, func(tx pgx.Tx) error {
 		q := r.q.WithTx(tx)
-		if _, err := q.LockHolding(ctx, sqlcgen.LockHoldingParams{
-			HouseholdID: uuid(e.HouseholdID),
-			ID:          uuid(e.HoldingID),
-		}); err != nil {
-			return translate(err, "lock holding")
-		}
-		existing, err := listEventsTx(ctx, q, e.HouseholdID, e.HoldingID)
+		existing, prices, err := lockHoldingAndRead(ctx, q, e.HouseholdID, e.HoldingID)
 		if err != nil {
 			return err
 		}
-		if err := fold(append(existing, e)); err != nil {
+		if err := fold(append(existing, e), prices); err != nil {
 			return err
 		}
 		inserted, err = insertEventTx(ctx, q, e)
@@ -292,17 +286,11 @@ func (r *HoldingEventRepo) InsertWithFold(
 func (r *HoldingEventRepo) DeleteWithFold(
 	ctx context.Context,
 	householdID, holdingID, eventID string,
-	fold func([]domain.HoldingEvent) error,
+	fold usecase.HoldingFold,
 ) error {
 	return pgx.BeginFunc(ctx, r.pool, func(tx pgx.Tx) error {
 		q := r.q.WithTx(tx)
-		if _, err := q.LockHolding(ctx, sqlcgen.LockHoldingParams{
-			HouseholdID: uuid(householdID),
-			ID:          uuid(holdingID),
-		}); err != nil {
-			return translate(err, "lock holding")
-		}
-		existing, err := listEventsTx(ctx, q, householdID, holdingID)
+		existing, prices, err := lockHoldingAndRead(ctx, q, householdID, holdingID)
 		if err != nil {
 			return err
 		}
@@ -318,7 +306,7 @@ func (r *HoldingEventRepo) DeleteWithFold(
 		if !found {
 			return domain.ErrNotFound
 		}
-		if err := fold(remaining); err != nil {
+		if err := fold(remaining, prices); err != nil {
 			return err
 		}
 		n, err := q.DeleteHoldingEvent(ctx, sqlcgen.DeleteHoldingEventParams{
@@ -334,6 +322,33 @@ func (r *HoldingEventRepo) DeleteWithFold(
 		}
 		return nil
 	})
+}
+
+// lockHoldingAndRead is the first half of every guarded holding write: it
+// takes the row lock on the holding, then reads the events and the prices a
+// usecase.HoldingFold is handed. The lock comes FIRST, so both reads see
+// whatever an earlier writer committed and no later writer can change them
+// before this transaction ends.
+//
+// q must be bound to the caller's transaction: on the pool the lock would be
+// released as soon as the statement finished. A holding that is not this
+// household's is domain.ErrNotFound.
+func lockHoldingAndRead(ctx context.Context, q *sqlcgen.Queries, householdID, holdingID string) ([]domain.HoldingEvent, []domain.Valuation, error) {
+	if _, err := q.LockHolding(ctx, sqlcgen.LockHoldingParams{
+		HouseholdID: uuid(householdID),
+		ID:          uuid(holdingID),
+	}); err != nil {
+		return nil, nil, translate(err, "lock holding")
+	}
+	events, err := listEventsTx(ctx, q, householdID, holdingID)
+	if err != nil {
+		return nil, nil, err
+	}
+	prices, err := listValuations(ctx, q, householdID, holdingID)
+	if err != nil {
+		return nil, nil, err
+	}
+	return events, prices, nil
 }
 
 // listEventsTx and insertEventTx are the transaction-scoped halves of
@@ -466,14 +481,26 @@ func toHoldingEvent(row eventRow) (domain.HoldingEvent, error) {
 	}, nil
 }
 
-type HoldingValuationRepo struct{ q *sqlcgen.Queries }
+// HoldingValuationRepo keeps the pool for the same reason HoldingEventRepo
+// does: UpsertWithFold opens its own transaction.
+type HoldingValuationRepo struct {
+	q    *sqlcgen.Queries
+	pool *pgxpool.Pool
+}
 
 func NewHoldingValuationRepo(db *DB) *HoldingValuationRepo {
-	return &HoldingValuationRepo{q: sqlcgen.New(db.Pool())}
+	return &HoldingValuationRepo{q: sqlcgen.New(db.Pool()), pool: db.Pool()}
 }
 
 func (r *HoldingValuationRepo) ListByHolding(ctx context.Context, householdID, holdingID string) ([]domain.Valuation, error) {
-	rows, err := r.q.ListValuations(ctx, sqlcgen.ListValuationsParams{
+	return listValuations(ctx, r.q, householdID, holdingID)
+}
+
+// listValuations is one holding's prices, newest first, on whichever
+// connection q is bound to: the pool for ListByHolding, a transaction for
+// the guarded writes, which must read inside their own lock.
+func listValuations(ctx context.Context, q *sqlcgen.Queries, householdID, holdingID string) ([]domain.Valuation, error) {
+	rows, err := q.ListValuations(ctx, sqlcgen.ListValuationsParams{
 		HouseholdID: uuid(householdID),
 		HoldingID:   uuid(holdingID),
 	})
@@ -515,14 +542,63 @@ func (r *HoldingValuationRepo) ListLatest(ctx context.Context, householdID strin
 	return out, nil
 }
 
-func (r *HoldingValuationRepo) Upsert(ctx context.Context, v domain.Valuation) (domain.Valuation, error) {
+// UpsertWithFold stores a price only after the caller's rule has seen the
+// holding as it would be with that price in it. It takes the same row lock
+// InsertWithFold takes, so a price write and an event write on one holding
+// run one after the other, and the second folds the first one's result.
+func (r *HoldingValuationRepo) UpsertWithFold(
+	ctx context.Context,
+	v domain.Valuation,
+	fold usecase.HoldingFold,
+) (domain.Valuation, error) {
+	var stored domain.Valuation
+	err := pgx.BeginFunc(ctx, r.pool, func(tx pgx.Tx) error {
+		q := r.q.WithTx(tx)
+		events, prices, err := lockHoldingAndRead(ctx, q, v.HouseholdID, v.HoldingID)
+		if err != nil {
+			return err
+		}
+		if err := fold(events, pricesAfterUpsert(prices, v)); err != nil {
+			return err
+		}
+		stored, err = upsertValuationTx(ctx, q, v)
+		return err
+	})
+	if err != nil {
+		return domain.Valuation{}, err
+	}
+	return stored, nil
+}
+
+// pricesAfterUpsert is the holding's price list as it will read once v is
+// written: v itself, plus every stored price for a different day.
+//
+// "The same day" is decided with dateOnly on both sides, because that is the
+// conversion the upsert's (holding_id, as_of) key is built with. Don't
+// compare the two times directly: a stored price reads back as midnight UTC
+// and v.AsOf may carry any time of day, so the row v is about to replace
+// would stay in the list and a corrected, lower price would be judged
+// against the very figure it corrects.
+func pricesAfterUpsert(stored []domain.Valuation, v domain.Valuation) []domain.Valuation {
+	day := dateOnly(v.AsOf).Time
+	out := make([]domain.Valuation, 0, len(stored)+1)
+	for _, existing := range stored {
+		if dateOnly(existing.AsOf).Time.Equal(day) {
+			continue
+		}
+		out = append(out, existing)
+	}
+	return append(out, v)
+}
+
+func upsertValuationTx(ctx context.Context, q *sqlcgen.Queries, v domain.Valuation) (domain.Valuation, error) {
 	var primaryMinor *int64
 	var primaryCurrency *string
 	if v.PrimaryUnitPrice != nil {
 		amount, currency := v.PrimaryUnitPrice.Amount, v.PrimaryUnitPrice.Currency
 		primaryMinor, primaryCurrency = &amount, &currency
 	}
-	row, err := r.q.UpsertValuation(ctx, sqlcgen.UpsertValuationParams{
+	row, err := q.UpsertValuation(ctx, sqlcgen.UpsertValuationParams{
 		HoldingID:             uuid(v.HoldingID),
 		HouseholdID:           uuid(v.HouseholdID),
 		UnitPriceMinor:        v.UnitPrice.Amount,

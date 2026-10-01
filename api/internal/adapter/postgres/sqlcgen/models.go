@@ -243,6 +243,7 @@ type Household struct {
 	SecondaryCurrency     string
 	FxRateMode            string
 	CreatedAt             pgtype.Timestamptz
+	Timezone              string
 }
 
 type HouseholdFeatureFlag struct {

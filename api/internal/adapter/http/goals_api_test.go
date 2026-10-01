@@ -266,7 +266,11 @@ func TestGoalListReflectsRealDerivedFigures(t *testing.T) {
 	// month neutral (same shape as TestBudgetHistoryMonthsIsClamped's "base"),
 	// so this doesn't misbehave on a day like the 31st a later month lacks.
 	targetMonth := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC).AddDate(0, 6, 0)
-	occurredOn := time.Date(now.Year(), now.Month(), 14, 0, 0, 0, 0, time.UTC).Format("2006-01-02")
+	// Today, not a fixed day of the month: a contribution may not be dated
+	// after the household's today, and the 14th is in the future for the
+	// first thirteen days of every month. Today is always in the current
+	// month, which is what actualThisMonthMinor below needs.
+	occurredOn := now.Format("2006-01-02")
 
 	created := env.mustCreateGoal(t, session, csrf, map[string]any{
 		"name": "Derived figures goal", "targetMinor": 600_000,

@@ -27,7 +27,7 @@ function meBody(features: Record<string, boolean>): Me {
     user: { id: "u-1", email: "andreas@hearth.family", displayName: "Andreas", avatarInitial: "A" },
     household: {
       id: "h-1", name: "Andreas & Christine", familyName: "Oentoro",
-      primaryCurrency: "SGD", showSecondaryCurrency: false, secondaryCurrency: "", fxRateMode: "auto",
+      primaryCurrency: "SGD", showSecondaryCurrency: false, secondaryCurrency: "", fxRateMode: "auto", timezone: "Asia/Singapore",
     },
     membership: { id: "mem-1", householdId: "h-1", userId: "u-1", role: "owner", capabilities: ["money"] },
     capabilities: ["money"],

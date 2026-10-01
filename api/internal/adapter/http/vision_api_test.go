@@ -293,9 +293,12 @@ func TestGetVisionWithNoYearDefaultsToTheCurrentYear(t *testing.T) {
 		t.Fatalf("status = %d, want 200 (body = %s)", rec.Code, rec.Body.String())
 	}
 	body := decodeVision(t, rec)
-	wantYear := time.Now().Year()
+	// UTC, because the test household keeps its calendar in UTC. Reading the
+	// year in the machine's own zone made this test fail for part of every
+	// New Year's Eve.
+	wantYear := time.Now().UTC().Year()
 	if body.Vision.Year != wantYear {
-		t.Fatalf("year = %d, want %d (today's year, since no ?year was given)", body.Vision.Year, wantYear)
+		t.Fatalf("year = %d, want %d (the household's year, since no ?year was given)", body.Vision.Year, wantYear)
 	}
 }
 

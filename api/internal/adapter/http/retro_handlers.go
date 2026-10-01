@@ -80,7 +80,7 @@ type retrosResponse struct {
 	Mood       []moodPointDTO    `json:"mood"`
 	DoneCount  int               `json:"doneCount"`
 	Since      *string           `json:"since"`      // "2025-08", or null
-	StartMonth *string           `json:"startMonth"` // null when both months exist
+	StartMonth *string           `json:"startMonth"` // null when no month is left to start
 }
 
 // retroResponse is one month's detail screen: GET /retros/{month}'s entire
@@ -169,7 +169,7 @@ func handleListRetros(deps Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		scope, _ := RequestScope(r)
 
-		view, err := deps.Retros.List(r.Context(), scope.HouseholdID, deps.Clock.Now())
+		view, err := deps.Retros.List(r.Context(), scope.HouseholdID, scope.Today)
 		if err != nil {
 			MapDomainError(w, r, err)
 			return
@@ -219,16 +219,17 @@ func handleGetRetro(deps Deps) http.HandlerFunc {
 }
 
 // handleStartRetro creates the draft RetroService.Start picks -- the
-// earlier of {this month, last month} that has none yet. It reads no body:
-// the month comes from household state and the clock, never the client,
-// because a client-supplied month would let a stale tab file a retro
-// against a month "Start retro" never actually offered (domain.StartableMonth's
-// own contract).
+// earlier of {this month, last month} that has none yet and is not before
+// the month the household was created in. It reads no body:
+// the month comes from household state and the household's own calendar day
+// (Scope.Today), never the client, because a client-supplied month would let
+// a stale tab file a retro against a month "Start retro" never actually
+// offered (domain.StartableMonth's own contract).
 func handleStartRetro(deps Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		scope, _ := RequestScope(r)
 
-		created, err := deps.Retros.Start(r.Context(), scope.HouseholdID, deps.Clock.Now())
+		created, err := deps.Retros.Start(r.Context(), scope.HouseholdID, scope.Today)
 		if err != nil {
 			// Start's repository never wraps this in anything more specific
 			// (RetroRepository.Create's doc comment: a plain

@@ -67,6 +67,10 @@ func newHoldingFixture(t *testing.T, primaryCurrency string) *holdingFixture {
 		householdID: "hh",
 		accountID:   "acct",
 	}
+	// Each double reads the other's rows, as the real repositories read both
+	// tables inside one transaction.
+	f.events.valuations = f.valuations
+	f.valuations.events = f.events
 	f.svc = usecase.NewHoldingService(usecase.HoldingDeps{
 		Holdings:   f.holdings,
 		Events:     f.events,
@@ -519,8 +523,8 @@ func TestRecordValuationRefusesADateInTheFuture(t *testing.T) {
 		HoldingID: h.ID, HouseholdID: f.householdID,
 		UnitPrice: money(t, 250, "SGD"), AsOf: holdingDay(20),
 	}, holdingDay(10))
-	if !errors.Is(err, domain.ErrHoldingDateInFuture) {
-		t.Fatalf("error = %v, want ErrHoldingDateInFuture", err)
+	if !errors.Is(err, domain.ErrDateInFuture) {
+		t.Fatalf("error = %v, want ErrDateInFuture", err)
 	}
 }
 
@@ -547,8 +551,8 @@ func TestRecordEventRefusesADateInTheFuture(t *testing.T) {
 		HoldingID: h.ID, HouseholdID: f.householdID, Kind: domain.HoldingAcquisition,
 		Quantity: qty(t, 10), Amount: money(t, 1000, "SGD"), OccurredOn: holdingDay(20),
 	}, holdingDay(10))
-	if !errors.Is(err, domain.ErrHoldingDateInFuture) {
-		t.Fatalf("error = %v, want ErrHoldingDateInFuture", err)
+	if !errors.Is(err, domain.ErrDateInFuture) {
+		t.Fatalf("error = %v, want ErrDateInFuture", err)
 	}
 }
 
@@ -589,8 +593,8 @@ func TestRecordIncomeRefusesAFutureDate(t *testing.T) {
 		HouseholdID: f.householdID, HoldingID: h.ID, Kind: domain.IncomeReceived,
 		Amount: amount, ReceivedOn: reportToday.AddDate(0, 0, 1),
 	}, reportToday)
-	if !errors.Is(err, domain.ErrHoldingDateInFuture) {
-		t.Fatalf("error = %v, want ErrHoldingDateInFuture", err)
+	if !errors.Is(err, domain.ErrDateInFuture) {
+		t.Fatalf("error = %v, want ErrDateInFuture", err)
 	}
 }
 

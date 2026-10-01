@@ -1977,6 +1977,7 @@ func newFixture(t *testing.T) *fixture {
 	households.put(domain.Household{
 		ID: householdID, Name: "Andreas & Christine", FamilyName: "Oentoro",
 		PrimaryCurrency: "SGD", ShowSecondaryCurrency: true, SecondaryCurrency: "IDR", FXRateMode: "auto",
+		Timezone: "Asia/Singapore",
 	})
 
 	spaces := newSpaceDouble()

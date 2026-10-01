@@ -52,7 +52,8 @@ func TestFindOrphanedChild(t *testing.T) {
 	}
 
 	h, err := households.Create(ctx, domain.Household{
-		Name: "Andreas & Christine", FamilyName: "Oentoro",
+		Timezone: "UTC",
+		Name:     "Andreas & Christine", FamilyName: "Oentoro",
 		PrimaryCurrency: "SGD", SecondaryCurrency: "IDR", ShowSecondaryCurrency: true,
 	})
 	if err != nil {
@@ -105,7 +106,8 @@ func TestMembershipRepoRejectsAnInvalidCapabilitySet(t *testing.T) {
 	members := postgres.NewMembershipRepo(db)
 
 	h, err := households.Create(ctx, domain.Household{
-		Name: "Andreas & Christine", FamilyName: "Oentoro",
+		Timezone: "UTC",
+		Name:     "Andreas & Christine", FamilyName: "Oentoro",
 		PrimaryCurrency: "SGD", SecondaryCurrency: "IDR", ShowSecondaryCurrency: true,
 	})
 	if err != nil {
@@ -138,7 +140,8 @@ func TestSessionLifecycle(t *testing.T) {
 	db := openTestDB(t)
 	ctx := context.Background()
 	h, _ := postgres.NewHouseholdRepo(db).Create(ctx, domain.Household{
-		Name: "H", FamilyName: "H",
+		Timezone: "UTC",
+		Name:     "H", FamilyName: "H",
 		PrimaryCurrency: "SGD", SecondaryCurrency: "IDR", ShowSecondaryCurrency: true,
 	})
 	u, _ := postgres.NewUserRepo(db).Create(ctx, "a@b.c", "hash", "Andreas")
@@ -171,7 +174,8 @@ func TestLoginAttemptsRespectTheWindow(t *testing.T) {
 	db := openTestDB(t)
 	ctx := context.Background()
 	h, _ := postgres.NewHouseholdRepo(db).Create(ctx, domain.Household{
-		Name: "H", FamilyName: "H",
+		Timezone: "UTC",
+		Name:     "H", FamilyName: "H",
 		PrimaryCurrency: "SGD", SecondaryCurrency: "IDR", ShowSecondaryCurrency: true,
 	})
 	attempts := postgres.NewLoginAttemptRepo(db)
@@ -204,7 +208,8 @@ func TestSpaceRepoListsInPositionOrder(t *testing.T) {
 	db := openTestDB(t)
 	ctx := context.Background()
 	h, _ := postgres.NewHouseholdRepo(db).Create(ctx, domain.Household{
-		Name: "H", FamilyName: "H",
+		Timezone: "UTC",
+		Name:     "H", FamilyName: "H",
 		PrimaryCurrency: "SGD", SecondaryCurrency: "IDR", ShowSecondaryCurrency: true,
 	})
 	spaces := postgres.NewSpaceRepo(db)
@@ -241,7 +246,8 @@ func TestSpaceRepoRejectsADuplicateKeyWithErrAlreadyExists(t *testing.T) {
 	db := openTestDB(t)
 	ctx := context.Background()
 	h, _ := postgres.NewHouseholdRepo(db).Create(ctx, domain.Household{
-		Name: "H", FamilyName: "H",
+		Timezone: "UTC",
+		Name:     "H", FamilyName: "H",
 		PrimaryCurrency: "SGD", SecondaryCurrency: "IDR", ShowSecondaryCurrency: true,
 	})
 	spaces := postgres.NewSpaceRepo(db)

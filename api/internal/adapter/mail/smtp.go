@@ -116,7 +116,7 @@ func (m *SMTPMailer) SendSignupLink(ctx context.Context, to, url string) error {
 	body := "Welcome to Hearth.\n\n" +
 		"Use this link to set up your household. It works once, and expires in 24 hours.\n\n" +
 		url + "\n\n" +
-		"If you did not ask for this, you can ignore this email -- nothing has been created.\n"
+		"If you did not ask for this, you can ignore this email. Nothing has been created.\n"
 	return m.send(ctx, to, "Set up your Hearth household", body)
 }
 

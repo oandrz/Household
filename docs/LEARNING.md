@@ -23,9 +23,10 @@ gets rebuilt.
 
 ### 1. Fixing an instance rarely fixes the class
 
-This happened **twenty-four times** — one bullet each below, and the count is
+This happened **twenty-seven times** — one bullet each below, and the count is
 the number of bullets, so recount it when you add one (it had already drifted
-by one before the UX-repair round noticed). Almost every time, the fix was
+by one before the UX-repair round noticed, and again on 2026-10-01: the count
+read twenty-four over twenty-five bullets). Almost every time, the fix was
 correct and the sibling kept the bug; two of them are the variant where
 nothing was broken at all until a field's or a product's meaning moved under
 a reader nobody thought to look at, and one is the variant where an earlier
@@ -71,7 +72,8 @@ fix in the same branch *created* the sibling.
   household's calendar. A derived "this month" computed server-side is a
   product decision (whose timezone?) wearing a bug's clothes, and it needs
   answering before it is coded, not after. Recorded against Transactions; not
-  M2's to fix.
+  M2's to fix. **Answered and fixed 2026-10-01: the household's, stored
+  (ADR 12). The last bullet of this pattern is that entry.**
 
   **A fifth instance, found in review rather than live, and one step removed
   from `Truncate` itself: Bills' `domain.NextDue`/`startOfDay`.** Go's
@@ -532,6 +534,157 @@ count stays the number of bullets.)
   prints its name, so adding or renaming one left the cached report short a row
   or labelling one with a dead name. Found by grepping for the shape of the
   first fix, which is checklist step 3, rather than by hitting it: `dacc4c1`.
+- **Overflow was guarded at two places it could happen and left open at the
+  third, and the fix for the third left a fourth (QA ISSUE-001,
+  2026-10-01).** `Money.Add` refuses to wrap, and so does `Rate.Apply` (see
+  "Domain and money" below, where both are recorded as separate defects). The
+  third place is not in Go at all: an account's balance is summed in SQL and
+  cast back with `::bigint` (`queries/account.sql`), and nothing bounded what
+  could be put into that sum. One expense of `9223372036854775807` answered
+  201. After it `GET /accounts` and `GET /transactions` answered 500 with
+  `bigint out of range (SQLSTATE 22003)`, Finances and Transactions showed
+  only "Couldn't load your accounts.", and the row could not be deleted in
+  the app because the page listing it was the page that failed. The same was
+  reachable from the form with two expenses of S$50,000,000,000,000,000.
+  Negative, zero and non-integer amounts were already refused; "is it too
+  big" was never asked, on any of twenty amount fields. Fixed with one rule,
+  `domain.MaxAmountMinor` and `CheckAmountWithinLimit`, called beside every
+  existing sign check, and a 422 `AMOUNT_TOO_LARGE`.
+  **The fourth, found by the sibling hunt and closed the same day:** a
+  holding's market value is quantity times unit price, and both can sit
+  inside the ceiling while their product does not (100,000 units at S$1
+  trillion each). Probed on a real stack: the price is stored, its own
+  `POST` answers 500, and `GET /holdings` answers 500 from then on. A
+  per-field ceiling cannot close it; it needed a rule across events and
+  valuations, which was a design question, so it went to the architect
+  first and was built from
+  `docs/superpowers/specs/2026-10-01-hearth-holding-value-limit-design.md`.
+  The next bullet is what building it taught.
+  What would have caught the third sooner: asking of every number a caller
+  sends, "what is the largest value this accepts, and what does the code do
+  with it next?" — the lower bound had a test on every field and the upper
+  bound had none. And a read that adds up stored rows should be tried once
+  with the largest row a write will accept.
+- **A product of two bounded figures is not bounded, and a rule across two
+  tables needs both tables' writers behind one lock (2026-10-01).** Closing
+  the fourth overflow above. Four things were wrong at once, and fixing any
+  one alone would have left the defect reachable:
+  - **The price write had no lock and no check at all.** Events were already
+    written through `InsertWithFold` (lock the holding, read, check, write).
+    Prices went through a plain `Upsert`. The rule "quantity × price fits"
+    reads both tables, so a check on the event side only would have been
+    passed by a purchase and a price arriving together: each is legal alone.
+    Both repositories now take the same `holdings` row lock first, and the
+    plain `Upsert` was removed rather than kept beside `UpsertWithFold`.
+  - **Checking after storing is not a check.** Every holding write answers
+    by re-reading the whole portfolio. The stored price made that re-read
+    overflow, so the write's own response was the 500, and the row was
+    already committed. The rule has to see the rows *as they would be* and
+    refuse before the write. That is why the repository builds "the prices
+    after this upsert" in memory and hands that to the rule.
+  - **"Held now" was the wrong quantity, and "latest price" the wrong
+    price.** The period report prices the quantity held at each period's
+    end with the latest price inside that period. A holding of 100,000
+    units sold down to 1 still has a quarter where 100,000 were held. So
+    the rule uses the most ever held (`Position.PeakHeld`) and every
+    recorded price. It refuses a few pairs no read multiplies; the
+    alternative was repeating the report's choice of period and price
+    inside the rule and keeping the two in step.
+  - **An overflow is "too large", but it must not *look* like an overflow.**
+    `Quantity.Value` reports a product that does not fit as
+    `ErrAmountOverflow`, which the HTTP table answers with a 500 from a row
+    far above the holdings rows. Wrapping that error inside the new
+    `ErrHoldingValueTooLarge` would have matched the 500 row first and
+    turned the fix back into the defect for exactly the probe figure. The
+    domain test asserts both halves: it *is* `ErrHoldingValueTooLarge` and
+    it is *not* `ErrAmountOverflow`.
+
+  **The sibling the design named and the build confirmed:** "the same day"
+  for a price. A corrected price must be judged without the row it
+  replaces, or the only repair for a too-high price is refused. The stored
+  key is the calendar day the request's value shows in its own location, so
+  the comparison has to use that same conversion on both sides.
+
+  **Siblings still open, listed for a follow-up issue rather than fixed
+  here:** three percentages multiply an amount by 100 with no overflow
+  check: `domain/budget.go` (`spentMinor * 100`), `domain/goal.go`
+  (`contributedMinor*100`) and `usecase/nudge.go` (`c.Spent.Amount * 100`).
+  Each needs a sum past 9.2e16, which is 923 rows at the ceiling, and the
+  result is a wrong percentage rather than a failed page. And the port
+  still has `HoldingEventRepository.Insert` and `Delete`, the unguarded
+  twins of `InsertWithFold` and `DeleteWithFold`; only tests call them.
+
+  What would have caught it sooner: the same question as the bullet above,
+  asked of every *computed* figure and not only every typed one. "What is
+  the largest value this multiplication can produce from inputs the forms
+  accept?" has a one-line answer for quantity × price: about a billion
+  units times 1e14 minor units is 1e23, and an int64 stops at 9.2e18.
+- **The date class itself, fixed at the root after seven instances, and
+  the root fix had two siblings inside it (QA ISSUE-002 to 006,
+  2026-10-01).** Every earlier date bullet above patched where it surfaced:
+  a day of slack here, "read local components" there, a label formatted
+  with `timeZone: "UTC"` to imitate the server. None of them could be
+  right, because three clocks each decided "today": the server in UTC, the
+  browser in its own zone, and one label copying UTC. At 07:00 in Singapore
+  on 1 October a holding purchase with the form's default date was refused
+  as "in the future", a transaction saved from the ledger was not in the
+  list, a bill paid that morning was missing from "paid this month" with
+  its Undo, a new household was offered "Start August retro", and Goals
+  read "Actual this month S$0.00" beside a contribution dated today. The
+  fix is one stored fact, `households.timezone`, and one function,
+  `domain.TodayIn`, called at each inbound edge
+  ([ADR 12](adr/0012-one-calendar-per-household.md)).
+
+  **Sibling one, the spec named: one value doing two jobs.**
+  `BillService.SetArchived(at)` used `at` as the `archived_at` stamp and as
+  the "today" the returned row's Overdue is judged by. Those are an instant
+  and a calendar day, and they stopped being interchangeable the moment
+  "today" stopped being the clock. **Sibling two, the spec did not name:**
+  `setGoalArchived` did the same thing one layer up, in the handler. It
+  read the clock once into a variable called `today` and passed it both to
+  `SetArchived` and to the card it answered with. Found by opening the
+  neighbour of the function just fixed, which is step 3 of the checklist.
+
+  **Sibling three: a clock nobody could inject.** The ledger's default
+  month was `time.Now().UTC()` written straight into
+  `parseTransactionFilter`, past the `Clock` port every other handler used.
+  No test could move it, so no test pinned it. `grep 'time\.Now()'` over
+  the adapter and usecase layers is the check; it now finds only comments.
+
+  What would have caught the class sooner is in the fourth bullet's own
+  last sentence, written two months before this fix: a derived "this
+  month" computed server-side is a product decision wearing a bug's
+  clothes. It was recorded seven times and decided once.
+- **A rule on two of five facts, and a writer that goes round the service
+  that owns the rule (QA ISSUE-013, 2026-10-01).** "A recorded fact may not
+  be dated in the future" was enforced for holdings and for an account's
+  opening balance. A transaction, a bill payment and a goal contribution
+  took any date, so an expense dated 2099 lowered today's balance: a balance
+  sums every row with no upper bound on the date. The obvious fix is one
+  check in `TransactionService`, and it would have left a hole.
+  `BillService.MarkPaid` writes an expense dated `paidOn` through
+  `BillRepository.RecordPayment`, straight into `transactions`, and never
+  passes through `TransactionService`. With the check only where the name
+  suggests, a bill "paid" next year would still have written a future-dated
+  ledger row. **When a rule guards a table, list every writer of the table,
+  not every caller of the service**: `grep 'CreateTransaction('` over the
+  repositories finds two, and `InsertGoalContribution(` finds three (manual,
+  a new goal's starting balance, a budget rollover). The last two are dated
+  today by the server and need no check, which is worth knowing on purpose
+  rather than by luck.
+- **A fixture dated "the 14th of this month" passes for half of every
+  month (2026-10-01).** `TestGoalListReflectsRealDerivedFigures` dated its
+  contribution the 14th of the current month so it would always count as
+  "this month". Once a contribution may not be dated after today, that
+  fixture is in the future from the 1st to the 13th and legal from the 14th
+  on. It failed because this work happened to run on the 1st. Run on the
+  20th it would have gone in green and broken the suite twelve days later,
+  on a change that touched nothing. Six bill tests paid bills on dates in
+  2030 for no reason but that nothing stopped them. **After adding a date
+  rule, grep the fixtures for dates computed from `time.Now()`, not only for
+  literal years**, and ask of each one whether it is legal on the 1st and on
+  the last day of a month. A date that must be "this month and not after
+  today" has one safe value, today.
 
 The **seventh date instance, 2026-09-12 — and the first one a test caught
 before it shipped.** `domain.Period.Contains` needs the calendar day a
@@ -553,14 +706,31 @@ Singapore-zone timestamp, so the defect was RED before any code shipped rather
 than being found in a browser eight hours later. The sibling was still not read
 — the test was what stood in for reading it.
 
-**The other half of this is still open, and is a product decision rather than a
-bug.** `PeriodsEndingOn` is handed `Clock.Now()`, which on a UTC server is a
-UTC instant: at 01:00 Singapore time on 1 October, the "current quarter" is
-still Q3 for eight hours. The same asymmetry makes `priceAgeLabel` say "priced
-yesterday" for a price the owner typed a minute ago. Nothing in Hearth stores a
-household timezone (`usecase/account.go:165`,
-`transaction_repo.go:318` both record this), so the fix is that feature, not a
-patch here.
+**The other half of this was a product decision rather than a bug, and it
+stayed open until 2026-10-01.** `PeriodsEndingOn` was handed `Clock.Now()`,
+which on a UTC server is a UTC instant: at 01:00 Singapore time on 1 October,
+the "current quarter" was still Q3 for eight hours. The same asymmetry made
+`priceAgeLabel` say "priced yesterday" for a price the owner typed a minute
+ago. Nothing in Hearth stored a household time zone, so the fix was that
+feature, not a patch here. It is built now: the report handler passes
+`Scope.Today` to both of its reads (the series and the "current" flag were two
+separate clock reads), and the frontend ages a price against
+`todayIn(household zone)`. See the last bullet of pattern 1's list, and
+[ADR 12](adr/0012-one-calendar-per-household.md).
+
+**Two small ones from the 2026-10-01 QA run, both found by searching for
+the shape rather than the page.** The admin households list said "1 members"
+on a phone (ISSUE-010) while the household's own detail page, one click away,
+had the singular right in an inline ternary. The rule existed; it existed
+once, inline, where the second caller could not reach it. It is now
+`memberCountLabel` in `directoryCopy.ts` and both pages call it. And the
+Retros empty state showed a literal " -- " (ISSUE-011): this codebase writes a
+dash that way in comments, and the habit had reached four strings a person
+reads. Reading the copy files found two. **Building the frontend and
+searching the shipped JavaScript found all three in the bundle** (comments are
+gone from a build, so every hit is real), and a search of Go string literals
+found the fourth in the sign-up email. For "is this string shown to anyone",
+search what ships, not the source.
 
 ### 2. A test that cannot fail protects nothing
 
@@ -1748,6 +1918,37 @@ entries were unfalsifiable for that family of reason — a string compared
 against a differently-shaped string, an assertion about a component that was
 never mounted, and a reordering of two statements that do not interact.
 
+**A test for "this date is accepted" needs the case where the same date is
+refused, 2026-10-01 (the household calendar).** The pinning test for QA
+ISSUE-002 stops the clock at 23:00 UTC, puts the household on Singapore and
+asserts that tomorrow's UTC date is accepted, because it is today there. On
+its own that passes against a server that accepts every date. So each of
+these tests carries a control: the same request with the household on UTC,
+where the date must be refused. Two mutations then fail in opposite halves.
+Make `TodayIn` ignore the zone and the Singapore cases fail while the
+control passes; make the future-date check accept anything and the control
+fails while the Singapore cases pass. A test with only one half would have
+survived one of the two.
+
+Three things about running those mutation checks that cost time:
+
+- **A mutation that does not compile proves nothing.** The first attempt
+  at the Telegram one replaced `OccurredOn: today` with the old clock read,
+  which left `today` unused. Go refused to build, the run printed `FAIL`,
+  and it looked like a caught mutation. Read the failure: `[build failed]`
+  is not the test going red.
+- **Never restore a mutation with `git checkout` on a file that has
+  uncommitted work in it.** It restores the last commit, not the state
+  before the mutation, and silently discards the fix being tested. It
+  happened once here and was noticed only because `git status` no longer
+  listed the file. Copy the file aside before mutating and copy it back.
+- **The existing suite is a constraint on the fixture.** Dozens of HTTP
+  tests work out "today" as `time.Now().UTC()`. Had the shared test
+  household been put on Singapore, each of them would have failed for the
+  eight hours a day the two dates differ. The test household is on UTC and
+  a test that needs another zone sets it through `PATCH /household`, which
+  exercises that route too.
+
 ### 3. The simulated environment lied
 
 - `Modal` threw `InvalidStateError` on **every open in every real browser** —
@@ -2874,6 +3075,21 @@ proper nouns in rendered strings before calling a feature built from a
 worked example done; a name that reads naturally in a mockup is a household
 inventing itself as a person the moment it renders for someone else's family.
 
+**A third instance, 2026-10-01 (QA ISSUE-007), with the same marker.** The
+Spaces card labelled Money "Parents". The design's mockup says "Parents"
+because in the design's household no child has Money. `spaceAudienceLabel`
+returned that word for any space that required a capability, and its comment
+said so in as many words: it reads "Parents" "only because every
+capability-gated builtin space in this household happens to be parent-held
+today". The Members card on the same page has had a working Money switch per
+child since the day it was built, so the two cards could contradict each other
+side by side, and did. Fixed the way `limitedMembersLine` was: the label is
+worked out from the member list the page already loads ("Parents", "Parents
+and 1 kid", "Parents and 2 kids"), and says nothing until that list has
+arrived. The same function also read an unknown visibility as "Everyone",
+while `domain.VisibleSpaces` treats one as owners-only. **A label that
+restates a server rule has to fail the same way the rule does.**
+
 ### 15. A capability nobody can reach is not shipped, however well it is tested
 
 Goals shipped archive and restore end to end — a migration column, a
@@ -3707,6 +3923,30 @@ default, never checked against it. Fixed with `gcTime: 0` on
 the claim true; the comment now cites that option instead of asserting the
 outcome on its own.
 
+**The overflow row's comment, 2026-10-01 (QA ISSUE-001).** The
+`ErrAmountOverflow` row in `adapter/http/errors.go` explained why it answers
+500 rather than 4xx: "nothing on this API surface accepts a caller-supplied
+amount that could overflow." Every amount field on the API accepted one. The
+sentence read as a reason not to look, and it sat one screen away from the
+`INVALID_AMOUNT` row that checked only the lower bound. A comment that says
+"callers cannot do X" is a claim about every route, and it needs a test that
+tries X; `TestEveryAmountFieldOnTheWireRefusesAFigurePastTheCeiling` is that
+test now, and the comment names the two cases that still reach the row.
+
+**"The account form shows it beside its own field", 2026-10-01.** When the
+future-date error was renamed for every fact, the opening balance kept its
+own sentinel, and the reason went into a doc comment and a commit message:
+the account form shows `INVALID_AS_OF` beside its own field. No form reads
+that code. `grep -rn INVALID_AS_OF web/src` finds nothing, and the account
+form shows the sentence in its one error line like every other form. The
+claim came from a review note and was written down without the grep that
+takes five seconds. It was caught in the browser walk, by looking at where
+the transaction form put the same sentence and then going to see how the
+account form did it "differently". The comment now gives the true reason
+(a separate wire code, named after the field), and a later commit says the
+earlier message was wrong. **A reason for keeping two things apart is a
+claim about both of them. Check the one you did not just edit.**
+
 ---
 
 ### 17. A requirement the plan drops is invisible to every review that reads the plan
@@ -4062,6 +4302,29 @@ moment both read "two owners", both pass the rule, both commit.
     lives only at the channel's edge. The request was authorised when it
     arrived.
 
+**Third instance, 2026-10-01: a rule across two tables.** A holding's worth
+is quantity × price, so the purchase and the price are written to different
+tables by different repositories. `HoldingValuationRepo` took no lock.
+`TestARacingLargePurchaseAndLargePriceCannotBothCommit` races a purchase of
+100,000 units against a price of S$10 billion a unit: each is legal alone,
+together the holding is worth a thousand times the limit. The 300ms sleep is
+inside the rule, as this pattern requires. It passed on its first run,
+because the lock had been built one commit earlier, so it proved nothing
+until it was mutated. With `UpsertWithFold` reading without the lock:
+`0 of the 2 racing writes were refused, want exactly 1`, while the older
+racing-disposals test stayed green. That last part matters: the existing
+test could not have noticed the new path was unlocked.
+
+- **What this instance adds to the rule:** when an invariant reads two
+  tables, *every writer of either table* is a party to the race. The
+  oversell fix locked the event writes and was complete for a rule that
+  reads only events. The moment the rule also read prices, the price writer
+  needed the same lock, and nothing would have said so: no test failed.
+- **Both racing tests share one more property worth copying.** They assert
+  what is in the database after the race (one row in total, and the rule
+  still passes on it), not only how many calls were refused. A count of
+  refusals alone would pass if both writes were refused.
+
 ### 20. Every test can pass while the page has no styling at all
 
 Found 2026-09-12, in the browser walk of the portfolio screen.
@@ -4214,6 +4477,21 @@ the fourth key to the same `Promise.all`
 test in the shape `useAgreementsInvalidation.test.tsx` already established:
 render the read hook and the write hook together, assert a second `GET`
 after the mutation lands (`useUpdateMember.test.tsx`).
+
+**Broke again, 2026-10-01 (QA ISSUE-012), in the same hour the field was
+added.** `GET /household` gained `primaryCurrencyLocked` so that Settings can
+say the currency is locked before Save. The first holding is what locks it,
+and a holding is created on the Portfolio page by `useHoldings`, whose
+`invalidateHoldings` knew nothing about `["household"]`. So: open Settings
+(field offered), add an account and a holding, return to Settings by the
+sidebar. The field was still offered, the server said `locked=true`, and the
+whole trip took eight seconds, well inside the thirty-second `staleTime`. The
+unit tests for the panel were green, because each one hands the panel a
+fixture that is already in its final state. Found by walking that exact
+sequence in a browser; fixed by one more key in `invalidateHoldings`; pinned
+in `useHoldings.test.tsx`. **A fourth clause: when a response gains a field,
+ask which writes change that field, and whether each of them knows this key
+exists.** The field and its invalidation are one change, not two.
 
 ### 24. A delete scoped to the parent's parent, and a scope check thrown away
 
@@ -4412,6 +4690,53 @@ context the check was silently assuming, and require it explicitly.
   member tripped `ErrLastOwner` for an operation that never touched ownership.
 - `Rate.Apply` multiplied without an overflow guard while `Add` refused to wrap.
   Multiplication overflows far sooner.
+- No amount had an upper bound, so one accepted expense overflowed the SQL
+  sum behind every account balance and took a household's money pages down
+  (QA ISSUE-001, 2026-10-01; the full entry is under pattern 1). The rule is
+  now `domain.MaxAmountMinor`. Three things about it that are easy to get
+  wrong:
+  - **A per-amount ceiling is not a guarantee that sums fit.** Nothing limits
+    how many rows there are. It turns "one typo" into "more than 92,233
+    deliberate rows at the ceiling". The comment at the constant says so, and
+    so should anyone describing it.
+  - **The number is tied to the FX table.** 1e14 was chosen partly because
+    1e14 × 12,410 (SGD to IDR, the largest rate) still fits an int64, and 1e15
+    does not. `adapter/fx/static_ceiling_test.go` checks every rate in the
+    table against the ceiling, so a new rate that breaks the promise fails
+    there.
+  - **It does nothing for rows already stored.** A row past the ceiling
+    written before the fix still makes the read fail. The read was left
+    failing on purpose: showing a clamped or partial balance would misstate
+    the household's money, which is the same reason `ErrNoRate` is the only
+    conversion failure a total may skip.
+- A holding's worth (quantity × unit price) could overflow with both figures
+  inside the amount ceiling, and the price that caused it was stored before
+  anything multiplied it (2026-10-01; the full entry is under pattern 1).
+  The rule is `domain.CheckHoldingValueWithinLimit`, run by
+  `HoldingService`'s `holdingRule` under the holding's lock before any event
+  or price is written. Two things about it that are easy to get wrong:
+  - **It multiplies the most ever held, not what is held now, by every
+    price, not the latest.** Either "obvious" figure reopens the period
+    report to an overflow. Swapping the peak for what is held now was tried
+    as a mutation: of the service tests only
+    `TestAPriceIsJudgedAgainstTheMostEverHeldWhateverItsDate` failed, so
+    that one test is what holds the choice in place.
+    `TestEveryRecordedPriceIsCheckedNotOnlyTheNewest` does the same for the
+    prices.
+  - **The held quantity itself could wrap.** Two purchases that each fit in
+    an int64 could add up past it. The fold refused that only because a
+    wrapped sum is negative and `NewQuantity` refuses a negative, with an
+    error naming the wrong cause. It checks before adding now. The sentence
+    a person sees for it is still the generic "Enter a quantity as a number,
+    up to nine decimal places", which does not describe ten purchases of a
+    billion units each; nobody has reported reaching it.
+- The browser has its own, lower limit, and it failed with the wrong words. A
+  JavaScript number is exact only up to 2^53 − 1, so seventeen digits typed
+  into an amount field were sent rounded, or as a number past int64, and the
+  form showed "The request body could not be parsed." Found only by typing
+  twenty digits into the real form during the browser walk; the server-side
+  tests could not see it. `toMinorUnits` now refuses what it cannot hold
+  exactly and `describeAmountError` says the amount is too large.
 - A doc comment promised "an invalid value cannot exist anywhere in the system".
   Go cannot enforce that with exported fields, and the repository layer rebuilds
   these values from database rows.
@@ -4534,6 +4859,26 @@ context the check was silently assuming, and require it explicitly.
   breakdown can quietly stop reconciling with the number above it, and nothing
   short of summing the rows and comparing catches that** — the same shape as
   pattern 5's silent partial success, on a read path instead of a write.
+- **A "day" is a date, and a zoned instant is not one (2026-10-01).** The
+  obvious way to give a household its own today is `now.In(zone)`. It is
+  wrong here, and the tests would not all have said so. Hearth's date rules
+  read a day in two ways: periods and retros read a value in its own
+  location, Bills convert it to UTC first. Hand both a zoned instant at
+  07:00 on 1 October in Singapore and the quarter is Q4 while a bill due on
+  30 September is not yet overdue, because converted to UTC it is still the
+  30th. `domain.TodayIn` therefore returns the household's date stamped
+  midnight UTC, the one shape both families read alike.
+  `TestAZonedInstantIsNotAHouseholdDay` keeps the wrong shape as a test, so
+  the warning in the comment cannot quietly stop being true.
+- **Go loads two time zone names it should refuse.** `time.LoadLocation("")`
+  is UTC and `time.LoadLocation("Local")` is whatever zone the server sits
+  in, both without an error. Either would hand a household the server's
+  calendar while looking like a stored choice. `domain.ParseTimezone`
+  refuses both before asking the standard library, and the column has a
+  `CHECK (timezone <> '')` behind it. A third thing to know: the zone data
+  is a file on the machine unless the binary embeds it. The tests pass on a
+  developer's Mac either way, and a minimal container may have none, so
+  `cmd/api` and `cmd/adminctl` import `time/tzdata`.
 
 ### Database and repositories
 
@@ -5041,6 +5386,48 @@ route with a missing guard has no second line of defence.
   and still gets 400; everything else undeclared gets 415. The first version
   refused it too, and would have turned a correct 400 into a misleading 415
   across every route.
+- **Tightening a rule can break an edit that never touched the field
+  (2026-10-01).** An account's opening balance allowed a day past the
+  server's clock, and `AccountService.Update` re-validated the whole account
+  on every patch, date included. That was safe only because the rule was
+  loose: a date accepted once stayed acceptable. With the slack removed and
+  "today" now the household's, a stored date can be after today without
+  anyone typing a future date. Move the household's zone west and
+  yesterday's "today" is tomorrow. The edit form sends the date back on
+  every save, so a rename of that account would have been refused with
+  "That date is in the future." The date is now checked only when the patch
+  changes it, which is also the owner's rule for every recorded fact:
+  existing rows stay. **When a validation is tightened, ask what already
+  stored data fails it, and whether an unrelated edit re-runs it.**
+- **A refusal's sentence can encode the rule it was written under
+  (2026-10-01).** `409 RETRO_NOTHING_TO_START` said "Both this month and last
+  month already have a retro." That was the only way to reach it. Once a
+  retro could not start before the household's creation month, a household
+  created this month reached it with one retro and no last month at all, and
+  the sentence was false. Nothing failed: the test asserts the code, not the
+  words. It was found by reading the response body in a failing test's
+  output. **When a rule gains a condition, grep the user-facing sentences
+  that explain the old rule**: the error table, the copy files and the
+  comments beside both. Four frontend comments said "null means both months
+  have a retro" for the same reason.
+- **A new dependency on a row's age breaks every test that creates the row
+  and uses it at once (2026-10-01).** The retro floor reads
+  `households.created_at`. Every test household is created a moment before
+  the test uses it, so the only retro any of them can start is this month's.
+  Two HTTP tests start two retros in a row and broke. The fix is a helper
+  that backdates the household by direct SQL, not a looser assertion: those
+  tests were about the second and third `POST`, and still are. The same thing
+  met the browser walk, where the seeded household is also created that
+  minute and cannot have a draft for last month until its creation is moved
+  back.
+- **Every authenticated request now depends on one more row being
+  readable.** Both auth middlewares read the household to work out its day.
+  A zone that cannot be loaded is a 500 on every route, including the
+  Settings control that would change it, so that state needs a database
+  edit to leave. It is deliberate (a guessed date is worse) and it is only
+  reachable around the API, which refuses such a zone on both writes that
+  set one. It is written down here because the first person to meet it
+  will be looking at a household that cannot open anything.
 
 ### Frontend
 
@@ -5911,6 +6298,73 @@ route with a missing guard has no second line of defence.
   What catches this class: a screenshot of every route at 375, 768 and
   1440px, read by a person, not only asserted on by a test.
 
+- **"Duplicated on purpose" was right until the answer depended on the
+  household (2026-10-01).** Eight files each carried a private `today()`,
+  and each carried a comment saying the copy was deliberate: four lines are
+  cheaper than coupling features through an import. That was a sound call
+  while "today" was a pure function of the browser's clock. Once the answer
+  depends on the household's time zone, a private copy is a private bug,
+  and all eight are gone in favour of `lib/householdDate.ts`. **A decision
+  recorded in a comment is only as good as its premise. When the premise
+  changes, grep for the comment, not just the code.**
+- **A default worked out from server data must be derived on each render,
+  not stored at mount.** `useState(today())` captures whatever "today" was
+  when the component mounted. In the app the household's zone is always
+  loaded by then, because `RequireAuth` renders nothing else first. In a
+  component test it is not, and the field would sit on the fallback zone's
+  date for ever. `useHouseholdDateInput` keeps `null` for "the person has
+  not chosen" and works out today on every render, so the field is right
+  the moment the zone arrives, and moves on at midnight in a form left
+  open. `""` is different from `null`: a field the person emptied stays
+  empty, so the form's own "pick a date" message can still fire.
+- **The browser's list of time zones leaves out UTC, and a `<select>`
+  whose value is not among its options shows its first option.** Together
+  those would have shown a household on UTC as being in `Africa/Abidjan`.
+  `timeZoneOptions` always includes UTC and the stored zone, whatever
+  `Intl.supportedValuesOf("timeZone")` returns.
+- **`en-GB` abbreviates September as "Sept".** `longDateIn` builds its
+  string from `formatToParts` so the order is the app's own, and takes the
+  words from `en-US` like every other month name in the app. Found by the
+  test, which asserted "30 Sep".
+- **A new control can make an old test's query ambiguous.** CurrencyPanel's
+  three tests found their button with `/save/i`. The time zone row added a
+  button named "Save time zone", and all three failed with "multiple
+  elements". They now name the button exactly. That is tightening a query,
+  not loosening an assertion, and it is the right fix; a regex was the
+  loose part.
+
+- **Free text cannot be put inside a sentence (QA ISSUE-009, 2026-10-01).**
+  A holding's unit is whatever the household typed. `HoldingLotsPanel` wrote
+  "How many {unit}s", "What one {unit} was worth" and "Price per {unit}",
+  which is right for "gram" and reads "gramss", "one grams" and "per grams"
+  for "grams". The Add holding form's own hint suggested the plural. English
+  plurals cannot be derived from a string, so the fix is to stop needing
+  one: the unit is shown as a label in brackets, "How many (grams)", like
+  the currency beside it, and the price is "per unit". The test runs the
+  same assertions for "gram" and "grams". Still open, and a product choice:
+  the portfolio card and each entry row print a count followed by the unit
+  as typed, so the default presets read "10 share".
+- **A rule the page can only learn from a refusal is a rule the person
+  learns by failing (QA ISSUE-012, 2026-10-01).** The primary currency
+  cannot change once a household holds investments. The server refused
+  correctly and said why, but Settings offered an enabled field and the
+  reason arrived after Save. The fix was not to copy the rule into the
+  browser. A frontend check on `GET /holdings` would have had to know that
+  archived holdings count too, and would have drifted the first time the
+  rule changed. The server now answers the question on `GET /household`
+  (`primaryCurrencyLocked`), from the same method `Update` refuses on, and
+  the page only shows it. The flag is worked out for an owner alone:
+  nobody else can change the currency, and for a child without Money
+  "locked" would mean "this household holds investments". The frontend
+  schema makes the field required, because a default of `false` is exactly
+  the behaviour being fixed.
+- **Offering a switch between a thing and itself (QA ISSUE-008,
+  2026-10-01).** Self-serve sign-up stores the primary currency as the
+  second currency, since nothing chooses a second one yet. The panel then
+  offered "Show SGD equivalents" beside an SGD primary currency. A value
+  that is stored only because a column needs something in it is not a
+  choice, and the screen must not present it as one.
+
 ### Tooling and infrastructure
 
 - **`hearthctl` (2026-09-08).** Three things worth keeping from building the
@@ -6553,6 +7007,114 @@ route with a missing guard has no second line of defence.
   that header to `/api/`. The same test also fails if `index.html` gains an
   inline `<script>`, which the new CSP would block in production and
   nowhere else, since `vite` dev does not go through nginx.
+- **Running a second copy of the stack beside the first (2026-10-01).**
+  The walk for the household calendar could not touch the `hearth` compose
+  project another session was using. A second project works
+  (`docker compose -p hearth-qafix -f docker-compose.yml -f override.yml`),
+  with three things to know. A `ports:` list in an override file is
+  **appended** to the base file's, not replacing it, so both stacks ask
+  for 5432; write `ports: !override [...]`. `APP_BASE_URL` must be
+  overridden too, or every magic link in the second stack's Mailpit points
+  at the first stack's web port. And the compose file's `name: hearth` is
+  overridden by `-p`, volumes included, so `down -v` on the second project
+  removes only its own data.
+
+### The household calendar's browser walk (2026-10-01)
+
+- **Which zone to walk in depends on the hour, and so does what the walk
+  can show.** The brief was to use `Pacific/Kiritimati` (UTC+14) or
+  `Pacific/Pago_Pago` (UTC-11), whichever is on a different date from UTC.
+  At 02:00 UTC only Pago Pago was: 30 September there, 1 October in UTC and
+  in the browser's own Singapore. Every date on every Money and Marriage
+  screen then read 30 September and September, against a server and a
+  browser both on 1 October. That is strong evidence the app reads the
+  household's zone and neither clock. **What it could not show** is the
+  original defect's own direction, a household ahead of the server. Pago
+  Pago is behind it. That direction is covered by the Go tests, which stop
+  the clock at 23:00 UTC with the household on Singapore. A walk proves
+  what it touches at the hour it runs; say which half it was.
+- **The headless browser's own zone is set by `TZ`, not by a browser
+  command.** The check "a fresh sign-up captures the browser's zone" is
+  weak when the browser and the seeded household are both in Singapore.
+  The browse daemon refuses `Emulation.setTimezoneOverride`, but a second
+  daemon started with `TZ=America/Sao_Paulo` and its own state file reports
+  that zone to the page, and the household it signed up was stored on
+  `America/Sao_Paulo`.
+- **A walk finds what the next task is for.** A household created that
+  morning was offered "Start August retro" while on Pago Pago time and
+  "Start September retro" on Singapore time. Both are correct by the rule
+  as built (the earlier of last month and this month with no retro), and
+  both name a month the household did not exist in. The owner has already
+  decided the floor at the creation month. It was a ⬜ row in the tracker
+  when this was written and was built later the same day: a household
+  created on 1 October is now offered October.
+- **Refs go stale after a re-render.** `fill @e29` after typing into
+  another field landed nowhere, and the form then refused to submit for an
+  empty amount. Filling by the input's `id` does not have the problem.
+
+### The three calendar rules' browser walk (2026-10-01)
+
+- **Move the household a day behind and the walk shows whose day is used.**
+  With the household on Singapore, the browser on Singapore and the server
+  eight hours behind, "tomorrow is refused" proves little: every clock but
+  the server's agrees. With the household moved to `Pacific/Pago_Pago`, a
+  transaction dated 1 October was refused as "in the future" while the
+  browser and the server were both on 1 October, and one dated 30 September
+  saved. The rows saved earlier that morning were then dated after the
+  household's today without anyone having typed a future date, which is the
+  very case "an edit is checked only when it changes the date" exists for.
+  Editing one's description saved.
+- **A snapshot ref can match two elements.** The browse tool resolves
+  `@e17` by role and name. A row that is itself a button takes its
+  accessible name from everything inside it, including the inner "Mark
+  paid" or "Add contribution" button, so the ref for the inner button
+  matched both and the click was refused. `button[aria-label="Mark Internet
+  paid"]` and `button:text-is("Add contribution")` are exact.
+- **The card had no way to the retro it named.** `NextRetroCard` linked to
+  the Retros page only from its "No retro yet" prompt. A card showing a
+  retro in progress was a dead end, and had been since it shipped. Nothing
+  tested for it, because the tests asserted what the card said. It was
+  found by reading the component for the new state and asking what a
+  person would click. A draft on the card links to the Retros page now.
+- **What was not walked.** `hearthctl transaction add` and `import` against
+  a running stack, and Telegram `/spend`. The first two share the browser's
+  route and the token middleware, pinned by a Go test; the third is dated
+  today by the server and cannot be refused.
+
+### The holding value limit's browser walk (2026-10-01)
+
+- **Walk both orders, because each order is refused by a different write.**
+  Quantity first: 100,000 shares, then a price of S$1,000,000,000,000 a
+  share. The price dialog showed the refusal sentence under the price field,
+  "No prices recorded yet." stayed, and Portfolio and "How each did"
+  (quarter, half-year, year) reloaded. Price first on a second holding: the
+  same price saved with nothing held, and the purchase of 100,000 units was
+  then refused under the purchase form with "No entries yet." still showing.
+  A walk of only the first order would never have run the event path.
+- **The limit itself is worth one click each side.** With 100,000 shares,
+  S$10,000,000.00 a share saved and "Worth now" read S$1,000,000,000,000.00
+  exactly. S$10,000,000.01 was refused and the S$10,000,000.00 row stayed.
+  Re-entering the day at S$10.00 replaced it: one row, worth S$1,000,000.00.
+- **The third write was only reachable by building a history.** Deleting a
+  sale is refused when it would make the holding larger than its price
+  allows. On the second holding (one unit at the limit): buy 1, sell 1, buy
+  1, then Remove on the sale. The sentence appeared in the entries section
+  and all three entries were still listed. The sentence says "Check the
+  quantity and the price for extra digits", which is advice for a typed
+  figure; for a removal it still names the two things that are in conflict,
+  and it is one row shared by three writes on purpose.
+- **Then look at the database, not only the page.** `psql` on the walk's own
+  stack showed one price per holding and no row from any refused write, and
+  the API log held no "unhandled error" line. "The list looks empty" and
+  "nothing was stored" are different claims, and the defect was a row that
+  was stored while the page showed an error.
+- **A report of a holding worth exactly the limit still adds up.** The
+  quarter's unrealised figure was S$999,999,999,000.00 (the limit minus the
+  S$1,000.00 cost), which is the headroom argument for holding the product
+  to the amount ceiling rather than to "fits in an int64".
+- **What was not walked.** A foreign-currency holding (two prices per day)
+  and the racing case. Both are pinned by Go tests, the second against real
+  Postgres. Production was not touched and the audit SQL was not run there.
 
 ### Provisioning the read-only role on the box (2026-09-05)
 
@@ -6998,6 +7560,11 @@ no test suite can hold.
    account type the product itself has no door for (pattern 15, eighth
    instance).
 6. If it accepts caller input, ask what a caller can measure.
+   And if it works out a date ("today", "this month", "this year"), ask
+   whose calendar: the household's. On the server that is `Scope.Today`
+   (or `domain.TodayIn` at a new edge), never a clock read. In the browser
+   it is `lib/householdDate.ts` with `useHouseholdZone()`, never
+   `new Date()`'s own components.
 7. If it writes twice, ask what happens when the second write fails.
 8. Add what you learned to this file.
 9. `git status` before you push. A file you created and never `git add`ed

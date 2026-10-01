@@ -59,7 +59,7 @@ func TestFeatureFlagRepoSeparatesGlobalFromHouseholdOverrides(t *testing.T) {
 	users := postgres.NewUserRepo(db)
 	flags := postgres.NewFeatureFlagRepo(db)
 
-	household, err := households.Create(ctx, domain.Household{Name: "Test", FamilyName: "Test", PrimaryCurrency: "SGD"})
+	household, err := households.Create(ctx, domain.Household{Timezone: "UTC", Name: "Test", FamilyName: "Test", PrimaryCurrency: "SGD"})
 	if err != nil {
 		t.Fatalf("create household: %v", err)
 	}
@@ -121,7 +121,7 @@ func TestExtendingASessionKeepsItsAdminGrant(t *testing.T) {
 	households := postgres.NewHouseholdRepo(db)
 	sessions := postgres.NewSessionRepo(db)
 
-	household, err := households.Create(ctx, domain.Household{Name: "Test", FamilyName: "Test", PrimaryCurrency: "SGD"})
+	household, err := households.Create(ctx, domain.Household{Timezone: "UTC", Name: "Test", FamilyName: "Test", PrimaryCurrency: "SGD"})
 	if err != nil {
 		t.Fatalf("create household: %v", err)
 	}
@@ -176,7 +176,7 @@ func TestTouchWritesOnlyLastSeenAt(t *testing.T) {
 	households := postgres.NewHouseholdRepo(db)
 	sessions := postgres.NewSessionRepo(db)
 
-	household, err := households.Create(ctx, domain.Household{Name: "Test", FamilyName: "Test", PrimaryCurrency: "SGD"})
+	household, err := households.Create(ctx, domain.Household{Timezone: "UTC", Name: "Test", FamilyName: "Test", PrimaryCurrency: "SGD"})
 	if err != nil {
 		t.Fatalf("create household: %v", err)
 	}

@@ -70,6 +70,31 @@ type HoldingCounter interface {
 	CountForHousehold(ctx context.Context, householdID string) (int64, error)
 }
 
+// HoldingFold is the rule a write to one holding must pass before anything
+// is stored. The service supplies it; the repository calls it once, while it
+// holds the lock on the holding's row, and writes only if it returns nil. An
+// error it returns goes back to the caller unchanged, with nothing written.
+//
+// Both arguments are the holding's rows as they WOULD be after this write,
+// read inside the lock:
+//
+//   - events: every acquisition and disposal, in
+//     HoldingEventRepository.ListByHolding's order. An insert has the new
+//     event appended last; a delete has the removed event taken out; a price
+//     write leaves them as stored.
+//   - prices: every valuation, in no promised order. A price write has the
+//     new price in the list and the row it replaces (the same calendar day)
+//     taken out; an event write leaves them as stored.
+//
+// Why the repository reads the prices instead of the service passing them
+// in: a service that read them first could miss a price committed between
+// its read and the lock. A large purchase and a large price are each legal
+// alone, so both writers would pass and both commit.
+//
+// A fold does no I/O and calls no repository: it runs while the transaction
+// holds a row lock and a pool connection.
+type HoldingFold func(events []domain.HoldingEvent, prices []domain.Valuation) error
+
 // HoldingEventRepository stores the acquisitions and disposals a holding is
 // made of. Income (a dividend) is deliberately not among them: it changes
 // neither what is held nor what it cost, so folding it here would corrupt the
@@ -91,23 +116,24 @@ type HoldingEventRepository interface {
 	// per holding.
 	ListByHousehold(ctx context.Context, householdID string) ([]domain.HoldingEvent, error)
 	Insert(ctx context.Context, e domain.HoldingEvent) (domain.HoldingEvent, error)
-	// InsertWithFold is Insert with the holding's invariant held ACROSS the
-	// write; a service must use it for anything the fold can refuse. The
-	// implementation locks the holding, lists its events in the same
-	// transaction, calls fold with them, and inserts only if fold returns
-	// nil -- so a second writer blocks and then folds the first one's
-	// result, not a stale copy.
+	// InsertWithFold is Insert with the holding's rules held ACROSS the write;
+	// a service must use it for anything the fold can refuse. The
+	// implementation locks the holding, reads its events and prices in the
+	// same transaction, calls fold with them (see HoldingFold for exactly
+	// what it is handed), and inserts only if fold returns nil -- so a second
+	// writer blocks and then folds the first one's result, not a stale copy.
 	//
 	// Reading, folding and writing as three separate calls is NOT
 	// equivalent: two sales of 30 from a holding of 50 would each pass and
-	// both commit, leaving events that can't be folded at all. fold is the
-	// caller's own rule (domain.Holding.Position); this port owns the
-	// transaction and the lock, never the rule.
-	InsertWithFold(ctx context.Context, e domain.HoldingEvent, fold func([]domain.HoldingEvent) error) (domain.HoldingEvent, error)
+	// both commit, leaving events that can't be folded at all. This port
+	// owns the transaction and the lock, never the rule.
+	InsertWithFold(ctx context.Context, e domain.HoldingEvent, fold HoldingFold) (domain.HoldingEvent, error)
 	// DeleteWithFold is the same guarantee in the other direction: removing a
-	// purchase a later sale was costed against must not be able to race a
-	// concurrent write. fold receives the events that WOULD remain.
-	DeleteWithFold(ctx context.Context, householdID, holdingID, eventID string, fold func([]domain.HoldingEvent) error) error
+	// purchase a later sale was costed against, or a sale that kept the
+	// holding small, must not be able to race a concurrent write. It reports
+	// domain.ErrNotFound, without calling fold, when the event is not this
+	// household's and this holding's.
+	DeleteWithFold(ctx context.Context, householdID, holdingID, eventID string, fold HoldingFold) error
 	// Delete reports domain.ErrNotFound when the event is not this
 	// household's AND this holding's, rather than silently succeeding. Both
 	// halves matter: the household keeps two families apart, and the
@@ -132,11 +158,25 @@ type HoldingValuationRepository interface {
 	// opens at a price recorded in the quarter before it, and ListLatest
 	// has already discarded that one.
 	ListForHousehold(ctx context.Context, householdID string) ([]domain.Valuation, error)
-	// Upsert writes one price per holding per day: a second write for the
-	// same AsOf replaces the first. Re-entering a day's price is a
+	// UpsertWithFold writes one price per holding per day: a second write for
+	// the same AsOf day replaces the first. Re-entering a day's price is a
 	// correction, not a second opinion, and two rows for one day would leave
 	// the report with no way to choose between them.
-	Upsert(ctx context.Context, v domain.Valuation) (domain.Valuation, error)
+	//
+	// It is the only way to store a price, and it holds the same lock as
+	// HoldingEventRepository.InsertWithFold: the implementation locks the
+	// holding, reads its events and prices in the same transaction, calls
+	// fold (see HoldingFold), and writes only if fold returns nil. A price
+	// write and an event write on one holding therefore never overlap.
+	//
+	// Don't add a plain Upsert beside it: a price stored without the fold is
+	// how a holding came to be worth more than an int64 can hold, which
+	// failed every portfolio read for the household. It reports
+	// domain.ErrNotFound, without calling fold, when the holding is not this
+	// household's.
+	UpsertWithFold(ctx context.Context, v domain.Valuation, fold HoldingFold) (domain.Valuation, error)
+	// Delete needs no fold: every rule a HoldingFold enforces can only be
+	// broken by a price that is present, so removing one cannot break it.
 	Delete(ctx context.Context, householdID, valuationID string) error
 }
 

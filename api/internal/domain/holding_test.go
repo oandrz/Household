@@ -2,6 +2,7 @@ package domain_test
 
 import (
 	"errors"
+	"math"
 	"testing"
 	"time"
 
@@ -346,6 +347,81 @@ func TestPositionRefusesToSellMoreThanIsHeld(t *testing.T) {
 	}
 }
 
+// PeakHeld is the most the holding has EVER held, which is what the value
+// limit multiplies a price by. The period report prices the quantity held at
+// each period's end, possibly long ago, so the quantity held now is not
+// enough.
+func TestPositionReportsTheMostEverHeldNotOnlyWhatIsHeldNow(t *testing.T) {
+	for _, tc := range []struct {
+		name               string
+		events             []domain.HoldingEvent
+		wantHeld, wantPeak int64
+	}{
+		{
+			name:     "bought 100, sold 90",
+			events:   []domain.HoldingEvent{buy(t, 1, 100, 1000), sell(t, 2, 90, 900)},
+			wantHeld: 10, wantPeak: 100,
+		},
+		{
+			name:     "a later purchase that stays under the earlier peak",
+			events:   []domain.HoldingEvent{buy(t, 1, 100, 1000), sell(t, 2, 90, 900), buy(t, 3, 30, 300)},
+			wantHeld: 40, wantPeak: 100,
+		},
+		{
+			name:     "a later purchase that sets a new peak",
+			events:   []domain.HoldingEvent{buy(t, 1, 100, 1000), sell(t, 2, 90, 900), buy(t, 3, 150, 1500)},
+			wantHeld: 160, wantPeak: 160,
+		},
+		{
+			// Handed over newest first: folded in slice order this would
+			// refuse the sale, and the peak is only right in date order.
+			name:     "events out of date order",
+			events:   []domain.HoldingEvent{buy(t, 3, 20, 200), sell(t, 2, 60, 600), buy(t, 1, 100, 1000)},
+			wantHeld: 60, wantPeak: 100,
+		},
+		{
+			name:     "sold out completely",
+			events:   []domain.HoldingEvent{buy(t, 1, 10, 100), sell(t, 2, 10, 100)},
+			wantHeld: 0, wantPeak: 10,
+		},
+		{name: "no events", events: nil, wantHeld: 0, wantPeak: 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p, err := sgdHolding().Position(tc.events, "SGD")
+			if err != nil {
+				t.Fatalf("Position: %v", err)
+			}
+			if p.Held.Nano() != tc.wantHeld*domain.QuantityScale {
+				t.Errorf("Held = %d, want %d units", p.Held.Nano(), tc.wantHeld)
+			}
+			if p.PeakHeld.Nano() != tc.wantPeak*domain.QuantityScale {
+				t.Errorf("PeakHeld = %d, want %d units", p.PeakHeld.Nano(), tc.wantPeak)
+			}
+		})
+	}
+}
+
+// Two quantities that each fit in an int64 can add up to one that does not.
+// The fold refuses that by checking before it adds. It used to be refused
+// only by luck: the sum wrapped to a negative number, and NewQuantity then
+// refused it as "a quantity cannot be negative", which is not what happened.
+func TestPositionRefusesAHeldQuantityTooLargeToCount(t *testing.T) {
+	almostEverything, err := domain.NewQuantity(math.MaxInt64 - 5)
+	if err != nil {
+		t.Fatalf("NewQuantity: %v", err)
+	}
+	first := buy(t, 1, 1, 100)
+	first.Quantity = almostEverything
+
+	_, err = sgdHolding().Position([]domain.HoldingEvent{first, buy(t, 2, 1, 100)}, "SGD")
+	if !errors.Is(err, domain.ErrInvalidQuantity) {
+		t.Fatalf("error = %v, want ErrInvalidQuantity", err)
+	}
+	if errors.Is(err, domain.ErrQuantityNegative) {
+		t.Fatalf("error = %v: nothing here was negative, the sum wrapped", err)
+	}
+}
+
 func TestPositionOfAHoldingWithNoEventsIsZeroInItsOwnCurrency(t *testing.T) {
 	h := sgdHolding()
 	h.Currency = "IDR"
@@ -645,5 +721,47 @@ func TestTheFoldRefusesAPrimaryAmountInSomeOtherCurrency(t *testing.T) {
 	}}
 	if _, err := usdHolding().Position(events, "SGD"); err == nil {
 		t.Fatal("a primary amount in IDR must not fold into an SGD pool")
+	}
+}
+
+// Every figure a holding row carries is added up somewhere (cost, realised
+// profit, market value), so each one gets the ceiling every other amount in
+// the product has. One minor unit past it is refused; the ceiling itself is
+// a real, if absurd, figure and is accepted.
+func TestEventRefusesAnAmountPastTheCeiling(t *testing.T) {
+	if err := buy(t, 1, 10, domain.MaxAmountMinor).Validate("SGD", "SGD"); err != nil {
+		t.Fatalf("amount at the ceiling: %v", err)
+	}
+	if err := buy(t, 1, 10, domain.MaxAmountMinor+1).Validate("SGD", "SGD"); !errors.Is(err, domain.ErrAmountTooLarge) {
+		t.Fatalf("amount past the ceiling: error = %v, want ErrAmountTooLarge", err)
+	}
+}
+
+func TestEventRefusesAPrimaryAmountPastTheCeiling(t *testing.T) {
+	if err := buyUSD(t, 1, 10, 250, domain.MaxAmountMinor).Validate("USD", "SGD"); err != nil {
+		t.Fatalf("primary amount at the ceiling: %v", err)
+	}
+	if err := buyUSD(t, 1, 10, 250, domain.MaxAmountMinor+1).Validate("USD", "SGD"); !errors.Is(err, domain.ErrAmountTooLarge) {
+		t.Fatalf("primary amount past the ceiling: error = %v, want ErrAmountTooLarge", err)
+	}
+}
+
+func TestValuationRefusesAUnitPricePastTheCeiling(t *testing.T) {
+	if err := valuation(t, 1, domain.MaxAmountMinor).Validate("SGD", "SGD"); err != nil {
+		t.Fatalf("unit price at the ceiling: %v", err)
+	}
+	if err := valuation(t, 1, domain.MaxAmountMinor+1).Validate("SGD", "SGD"); !errors.Is(err, domain.ErrAmountTooLarge) {
+		t.Fatalf("unit price past the ceiling: error = %v, want ErrAmountTooLarge", err)
+	}
+}
+
+// The primary-currency unit price goes through the same rule an event's
+// primary amount does, so it is checked here once for the valuation's side.
+func TestValuationRefusesAPrimaryUnitPricePastTheCeiling(t *testing.T) {
+	v := domain.Valuation{UnitPrice: money(t, 250, "USD"), AsOf: on(1)}
+	tooLarge := money(t, domain.MaxAmountMinor+1, "SGD")
+	v.PrimaryUnitPrice = &tooLarge
+	if err := v.Validate("USD", "SGD"); !errors.Is(err, domain.ErrAmountTooLarge) {
+		t.Fatalf("primary unit price past the ceiling: error = %v, want ErrAmountTooLarge", err)
 	}
 }

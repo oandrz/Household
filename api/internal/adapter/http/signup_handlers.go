@@ -50,7 +50,11 @@ type completeSignUpRequest struct {
 	HouseholdName   string `json:"householdName"`
 	DisplayName     string `json:"displayName"`
 	PrimaryCurrency string `json:"primaryCurrency"`
-	Password        string `json:"password"`
+	// Timezone is the browser's IANA zone. The form shows no field for it
+	// unless the device's zone cannot be used: the screen reads it from the
+	// device, and an owner can change it in Settings.
+	Timezone string `json:"timezone"`
+	Password string `json:"password"`
 }
 
 // handleCompleteSignUp provisions the household and signs the new owner in
@@ -63,7 +67,7 @@ func handleCompleteSignUp(deps Deps) http.HandlerFunc {
 			return
 		}
 		result, err := deps.Signups.Complete(r.Context(), chi.URLParam(r, "token"),
-			req.HouseholdName, req.DisplayName, req.PrimaryCurrency, req.Password)
+			req.HouseholdName, req.DisplayName, req.PrimaryCurrency, req.Timezone, req.Password)
 		if err != nil {
 			MapDomainError(w, r, err)
 			return

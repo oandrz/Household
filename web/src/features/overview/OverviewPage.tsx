@@ -13,7 +13,8 @@ import { Link } from "@tanstack/react-router";
 import { PageContainer } from "../../components/PageContainer";
 import { useMe } from "../auth/useAuth";
 import { NetWorthCard } from "../money/NetWorthCard";
-import { currentMonth } from "../money/month";
+import { useHouseholdZone } from "../auth/useHouseholdZone";
+import { monthIn } from "../../lib/householdDate";
 import { useAccounts } from "../money/useAccounts";
 import { useBudget } from "../money/useBudget";
 import { useGoals } from "../money/useGoals";
@@ -57,7 +58,9 @@ export function OverviewPage() {
   // ask -- the request would be answered 403 and leave a failed query in the
   // cache for nobody to read. `enabled`, not a fake month and not a
   // conditional call.
-  const budget = useBudget(currentMonth(), { enabled: isOwner });
+  // The household's month, the one BudgetPage opens on, so the two screens
+  // ask GET /budgets/{month} about the same month.
+  const budget = useBudget(monthIn(useHouseholdZone()), { enabled: isOwner });
   // GET /goals carries the identical guard as GET /budgets/{month}
   // (requireCapability(money) AND requireOwner), so this is gated the same
   // way and for the same reason.

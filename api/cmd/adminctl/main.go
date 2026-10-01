@@ -21,6 +21,9 @@ import (
 	"os"
 	"strings"
 	"time"
+	// The zone database, for the same reason cmd/api embeds it: seed
+	// validates the household's time zone by loading it.
+	_ "time/tzdata"
 
 	"golang.org/x/term"
 

@@ -37,6 +37,8 @@ import { useState } from "react";
 import { Link } from "@tanstack/react-router";
 import { ApiError } from "../../api/client";
 import { useCurrencies } from "../auth/useAuth";
+import { useHouseholdZone } from "../auth/useHouseholdZone";
+import { monthNameIn } from "../../lib/householdDate";
 import { useAccounts } from "./useAccounts";
 import { PageContainer } from "../../components/PageContainer";
 import { ToggleSwitch } from "../../components/ToggleSwitch";
@@ -51,30 +53,18 @@ import { useBills } from "./useBills";
 import { usePendingBillActions } from "./usePendingBillActions";
 import type { Bill } from "./billSchemas";
 
-// "What month is it right now" -- in UTC, which is the month the figures
-// this name labels were actually scoped to.
-//
-// The anchor-on-day-2 trick month.ts's monthLabel and GoalCard.tsx's
-// targetMonthLabel use is genuinely not needed here: there is no stored date
-// string to parse, so there is no parse-time offset shift to guard against.
-// That is what this comment used to say, and it is where it stopped -- it
-// missed that a *live* clock read locally has its own version of the same
-// problem. `allCaughtUp` below is derived entirely from server figures, and
-// the server scopes "this month" in UTC. In SGT (UTC+8) the two disagree for
-// the first eight hours of every month: at local 1 Sep 03:00 it is still
-// 31 Aug in UTC, so every August bill being paid fires the panel -- which
-// would then read "everything due in September is paid" while September's
-// unpaid bills sat in Due soon beside it.
-//
-// Fixed here rather than by having the server put the month it scoped onto
-// BillsSummary: this is a label, and the server-side version would cost a new
-// summary field, a DTO field, a schema change and a system-design update to
-// carry one string that toLocaleDateString already knows how to produce.
-function currentMonthName(): string {
-  return new Date().toLocaleDateString("en-US", { month: "long", timeZone: "UTC" });
-}
-
 export function BillsPage() {
+  // The month the "All caught up" panel names. `allCaughtUp` below is derived
+  // entirely from server figures, and the server scopes "this month" to the
+  // household's month. So the name is that month too, read in the household's
+  // zone: with the browser's zone, or with UTC, the panel would say
+  // "everything due in September is paid" on the 1st of October while
+  // October's unpaid bills sat in Due soon beside it.
+  //
+  // Worked out here rather than sent by the server on BillsSummary: it is a
+  // label, and a server-sent "today" would also go stale at midnight in a
+  // cached query.
+  const currentMonthName = monthNameIn(useHouseholdZone());
   const [includeArchived, setIncludeArchived] = useState(false);
   const bills = useBills(includeArchived);
   const currencies = useCurrencies();
@@ -406,7 +396,7 @@ export function BillsPage() {
                   <p className="text-[12.5px] leading-relaxed text-accent-dark">
                     <span className="font-semibold text-accent">{BILL_COPY.allCaughtUpHeadline}</span>{" "}
                     {BILL_COPY.allCaughtUpBody(
-                      currentMonthName(),
+                      currentMonthName,
                       summary.nextDue
                         ? BILL_COPY.nextBillClause(summary.nextDue.billName, dayMonthLabel(summary.nextDue.dueOn))
                         : null,

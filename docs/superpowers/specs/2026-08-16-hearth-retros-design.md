@@ -122,6 +122,17 @@ broken product. All of it comes back in this feature's first task, in one change
    page opens what exists. So a couple doing July's retro on 2 August files it as
    July, which is what they mean, and August is still available afterwards.
 
+   **A month before the household was created is never startable** (product-owner
+   decision, 2026-10-01; `docs/superpowers/specs/2026-10-01-hearth-household-calendar-design.md`).
+   A household created on 1 October did not exist in September, so it is offered
+   October, and once October has a retro it is offered nothing until November.
+   A household created on 30 September did exist in September, so on 1 October it
+   is still offered September first. The creation month is read in the
+   household's own time zone, like every other date here (ADR 12). The rule is
+   in `domain.StartableMonth` and `RetroService.Start`, so `POST /retros`
+   refuses it too (`409 RETRO_NOTHING_TO_START`), not only the page. Retros
+   that already exist for earlier months are left alone.
+
    Rejected: current-month-only, which files a 2 August retro as August and then
    leaves August without one — the design's own example retro is dated Jun 28,
    near the edge of its month. Also rejected: a free month picker, which is more
@@ -158,6 +169,13 @@ broken product. All of it comes back in this feature's first task, in one change
 9. **Overview's "Next retro" card ships in this feature.** Goals and Bills each
    built their own Overview card in their own round rather than deferring it, and
    the card needs nothing this feature does not already produce.
+
+   What it shows is in the formulas table below. Since 2026-10-01 it brings
+   last month's retro forward while that retro is still a draft and this month
+   has none. The card names the one thing that needs attention; the Retros
+   page still offers everything that can be done, so with September open on
+   1 October the card says "September retro · In progress" and the page lists
+   September as in progress beside a "Start October retro" button.
 
    It carries a gating point that must not be got wrong: **Overview is the only
    page every member reaches.** The card renders only for a member holding
@@ -276,10 +294,10 @@ five Money features in a row.
 | Mood over 12 months | The twelve calendar months ending at the current month. Each point is that month's **finished** retro's mood; a month with no finished retro, or a finished retro with no mood, is a **gap**. Never zero — zero is a claim, the same rule Budget applies to transactions it cannot convert |
 | History row | `Mood N/5 · K actions · "<first sentence of notes>"`. `K` counts all of that retro's actions, ticked or not. A retro with no mood omits the mood clause; with no actions, omits the action clause; with no notes, omits the quote — never renders `0 actions` or empty quotation marks |
 | First sentence | Up to and including the first `.`, `!` or `?`; failing that, the first 60 characters with an ellipsis; failing that (empty notes), nothing |
-| Startable month | The earlier of {previous month, current month} with no retro row. Both present → no start button (decision 5) |
+| Startable month | The earlier of {previous month, current month} with no retro row, never a month before the one the household was created in. No such month → no start button (decision 5) |
 | `Still open from July` | Actions on the **immediately previous** month's retro with `done_at IS NULL`. Previous month only (decision 4) |
 | Money check-in | Not ours. `GET /budgets/{month}` for the retro's own month plus `GET /goals`, rendered as they answer; a month with no budget shows Budget's own empty copy. The goals line is today's standing, not the month's, and is labelled that way — goals have no month dimension (decision 3) |
-| Overview "Next retro" card | The current month's retro if one exists (draft or finished), else the startable month as a prompt to begin. Beneath it, that retro's open actions — the design's "carried-over actions". Renders only for a member holding `marriage` (decision 9) |
+| Overview "Next retro" card | In order: the current month's retro if one exists (draft or finished); else **the previous month's retro if it is still a draft** (product-owner decision, 2026-10-01: on the 1st with last month's draft still open, the card shows that draft, not a prompt for the new month); else the startable month as a prompt to begin. Beneath a retro, its open actions — the design's "carried-over actions" — and, for a draft, a link to the Retros page. Only the previous month's draft is brought forward, never an older one. Renders only for a member holding `marriage` (decision 9) |
 
 ## API
 

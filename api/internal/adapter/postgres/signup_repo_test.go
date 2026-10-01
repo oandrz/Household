@@ -75,7 +75,7 @@ func TestSignupRepoCreateConsumedWritesAnInertCounterRow(t *testing.T) {
 		t.Fatalf("CountForEmailSince = %d, want 1 -- this is the entire reason CreateConsumed exists", count)
 	}
 
-	blueprint, err := usecase.NewSignupBlueprint("Someone Else's Household", "Stranger", "SGD")
+	blueprint, err := usecase.NewSignupBlueprint("Someone Else's Household", "Stranger", "SGD", "Asia/Singapore")
 	if err != nil {
 		t.Fatalf("NewSignupBlueprint: %v", err)
 	}
@@ -133,7 +133,7 @@ func TestSignupRepoProvisionCreatesTheWholeHousehold(t *testing.T) {
 		t.Fatalf("ByTokenHash: %v", err)
 	}
 
-	blueprint, err := usecase.NewSignupBlueprint("Ade & Kris", "Ade", "SGD")
+	blueprint, err := usecase.NewSignupBlueprint("Ade & Kris", "Ade", "SGD", "Asia/Singapore")
 	if err != nil {
 		t.Fatalf("NewSignupBlueprint: %v", err)
 	}
@@ -145,6 +145,19 @@ func TestSignupRepoProvisionCreatesTheWholeHousehold(t *testing.T) {
 	if got.UserID == "" || got.HouseholdID == "" || got.MembershipID == "" {
 		t.Fatalf("Provision returned %+v, want every id populated", got)
 	}
+
+	// Asia/Singapore is not the column's default, so this fails if Provision
+	// stops forwarding the blueprint's zone and the default fills the gap.
+	t.Run("the household keeps the time zone the blueprint named", func(t *testing.T) {
+		var timezone string
+		if err := pool.QueryRow(ctx,
+			`SELECT timezone FROM households WHERE id = $1`, got.HouseholdID).Scan(&timezone); err != nil {
+			t.Fatalf("query household: %v", err)
+		}
+		if timezone != "Asia/Singapore" {
+			t.Fatalf("timezone = %q, want Asia/Singapore", timezone)
+		}
+	})
 
 	t.Run("the user carries the verified address, not one passed in", func(t *testing.T) {
 		var email, initial string
@@ -259,7 +272,7 @@ func TestSignupRepoProvisionIsAllOrNothing(t *testing.T) {
 		t.Fatalf("ByTokenHash: %v", err)
 	}
 
-	blueprint, err := usecase.NewSignupBlueprint("Doomed household", "Ade", "SGD")
+	blueprint, err := usecase.NewSignupBlueprint("Doomed household", "Ade", "SGD", "Asia/Singapore")
 	if err != nil {
 		t.Fatalf("NewSignupBlueprint: %v", err)
 	}
@@ -319,7 +332,7 @@ func TestSignupRepoProvisionRefusesAnExpiredSignup(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ByTokenHash: %v", err)
 	}
-	blueprint, err := usecase.NewSignupBlueprint("Too late", "Ade", "SGD")
+	blueprint, err := usecase.NewSignupBlueprint("Too late", "Ade", "SGD", "Asia/Singapore")
 	if err != nil {
 		t.Fatalf("NewSignupBlueprint: %v", err)
 	}
@@ -353,7 +366,7 @@ func TestSignupRepoProvisionBindsTheChatFromTheClaimedRow(t *testing.T) {
 		t.Fatalf("Email = %q, want empty for a Telegram sign-up", details.Email)
 	}
 
-	blueprint, err := usecase.NewSignupBlueprint("Telegram household", "Ade", "SGD")
+	blueprint, err := usecase.NewSignupBlueprint("Telegram household", "Ade", "SGD", "Asia/Singapore")
 	if err != nil {
 		t.Fatalf("NewSignupBlueprint: %v", err)
 	}
@@ -388,7 +401,7 @@ func TestSignupRepoProvisionBindsNoChatForAnEmailSignup(t *testing.T) {
 		t.Fatalf("ByTokenHash: %v", err)
 	}
 
-	blueprint, err := usecase.NewSignupBlueprint("Email household", "Ade", "SGD")
+	blueprint, err := usecase.NewSignupBlueprint("Email household", "Ade", "SGD", "Asia/Singapore")
 	if err != nil {
 		t.Fatalf("NewSignupBlueprint: %v", err)
 	}
@@ -439,7 +452,7 @@ func TestSignupRepoProvisionRollsBackWhenTheChatIsAlreadyBound(t *testing.T) {
 		t.Fatalf("ByTokenHash: %v", err)
 	}
 
-	blueprint, err := usecase.NewSignupBlueprint("Doomed telegram household", "Ade", "SGD")
+	blueprint, err := usecase.NewSignupBlueprint("Doomed telegram household", "Ade", "SGD", "Asia/Singapore")
 	if err != nil {
 		t.Fatalf("NewSignupBlueprint: %v", err)
 	}

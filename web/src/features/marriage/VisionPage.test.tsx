@@ -5,19 +5,20 @@
 //
 // "Today" is faked to 2026-08-15 (GoalModal.test.tsx's own convention,
 // `toFake: ["Date"]` only, leaving every other timer real so
-// findBy*/waitFor's own polling still works) so currentVisionYear() -- and
-// therefore which GET this page fires and what year it renders in its own
-// hero -- is deterministic regardless of the real machine clock.
+// findBy*/waitFor's own polling still works) so the household's current year
+// -- and therefore which GET this page fires and what year it renders in its
+// own hero -- is deterministic regardless of the real machine clock.
 //
 // Two of the states below -- owner-only and load-error -- are the pair that
 // has shipped wrong three times already in this codebase (Bills, Budget,
 // Transactions; docs/LEARNING.md pattern 1's own entry), which is why both
 // get their own two-test pair here exactly as RetrosPage.test.tsx does, plus
 // the mutation check in this task's own report.
-import { fireEvent, screen, within } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { renderWithRouter } from "../../test/renderWithRouter";
 import { stubFetchRoutes, type RouteResponse } from "../../test/fetchStub";
+import { meRoute } from "../../test/meFixture";
 import { VisionPage } from "./VisionPage";
 import type { Vision, VisionMeasure, VisionPillar } from "./visionSchemas";
 import type { GoalsResponse } from "../money/goalSchemas";
@@ -48,9 +49,13 @@ beforeEach(() => {
   vi.setSystemTime(new Date("2026-08-15T12:00:00Z"));
 });
 
+const ORIGINAL_TZ = process.env.TZ;
+
 afterEach(() => {
   vi.useRealTimers();
   vi.unstubAllGlobals();
+  if (ORIGINAL_TZ === undefined) delete process.env.TZ;
+  else process.env.TZ = ORIGINAL_TZ;
 });
 
 function measureFixture(overrides: Partial<VisionMeasure> = {}): VisionMeasure {
@@ -338,5 +343,24 @@ describe("VisionPage", () => {
 
     expect(await screen.findByTestId("vision-load-error")).toHaveTextContent("Couldn't load this year's vision.");
     expect(screen.queryByTestId("vision-owner-only")).not.toBeInTheDocument();
+  });
+
+  // The page opens on "this year", and the year is the household's. On New
+  // Year's morning in Singapore it is still 31 December for a browser in Los
+  // Angeles, and for UTC.
+  it("opens on the household's year, whatever zone the browser is in", async () => {
+    process.env.TZ = "America/Los_Angeles";
+    vi.setSystemTime(new Date("2026-12-31T20:00:00Z"));
+    renderPage(visionFixture(), {
+      ...meRoute("Asia/Singapore"),
+      "GET /api/v1/marriage/vision?year=2027": {
+        status: 200,
+        body: { vision: visionFixture({ year: 2027, theme: "Build the house" }) },
+      },
+    });
+
+    const hero = await screen.findByTestId("vision-hero");
+    await waitFor(() => expect(hero).toHaveTextContent("2027 theme"));
+    expect(hero).toHaveTextContent("“Build the house”");
   });
 });

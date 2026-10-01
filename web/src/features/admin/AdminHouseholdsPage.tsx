@@ -19,6 +19,7 @@ import type {
 import {
   dateLabel,
   exactTimeLabel,
+  memberCountLabel,
   noMatchLabel,
   relativeTimeLabel,
   showingLabel,
@@ -321,7 +322,7 @@ function HouseholdRow({
       </td>
       <td className="hidden py-2 pr-3 md:table-cell">{household.familyName}</td>
       <td className="block pb-2 pr-3 text-muted md:table-cell md:py-2 md:text-ink">
-        <span className="md:hidden">{household.memberCount} members · </span>
+        <span className="md:hidden">{memberCountLabel(household.memberCount)} · </span>
         <span className="hidden md:inline tabular-nums">
           {household.memberCount}
         </span>

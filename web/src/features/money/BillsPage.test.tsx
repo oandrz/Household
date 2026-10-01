@@ -13,10 +13,11 @@
 // needs it) -- BudgetPage.test.tsx's own convention -- so "All caught up"
 // always names August and "24 Jul"/"20 Jul" are always in the past without
 // this file depending on the real calendar the test runner happens to have.
-import { fireEvent, screen, within } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { renderWithRouter } from "../../test/renderWithRouter";
 import { stubFetchRoutes, type RouteResponse } from "../../test/fetchStub";
+import { meRoute } from "../../test/meFixture";
 import { BillsPage } from "./BillsPage";
 import type { Bill, BillPayment, BillsResponse, BillsSummary } from "./billSchemas";
 
@@ -113,6 +114,9 @@ function billsFixture(
 
 function renderPage(response: BillsResponse, extraRoutes: Record<string, RouteResponse | RouteResponse[]> = {}) {
   const fetchMock = stubFetchRoutes({
+    // The page names "this month" in the household's zone, read off the me
+    // bundle. A test that cares which zone overrides this through extraRoutes.
+    ...meRoute("Asia/Singapore"),
     "GET /api/v1/currencies": CURRENCIES,
     "GET /api/v1/accounts": ACCOUNTS,
     "GET /api/v1/bills": { status: 200, body: response },
@@ -126,9 +130,13 @@ beforeEach(() => {
   vi.setSystemTime(new Date("2026-08-09T12:00:00Z"));
 });
 
+const ORIGINAL_TZ = process.env.TZ;
+
 afterEach(() => {
   vi.useRealTimers();
   vi.unstubAllGlobals();
+  if (ORIGINAL_TZ === undefined) delete process.env.TZ;
+  else process.env.TZ = ORIGINAL_TZ;
 });
 
 describe("BillsPage", () => {
@@ -310,6 +318,26 @@ describe("BillsPage", () => {
     expect(panel).toHaveTextContent("All caught up");
     expect(panel).toHaveTextContent("everything due in August is paid.");
     expect(panel).toHaveTextContent("Next bill: School fees, 15 Sep.");
+  });
+
+  // The two totals that raise this panel come from the server, which scopes
+  // "this month" to the household's month. The name beside them has to be
+  // that same month. At 23:00 UTC on 30 September it is 1 October for a
+  // household in Singapore, whatever the browser's own zone says, and
+  // whatever UTC says: the label used to imitate the server's UTC clock.
+  it("all caught up names the household's month, not the browser's and not UTC's", async () => {
+    process.env.TZ = "America/Los_Angeles";
+    vi.setSystemTime(new Date("2026-09-30T23:00:00Z"));
+    // Paid on the household's 1 October, so its next occurrence is November.
+    const paidBill = billFixture({ id: "b1", name: "SP utilities", nextDue: "2026-11-01", dueSoon: false, autopay: false });
+    const payment = paymentFixture({ id: "p1", billId: "b1", billName: "SP utilities", dueOn: "2026-10-01", paidOn: "2026-10-01", amountMinor: 38000 });
+    renderPage(
+      billsFixture([paidBill], [payment], { dueThisMonthMinor: 38000, paidSoFarMinor: 38000, billCount: 1 }),
+      meRoute("Asia/Singapore"),
+    );
+
+    const panel = await screen.findByTestId("bills-all-caught-up");
+    await waitFor(() => expect(panel).toHaveTextContent("everything due in October is paid."));
   });
 
   // dueThisMonthMinor only sums a bill whose next_due falls in the CURRENT

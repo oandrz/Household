@@ -33,7 +33,8 @@ func seedAccessFixture(t *testing.T) accessFixture {
 
 	newHousehold := func(name string) domain.Household {
 		h, err := households.Create(ctx, domain.Household{
-			Name: name, FamilyName: "Test",
+			Timezone: "UTC",
+			Name:     name, FamilyName: "Test",
 			PrimaryCurrency: "SGD", SecondaryCurrency: "IDR", ShowSecondaryCurrency: true,
 		})
 		if err != nil {

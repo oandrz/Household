@@ -1,10 +1,6 @@
-// today() (HoldingLotsPanel.tsx) must read the LOCAL calendar date rather than
-// converting through UTC. This repo has already shipped three bugs of exactly
-// that class -- f61407d ("stop refusing today's date east of UTC"), f17be2d
-// ("fix dateOnly, the third instance of one mistake") and the plan correction
-// behind both -- and AccountModal.test.tsx carries the same test for the same
-// reason. This was the fourth site with the hazard and the second with no
-// test; it shipped the bug, and a code review found it.
+// The panel's two date fields default to the household's today, read in the
+// household's own time zone and not the browser's (lib/householdDate.ts). The
+// last test pins that, with the browser deliberately in another zone.
 //
 // `toFake: ["Date"]` freezes only what `new Date()` returns, leaving setTimeout
 // alone, so the query client's own polling still resolves.
@@ -12,6 +8,7 @@ import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { renderWithRouter } from "../../test/renderWithRouter";
 import { stubFetchRoutes } from "../../test/fetchStub";
+import { meRoute } from "../../test/meFixture";
 import { HoldingLotsPanel } from "./HoldingLotsPanel";
 import type { Holding } from "./holdingSchemas";
 
@@ -82,9 +79,13 @@ function holdDeletesOpen(routes: Parameters<typeof stubFetchRoutes>[0]) {
   return { deletes, release: () => release() };
 }
 
+const ORIGINAL_TZ = process.env.TZ;
+
 afterEach(() => {
   vi.useRealTimers();
   vi.restoreAllMocks();
+  if (ORIGINAL_TZ === undefined) delete process.env.TZ;
+  else process.env.TZ = ORIGINAL_TZ;
 });
 
 describe("HoldingLotsPanel", () => {
@@ -122,16 +123,18 @@ describe("HoldingLotsPanel", () => {
     expect(network.deletes).toEqual(["/api/v1/holdings/holding-1/events/event-1"]);
   });
 
-  it("defaults both dates to the local calendar day, not the UTC one", async () => {
-    // Singapore is UTC+8, so at 16:00 UTC on 1 Jan it is already 2 Jan there.
-    // A household recording a purchase just after midnight would otherwise
-    // have it stamped the previous day -- and since ListLatestValuations
-    // orders by as_of, a price stamped a day early can be silently outranked.
-    process.env.TZ = "Asia/Singapore";
+  // QA ISSUE-002, the browser's half. The form's default date and the date
+  // the server accepts have to be the same day. Both are the household's
+  // today, so the browser's own zone must not come into it.
+  it("defaults both dates to the household's today, whatever zone the browser is in", async () => {
+    // 23:00 UTC on 30 September: 16:00 that day in Los Angeles, where the
+    // browser is, and 07:00 on 1 October in Singapore, where the household is.
+    process.env.TZ = "America/Los_Angeles";
     vi.useFakeTimers({ toFake: ["Date"] });
-    vi.setSystemTime(new Date("2026-01-01T16:00:00Z"));
+    vi.setSystemTime(new Date("2026-09-30T23:00:00Z"));
 
     stubFetchRoutes({
+      ...meRoute("Asia/Singapore"),
       "GET /api/v1/currencies": CURRENCIES,
       "GET /api/v1/holdings/holding-1/events": { status: 200, body: { events: [] } },
       "GET /api/v1/holdings/holding-1/valuations": { status: 200, body: { valuations: [] } },
@@ -139,9 +142,31 @@ describe("HoldingLotsPanel", () => {
 
     renderWithRouter(<HoldingLotsPanel holding={holdingFixture()} onClose={() => {}} />);
 
-    // The purchase date and the price date are separate inputs and both
-    // default from the same helper, so both are asserted.
-    expect(await screen.findByLabelText("On")).toHaveValue("2026-01-02");
-    expect(screen.getByLabelText("As of")).toHaveValue("2026-01-02");
+    // The purchase date and the price date are separate inputs, so both are
+    // asserted.
+    await waitFor(() => expect(screen.getByLabelText("On")).toHaveValue("2026-10-01"));
+    expect(screen.getByLabelText("As of")).toHaveValue("2026-10-01");
   });
+  // QA ISSUE-009. The unit is whatever the household typed, singular or
+  // plural, so no label may glue a letter or an article onto it: "grams" used
+  // to read "How many gramss", "What one grams was worth" and "Price per grams".
+  it.each(["gram", "grams"])(
+    "shows a unit called %s as a label, never bent into a sentence",
+    async (unit) => {
+      stubFetchRoutes({
+        ...meRoute("Asia/Singapore"),
+        "GET /api/v1/currencies": CURRENCIES,
+        "GET /api/v1/holdings/holding-1/events": { status: 200, body: { events: [] } },
+        "GET /api/v1/holdings/holding-1/valuations": { status: 200, body: { valuations: [] } },
+      });
+
+      renderWithRouter(<HoldingLotsPanel holding={{ ...holdingFixture(), unit }} onClose={() => {}} />);
+
+      expect(await screen.findByLabelText(`How many (${unit})`)).toBeInTheDocument();
+      expect(screen.getByLabelText("Price per unit (SGD)")).toBeInTheDocument();
+      expect(screen.getByText(/What one unit was worth on a given day\./)).toBeInTheDocument();
+      // The unit followed by an "s" it was not typed with is the old defect.
+      expect(document.body.textContent).not.toContain(`${unit}s`);
+    },
+  );
 });

@@ -68,6 +68,7 @@ function meFixture(role: "owner" | "limited"): Me {
       showSecondaryCurrency: false,
       secondaryCurrency: "",
       fxRateMode: "static",
+      timezone: "Asia/Singapore",
     },
     membership: {
       id: "m1",

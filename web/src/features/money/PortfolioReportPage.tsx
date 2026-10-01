@@ -23,6 +23,8 @@ import { useState } from "react";
 import { Link } from "@tanstack/react-router";
 import { PageContainer } from "../../components/PageContainer";
 import { useCurrencies } from "../auth/useAuth";
+import { useHouseholdZone } from "../auth/useHouseholdZone";
+import { todayIn } from "../../lib/householdDate";
 import { formatMoney } from "./formatMoney";
 import { HOLDING_REPORT_COPY, blankReasonCopy, periodHeading, priceAgeLabel } from "./holdingReportCopy";
 import { PeriodReturnChart } from "./PeriodReturnChart";
@@ -30,19 +32,6 @@ import { usePortfolioReport } from "./usePortfolioReport";
 import type { PeriodKind, PeriodReturn, ReportHolding, ReportPeriod } from "./holdingSchemas";
 
 const KINDS: PeriodKind[] = ["quarter", "half", "year"];
-
-// Local time, never toISOString(): that renders in UTC, so for the eight hours
-// a day this household is ahead of it every date would read as yesterday.
-// AccountModal.tsx and HoldingLotsPanel.tsx each carry their own copy of this
-// for the same reason -- three features' date handling deliberately not
-// coupled through one import.
-function today(): string {
-  const now = new Date();
-  const year = now.getFullYear();
-  const month = String(now.getMonth() + 1).padStart(2, "0");
-  const day = String(now.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-}
 
 export function PortfolioReportPage() {
   const [kind, setKind] = useState<PeriodKind>("quarter");
@@ -247,7 +236,9 @@ function ReportRow({
     );
   };
 
-  const age = priceAgeLabel(figures.closingPriceAsOf, today());
+  // The household's today, so that "priced yesterday" means yesterday by the
+  // same calendar the price was dated on.
+  const age = priceAgeLabel(figures.closingPriceAsOf, todayIn(useHouseholdZone()));
 
   return (
     <tr data-testid="report-row" data-period={period.label} className="border-t border-hairline align-top">

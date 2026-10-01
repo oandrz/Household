@@ -3,14 +3,18 @@
 // (useVision takes no `enabled` option, so the gate has to live where the
 // component is mounted or not, not inside the hook).
 import { screen, waitFor } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { renderWithRouter } from "../../test/renderWithRouter";
 import { stubFetchRoutes } from "../../test/fetchStub";
-import { currentVisionYear } from "../marriage/visionQueryKeys";
+import { meRoute } from "../../test/meFixture";
+import { yearIn } from "../../lib/householdDate";
 import type { Vision, VisionMeasure, VisionPillar } from "../marriage/visionSchemas";
 import { VisionCard } from "./VisionCard";
 
-const YEAR = currentVisionYear();
+// The component reads "this year" in the household's zone; so does the
+// expected value, so the two agree whatever day the suite runs on.
+const ZONE = "Asia/Singapore";
+const YEAR = yearIn(ZONE);
 
 function measureFixture(overrides: Partial<VisionMeasure> = {}): VisionMeasure {
   return {
@@ -53,10 +57,20 @@ function visionFixture(overrides: Partial<Vision> = {}): Vision {
 // the query is still in flight, which would pass for the wrong reason).
 function renderCard(vision: Vision, capture?: () => void) {
   const fetchMock = stubFetchRoutes({
+    ...meRoute(ZONE),
     [`GET /api/v1/marriage/vision?year=${YEAR}`]: { status: 200, body: { vision }, capture },
   });
   return { fetchMock, ...renderWithRouter(<VisionCard />) };
 }
+
+const ORIGINAL_TZ = process.env.TZ;
+
+afterEach(() => {
+  vi.useRealTimers();
+  vi.unstubAllGlobals();
+  if (ORIGINAL_TZ === undefined) delete process.env.TZ;
+  else process.env.TZ = ORIGINAL_TZ;
+});
 
 describe("VisionCard", () => {
   it("renders the theme, then one line per pillar showing its FIRST measure with live figures", async () => {
@@ -201,5 +215,24 @@ describe("VisionCard", () => {
 
     const card = await screen.findByTestId("vision-card");
     expect(card).toHaveAttribute("href", "/marriage/vision");
+  });
+
+  // The card shows "this year's" vision, and the year is the household's. On
+  // New Year's morning in Singapore that is 2027, while a browser in Los
+  // Angeles is still in 2026.
+  it("asks for the household's year, whatever zone the browser is in", async () => {
+    process.env.TZ = "America/Los_Angeles";
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-12-31T20:00:00Z"));
+    stubFetchRoutes({
+      ...meRoute("Asia/Singapore"),
+      "GET /api/v1/marriage/vision?year=2027": {
+        status: 200,
+        body: { vision: visionFixture({ year: 2027, theme: "Build the house" }) },
+      },
+    });
+    renderWithRouter(<VisionCard />);
+
+    expect(await screen.findByText(/Build the house/)).toBeInTheDocument();
   });
 });

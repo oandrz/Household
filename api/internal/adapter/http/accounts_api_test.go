@@ -264,8 +264,8 @@ func TestOwnerSeesTheTwelveMonthTrend(t *testing.T) {
 	env.mustCreateAccount(t, session, csrf, map[string]any{
 		"nickname": "DBS Everyday", "type": "cash",
 		"openingBalanceMinor": 824_055, "openingBalanceCurrency": "SGD",
-		// The first of the anchor's own month: usecase/account.go refuses an
-		// opening balance dated more than a day ahead of Clock.Now(), and the
+		// The first of the anchor's own month: AccountService refuses an
+		// opening balance dated after the household's today, and the
 		// assertions below need the account tracked from this month and no
 		// earlier.
 		"openingBalanceAsOf": thisMonth + "-01",

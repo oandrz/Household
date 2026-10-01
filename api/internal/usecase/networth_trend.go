@@ -121,10 +121,11 @@ func (s *AccountService) trend(
 			return nil, err
 		}
 		trackedFrom := startOfMonth(a.account.OpeningBalanceAsOf)
-		// AccountService.validate gives a full day of slack on this date, so a
-		// UTC+8 "today" can land in next month. The account is already in the
-		// headline regardless, so it belongs in the newest bar -- the same
-		// reason deltasByAccountMonth clamps a future-dated movement.
+		// An opening date can fall in a month after today's: the household's
+		// time zone was moved west after the account was written, or the row
+		// predates the stored zone. The account is already in the headline
+		// regardless, so it belongs in the newest bar -- the same reason
+		// deltasByAccountMonth clamps a future-dated movement.
 		if trackedFrom.After(current) {
 			trackedFrom = current
 		}
@@ -227,6 +228,10 @@ func changeBasisPoints(current, previous TrendPoint) *int64 {
 // the transaction date, so a next-month transaction is already inside the
 // anchor balance. Left in its own bucket, it would never be subtracted,
 // leaving every older bar wrong.
+//
+// A new transaction cannot be dated after today (domain.ErrDateInFuture),
+// but a stored one can be: it was written before that rule, or the
+// household's zone has moved west since. This fold is for those rows.
 func deltasByAccountMonth(
 	movements []AccountMonthMovement,
 	current time.Time,

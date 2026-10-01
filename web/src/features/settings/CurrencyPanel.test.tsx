@@ -5,8 +5,9 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { stubFetchRoutes } from "../../test/fetchStub";
-import type { Household, Me } from "../auth/schemas";
+import type { Me } from "../auth/schemas";
 import { CurrencyPanel } from "./CurrencyPanel";
+import type { HouseholdSettings } from "./useHousehold";
 
 const ME_URL = "/api/v1/auth/me";
 const HOUSEHOLD_URL = "/api/v1/household";
@@ -26,7 +27,7 @@ function currenciesFixture() {
   };
 }
 
-function householdFixture(overrides: Partial<Household> = {}): Household {
+function householdFixture(overrides: Partial<HouseholdSettings> = {}): HouseholdSettings {
   return {
     id: "h-1",
     name: "Andreas & Christine",
@@ -35,6 +36,8 @@ function householdFixture(overrides: Partial<Household> = {}): Household {
     showSecondaryCurrency: true,
     secondaryCurrency: "IDR",
     fxRateMode: "auto",
+    timezone: "Asia/Singapore",
+    primaryCurrencyLocked: false,
     ...overrides,
   };
 }
@@ -112,6 +115,63 @@ describe("CurrencyPanel", () => {
     });
   });
 
+  // QA ISSUE-012. The server refuses a currency change once the household
+  // holds investments. An owner used to find that out only after Save.
+  it("shows an owner the currency as locked, with the reason, instead of a field to edit", async () => {
+    const fetchMock = stubFetchRoutes({
+      [`GET ${ME_URL}`]: { status: 200, body: meFixture("owner") },
+      [`GET ${HOUSEHOLD_URL}`]: { status: 200, body: householdFixture({ primaryCurrencyLocked: true }) },
+      [`GET ${CURRENCIES_URL}`]: { status: 200, body: currenciesFixture() },
+    });
+    const { container } = renderPanel();
+
+    expect(await screen.findByText("SGD (S$)")).toBeInTheDocument();
+    expect(
+      screen.getByText("Can't be changed while you hold investments. Every holding records what it cost in this currency."),
+    ).toBeInTheDocument();
+    // No field and no Save for the currency: nothing on screen can send the
+    // request the server would refuse. The time zone's own Save stays.
+    expect(screen.queryByLabelText("Primary currency")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Save" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save time zone" })).toBeInTheDocument();
+    // The wording is still there, as text rather than as a label for a
+    // control that is no longer in the page.
+    expect(screen.getByText("Primary currency")).toBeInTheDocument();
+    container.querySelectorAll("label[for]").forEach((label) => {
+      expect(document.getElementById(label.getAttribute("for")!)).not.toBeNull();
+    });
+    expect(
+      fetchMock.mock.calls.some(([, init]) => (init?.method ?? "GET").toUpperCase() === "PATCH"),
+    ).toBe(false);
+  });
+
+  it("says nothing about a lock to a limited member, who cannot change the currency anyway", async () => {
+    stubFetchRoutes({
+      [`GET ${ME_URL}`]: { status: 200, body: meFixture("limited") },
+      // The server never sends true to a limited member. The flag is true here
+      // on purpose: with false, this test would pass whether or not the panel
+      // checks who is looking.
+      [`GET ${HOUSEHOLD_URL}`]: { status: 200, body: householdFixture({ primaryCurrencyLocked: true }) },
+      [`GET ${CURRENCIES_URL}`]: { status: 200, body: currenciesFixture() },
+    });
+    renderPanel();
+
+    await screen.findByText("SGD (S$)");
+    expect(screen.queryByText(/hold investments/)).not.toBeInTheDocument();
+  });
+
+  it("keeps the field for an owner whose household holds no investments", async () => {
+    stubFetchRoutes({
+      [`GET ${ME_URL}`]: { status: 200, body: meFixture("owner") },
+      [`GET ${HOUSEHOLD_URL}`]: { status: 200, body: householdFixture({ primaryCurrencyLocked: false }) },
+      [`GET ${CURRENCIES_URL}`]: { status: 200, body: currenciesFixture() },
+    });
+    renderPanel();
+
+    expect(await screen.findByLabelText("Primary currency")).toHaveValue("SGD");
+    expect(screen.queryByText(/hold investments/)).not.toBeInTheDocument();
+  });
+
   it("issues a PATCH toggling showSecondaryCurrency for an owner", async () => {
     const fetchMock = stubFetchRoutes({
       [`GET ${ME_URL}`]: { status: 200, body: meFixture("owner") },
@@ -149,6 +209,42 @@ describe("CurrencyPanel", () => {
     expect(screen.getByRole("switch", { name: "Show IDR equivalents" })).toBeDisabled();
   });
 
+  // Self-serve sign-up stores the primary currency as the second one too,
+  // because nothing lets a household choose a second currency yet.
+  it("offers no equivalents switch when the second currency is the primary one", async () => {
+    stubFetchRoutes({
+      [`GET ${ME_URL}`]: { status: 200, body: meFixture("owner") },
+      [`GET ${HOUSEHOLD_URL}`]: {
+        status: 200,
+        body: householdFixture({ primaryCurrency: "SGD", secondaryCurrency: "SGD", showSecondaryCurrency: false }),
+      },
+      [`GET ${CURRENCIES_URL}`]: { status: 200, body: currenciesFixture() },
+    });
+    renderPanel();
+
+    await screen.findByDisplayValue("SGD");
+    expect(screen.queryByText(/equivalents/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("switch", { name: /equivalents/ })).not.toBeInTheDocument();
+    expect(screen.getByText("Second currency")).toBeInTheDocument();
+    expect(screen.getByText("None set")).toBeInTheDocument();
+  });
+
+  it("offers no equivalents switch when no second currency is stored at all", async () => {
+    stubFetchRoutes({
+      [`GET ${ME_URL}`]: { status: 200, body: meFixture("owner") },
+      [`GET ${HOUSEHOLD_URL}`]: {
+        status: 200,
+        body: householdFixture({ primaryCurrency: "SGD", secondaryCurrency: "" }),
+      },
+      [`GET ${CURRENCIES_URL}`]: { status: 200, body: currenciesFixture() },
+    });
+    renderPanel();
+
+    await screen.findByDisplayValue("SGD");
+    expect(screen.queryByRole("switch", { name: /equivalents/ })).not.toBeInTheDocument();
+    expect(screen.getByText("None set")).toBeInTheDocument();
+  });
+
   it("lets an owner edit the primary currency and issues a matching PATCH", async () => {
     const fetchMock = stubFetchRoutes({
       [`GET ${ME_URL}`]: { status: 200, body: meFixture("owner") },
@@ -166,7 +262,7 @@ describe("CurrencyPanel", () => {
     // non-owner's label became a plain span.
     expect(screen.getByLabelText("Primary currency")).toBe(input);
     fireEvent.change(input, { target: { value: "usd" } });
-    fireEvent.click(screen.getByRole("button", { name: /save/i }));
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
     await waitFor(() => {
       const call = fetchMock.mock.calls.find(
@@ -189,7 +285,7 @@ describe("CurrencyPanel", () => {
     renderPanel();
 
     const input = await screen.findByDisplayValue("SGD");
-    const save = screen.getByRole("button", { name: /save/i });
+    const save = screen.getByRole("button", { name: "Save" });
 
     // Unchanged from the saved value.
     expect(save).toBeDisabled();
@@ -217,7 +313,7 @@ describe("CurrencyPanel", () => {
 
     const input = await screen.findByDisplayValue("SGD");
     fireEvent.change(input, { target: { value: "ZZZ" } });
-    fireEvent.click(screen.getByRole("button", { name: /save/i }));
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
     expect(await screen.findByText("That currency code is not valid.")).toBeInTheDocument();
     // The rejected attempt stays on screen for the owner to correct, rather

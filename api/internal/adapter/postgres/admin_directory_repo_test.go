@@ -44,7 +44,8 @@ func newDirectoryFixture(t *testing.T) *directoryFixture {
 func (f *directoryFixture) household(t *testing.T, name, family string) domain.Household {
 	t.Helper()
 	h, err := f.households.Create(context.Background(), domain.Household{
-		Name: name, FamilyName: family, PrimaryCurrency: "SGD", SecondaryCurrency: "IDR",
+		Timezone: "UTC",
+		Name:     name, FamilyName: family, PrimaryCurrency: "SGD", SecondaryCurrency: "IDR",
 	})
 	if err != nil {
 		t.Fatalf("create household %q: %v", name, err)
