@@ -29,7 +29,9 @@ func ParseMood(n int) (Mood, error) {
 // stays available afterwards. With both months already covered there is
 // nothing to start, and the page opens what exists instead.
 //
-// today is a parameter, never time.Now() reached for in here: every other
+// today is the household's calendar day (TodayIn), so "previous" and
+// "current" are the household's months and not the server's. It is a
+// parameter, never time.Now() reached for in here: every other
 // date rule in this codebase takes its clock from the caller, which is what
 // makes them testable without freezing time globally.
 func StartableMonth(today time.Time, currentExists, previousExists bool) (time.Time, bool) {

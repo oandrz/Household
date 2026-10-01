@@ -76,13 +76,15 @@ func (p Period) Index() int       { return p.index }
 // monthsEach is how many months one period of this kind spans.
 func (p Period) monthsEach() int { return 12 / periodsPerYear[p.kind] }
 
-// Start is the first day of the period, at midnight UTC.
+// Start is the first day of the period, stamped midnight UTC.
 //
-// UTC is the same normalisation usecase/budget.go's startOfMonth applies,
-// for the same reason: no household in Hearth stores a timezone
-// (usecase.AccountService.validate and the postgres adapter's startOfMonth
-// both record this) -- a caller-local boundary would put the same trade in
-// different quarters depending on who opened the page.
+// A period boundary is a calendar date, not an instant, and "midnight UTC"
+// is only how a date is written down here, the same shape usecase/budget.go's
+// startOfMonth and TodayIn use. Which period is the CURRENT one depends on
+// the household's time zone, and that is decided before this type is reached:
+// callers pass the household's day (TodayIn). The boundary must never depend
+// on who opened the page: a caller-local boundary would put the same trade
+// in different quarters for two members of one household.
 func (p Period) Start() time.Time {
 	firstMonth := time.Month((p.index-1)*p.monthsEach() + 1)
 	return time.Date(p.year, firstMonth, 1, 0, 0, 0, 0, time.UTC)
@@ -124,7 +126,9 @@ func (p Period) Contains(t time.Time) bool {
 
 // IsCurrent says whether the household is still living in this period, which
 // is what lets a screen label it "to date" rather than presenting a
-// half-finished quarter as a closed one.
+// half-finished quarter as a closed one. today is the household's calendar
+// day (TodayIn), not the server's clock: on the first morning of a quarter
+// east of Greenwich the two are in different quarters.
 func (p Period) IsCurrent(today time.Time) bool { return p.Contains(today) }
 
 // Label is the period as the owner would say it out loud.

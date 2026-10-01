@@ -619,11 +619,11 @@ func (s *BudgetService) History(ctx context.Context, householdID string, month, 
 
 // startOfMonth reads t.Year() and t.Month() in t's own location, without
 // converting to UTC first, and returns midnight UTC on the first of that
-// month. Every caller passes a UTC-located time today: the HTTP handlers
-// via time.Parse and clock.System, and the daily digest because
-// NudgeService.RunOnce re-anchors the local calendar date to UTC midnight
-// before Compose runs -- that step, not this one, is where the local zone
-// matters (see RunOnce's own comment).
+// month. Every caller passes a date stamped midnight UTC: the HTTP handlers
+// via time.Parse and Scope.Today (the household's calendar day,
+// domain.TodayIn), and the daily digest because NudgeService.RunOnce
+// re-anchors the local calendar date to UTC midnight before Compose runs.
+// Those two steps, not this one, are where a time zone matters.
 // It applies the same normalisation as budgetKey (the fakeBudgetRepo
 // double) and the postgres adapter's startOfMonth -- Budget.Month is
 // documented as "any instant in the month", so comparing two months for
