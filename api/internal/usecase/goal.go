@@ -441,13 +441,22 @@ func (s *GoalService) SetArchived(ctx context.Context, householdID, goalID strin
 // household_id check on the contribution side. Get(...) is the barrier: a
 // goal outside THIS household reads as domain.ErrNotFound, same as one
 // that doesn't exist, refused before anything is written.
-func (s *GoalService) AddContribution(ctx context.Context, in NewContribution) (domain.GoalContribution, error) {
+//
+// in.OccurredOn may not be after today, the household's calendar day: a
+// contribution is a recorded fact (refuseFutureDate). The goal's target
+// month is a plan and is not checked. The two contributions the server
+// writes itself (a new goal's starting balance and a budget rollover) are
+// dated today by construction, so they need no check.
+func (s *GoalService) AddContribution(ctx context.Context, in NewContribution, today time.Time) (domain.GoalContribution, error) {
 	if in.AmountMinor == 0 {
 		return domain.GoalContribution{}, domain.ErrContributionAmountZero
 	}
 	// A contribution may be negative (money taken back out), and a goal's
 	// total is the sum of them, so the limit applies on both sides of zero.
 	if err := domain.CheckAmountWithinLimit(in.AmountMinor); err != nil {
+		return domain.GoalContribution{}, err
+	}
+	if err := refuseFutureDate(in.OccurredOn, today); err != nil {
 		return domain.GoalContribution{}, err
 	}
 

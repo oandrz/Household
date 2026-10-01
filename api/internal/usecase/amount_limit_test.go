@@ -250,7 +250,7 @@ func TestGoalAddContributionRefusesAnAmountPastTheCeilingOnEitherSide(t *testing
 	for _, amount := range []int64{onePastTheCeiling, -onePastTheCeiling} {
 		_, err := f.svc.AddContribution(ctx, usecase.NewContribution{
 			HouseholdID: "house-1", GoalID: goal.ID, AmountMinor: amount, OccurredOn: createdOn,
-		})
+		}, createdOn)
 		if !errors.Is(err, domain.ErrAmountTooLarge) {
 			t.Fatalf("contribution %d = %v, want ErrAmountTooLarge", amount, err)
 		}

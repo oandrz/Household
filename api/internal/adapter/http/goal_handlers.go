@@ -357,7 +357,7 @@ func handleAddGoalContribution(deps Deps) http.HandlerFunc {
 			AmountMinor: req.AmountMinor,
 			OccurredOn:  occurredOn,
 			Note:        req.Note,
-		})
+		}, scope.Today)
 		if err != nil {
 			MapDomainError(w, r, err)
 			return
