@@ -136,7 +136,7 @@ export const BUDGET_COPY = {
   // creating a category with a name an archived row already holds 409s on
   // categories_household_id_name_key). Saving restores it instead of
   // creating a duplicate name the database would refuse anyway.
-  willRestore: "Archived -- saving will restore it instead of creating a duplicate.",
+  willRestore: "Archived — saving will restore it instead of creating a duplicate.",
   // 409 CATEGORY_NAME_TAKEN's server message is generic ("A category with
   // that name already exists.", no name in `details`) -- named here from
   // the name the modal itself just attempted, which it already knows

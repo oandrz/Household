@@ -30,7 +30,7 @@ export const RETRO_COPY = {
 
   emptyHeadline: "No retros yet",
   emptyBody:
-    "A monthly check-in for just the two of you -- what went well, what was hard, and what to try next.",
+    "A monthly check-in for just the two of you — what went well, what was hard, and what to try next.",
   // Distinct copy from the header's own startRetro() button above, both of
   // which render together the first time a household has zero retros and a
   // startable month -- BillsPage.tsx's own "+ Add bill"/"Create your first
