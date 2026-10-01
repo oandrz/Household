@@ -20,7 +20,8 @@ func TestInviteLifecycle(t *testing.T) {
 	invites := postgres.NewInviteRepo(db)
 
 	h, err := households.Create(ctx, domain.Household{
-		Name: "Andreas & Christine", FamilyName: "Oentoro",
+		Timezone: "UTC",
+		Name:     "Andreas & Christine", FamilyName: "Oentoro",
 		PrimaryCurrency: "SGD", SecondaryCurrency: "IDR", ShowSecondaryCurrency: true,
 	})
 	if err != nil {
@@ -84,7 +85,8 @@ func TestInviteAcceptCreatesUserAndMembershipAtomically(t *testing.T) {
 	invites := postgres.NewInviteRepo(db)
 
 	h, err := households.Create(ctx, domain.Household{
-		Name: "Andreas & Christine", FamilyName: "Oentoro",
+		Timezone: "UTC",
+		Name:     "Andreas & Christine", FamilyName: "Oentoro",
 		PrimaryCurrency: "SGD", SecondaryCurrency: "IDR", ShowSecondaryCurrency: true,
 	})
 	if err != nil {
@@ -147,7 +149,8 @@ func TestInviteAcceptIsSingleUse(t *testing.T) {
 	invites := postgres.NewInviteRepo(db)
 
 	h, err := households.Create(ctx, domain.Household{
-		Name: "Andreas & Christine", FamilyName: "Oentoro",
+		Timezone: "UTC",
+		Name:     "Andreas & Christine", FamilyName: "Oentoro",
 		PrimaryCurrency: "SGD", SecondaryCurrency: "IDR", ShowSecondaryCurrency: true,
 	})
 	if err != nil {
@@ -194,7 +197,8 @@ func TestInviteAcceptRollsBackOnMembershipConstraintViolation(t *testing.T) {
 	invites := postgres.NewInviteRepo(db)
 
 	h, err := households.Create(ctx, domain.Household{
-		Name: "Andreas & Christine", FamilyName: "Oentoro",
+		Timezone: "UTC",
+		Name:     "Andreas & Christine", FamilyName: "Oentoro",
 		PrimaryCurrency: "SGD", SecondaryCurrency: "IDR", ShowSecondaryCurrency: true,
 	})
 	if err != nil {
@@ -246,7 +250,8 @@ func TestLiveInviteForEmail(t *testing.T) {
 	invites := postgres.NewInviteRepo(db)
 
 	h, err := households.Create(ctx, domain.Household{
-		Name: "Andreas & Christine", FamilyName: "Oentoro",
+		Timezone: "UTC",
+		Name:     "Andreas & Christine", FamilyName: "Oentoro",
 		PrimaryCurrency: "SGD", SecondaryCurrency: "IDR", ShowSecondaryCurrency: true,
 	})
 	if err != nil {
@@ -279,7 +284,8 @@ func TestLiveInviteForEmail(t *testing.T) {
 
 	// A different household's invite for the same address must not surface.
 	h2, err := households.Create(ctx, domain.Household{
-		Name: "A Different Household", FamilyName: "Someone Else",
+		Timezone: "UTC",
+		Name:     "A Different Household", FamilyName: "Someone Else",
 		PrimaryCurrency: "SGD", SecondaryCurrency: "IDR", ShowSecondaryCurrency: true,
 	})
 	if err != nil {
@@ -321,7 +327,8 @@ func countUsersByEmail(t *testing.T, db *postgres.DB, email string) int {
 func createHouseholdForInviteTest(t *testing.T, households *postgres.HouseholdRepo, familyName string) domain.Household {
 	t.Helper()
 	h, err := households.Create(context.Background(), domain.Household{
-		Name: familyName + " household", FamilyName: familyName,
+		Timezone: "UTC",
+		Name:     familyName + " household", FamilyName: familyName,
 		PrimaryCurrency: "SGD", SecondaryCurrency: "IDR", ShowSecondaryCurrency: true,
 	})
 	if err != nil {
@@ -484,7 +491,8 @@ func newInviteTestHousehold(t *testing.T) (*postgres.DB, inviteTestHousehold) {
 	ctx := context.Background()
 
 	h, err := postgres.NewHouseholdRepo(db).Create(ctx, domain.Household{
-		Name: "Andreas & Christine", FamilyName: "Oentoro",
+		Timezone: "UTC",
+		Name:     "Andreas & Christine", FamilyName: "Oentoro",
 		PrimaryCurrency: "SGD", SecondaryCurrency: "IDR", ShowSecondaryCurrency: true,
 	})
 	if err != nil {

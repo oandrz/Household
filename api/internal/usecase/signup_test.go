@@ -415,7 +415,7 @@ func TestSignupComplete(t *testing.T) {
 		f := newSignupFixture(t)
 		token := f.issueSignup(t, "founder@example.test", f.clock.Now().Add(usecase.SignupTTL))
 
-		got, err := f.svc.Complete(context.Background(), token, "Ade & Kris", "Ade", "SGD", "a-long-enough-password")
+		got, err := f.svc.Complete(context.Background(), token, "Ade & Kris", "Ade", "SGD", "Asia/Singapore", "a-long-enough-password")
 		if err != nil {
 			t.Fatalf("Complete: %v", err)
 		}
@@ -438,7 +438,7 @@ func TestSignupComplete(t *testing.T) {
 	t.Run("the password is hashed, never stored raw", func(t *testing.T) {
 		f := newSignupFixture(t)
 		token := f.issueSignup(t, "founder@example.test", f.clock.Now().Add(usecase.SignupTTL))
-		if _, err := f.svc.Complete(context.Background(), token, "Ade & Kris", "Ade", "SGD", "a-long-enough-password"); err != nil {
+		if _, err := f.svc.Complete(context.Background(), token, "Ade & Kris", "Ade", "SGD", "Asia/Singapore", "a-long-enough-password"); err != nil {
 			t.Fatalf("Complete: %v", err)
 		}
 		if got := f.signups.lastProvisionPasswordHash(); got != "hashed:a-long-enough-password" {
@@ -449,7 +449,7 @@ func TestSignupComplete(t *testing.T) {
 	t.Run("a short password is refused before anything is written", func(t *testing.T) {
 		f := newSignupFixture(t)
 		token := f.issueSignup(t, "founder@example.test", f.clock.Now().Add(usecase.SignupTTL))
-		if _, err := f.svc.Complete(context.Background(), token, "Ade & Kris", "Ade", "SGD", "short"); !errors.Is(err, usecase.ErrPasswordTooShort) {
+		if _, err := f.svc.Complete(context.Background(), token, "Ade & Kris", "Ade", "SGD", "Asia/Singapore", "short"); !errors.Is(err, usecase.ErrPasswordTooShort) {
 			t.Fatalf("error = %v, want ErrPasswordTooShort", err)
 		}
 		if f.signups.provisionCalls() != 0 {
@@ -460,7 +460,7 @@ func TestSignupComplete(t *testing.T) {
 	t.Run("a blank household name is refused before anything is written", func(t *testing.T) {
 		f := newSignupFixture(t)
 		token := f.issueSignup(t, "founder@example.test", f.clock.Now().Add(usecase.SignupTTL))
-		if _, err := f.svc.Complete(context.Background(), token, "   ", "Ade", "SGD", "a-long-enough-password"); !errors.Is(err, usecase.ErrHouseholdNameRequired) {
+		if _, err := f.svc.Complete(context.Background(), token, "   ", "Ade", "SGD", "Asia/Singapore", "a-long-enough-password"); !errors.Is(err, usecase.ErrHouseholdNameRequired) {
 			t.Fatalf("error = %v, want ErrHouseholdNameRequired", err)
 		}
 		if f.signups.provisionCalls() != 0 {
@@ -471,7 +471,7 @@ func TestSignupComplete(t *testing.T) {
 	t.Run("an unknown currency is refused before anything is written", func(t *testing.T) {
 		f := newSignupFixture(t)
 		token := f.issueSignup(t, "founder@example.test", f.clock.Now().Add(usecase.SignupTTL))
-		if _, err := f.svc.Complete(context.Background(), token, "Ade & Kris", "Ade", "ZZZ", "a-long-enough-password"); !errors.Is(err, domain.ErrInvalidMoney) {
+		if _, err := f.svc.Complete(context.Background(), token, "Ade & Kris", "Ade", "ZZZ", "Asia/Singapore", "a-long-enough-password"); !errors.Is(err, domain.ErrInvalidMoney) {
 			t.Fatalf("error = %v, want domain.ErrInvalidMoney", err)
 		}
 		if f.signups.provisionCalls() != 0 {
@@ -488,7 +488,7 @@ func TestSignupComplete(t *testing.T) {
 		// it through the same domain.SelectableCurrencies gate GET
 		// /api/v1/currencies filters through, or a client posting directly
 		// provisions a household where every amount renders 100x wrong.
-		if _, err := f.svc.Complete(context.Background(), token, "Ade & Kris", "Ade", "JPY", "a-long-enough-password"); !errors.Is(err, domain.ErrInvalidMoney) {
+		if _, err := f.svc.Complete(context.Background(), token, "Ade & Kris", "Ade", "JPY", "Asia/Singapore", "a-long-enough-password"); !errors.Is(err, domain.ErrInvalidMoney) {
 			t.Fatalf("error = %v, want domain.ErrInvalidMoney", err)
 		}
 		if f.signups.provisionCalls() != 0 {
@@ -500,7 +500,7 @@ func TestSignupComplete(t *testing.T) {
 		f := newSignupFixture(t)
 		token := f.issueSignup(t, "done@example.test", f.clock.Now().Add(usecase.SignupTTL))
 		f.signups.markConsumed(f.tokens.HashToken(token), f.clock.Now())
-		if _, err := f.svc.Complete(context.Background(), token, "Ade & Kris", "Ade", "SGD", "a-long-enough-password"); !errors.Is(err, usecase.ErrSignupAlreadyUsed) {
+		if _, err := f.svc.Complete(context.Background(), token, "Ade & Kris", "Ade", "SGD", "Asia/Singapore", "a-long-enough-password"); !errors.Is(err, usecase.ErrSignupAlreadyUsed) {
 			t.Fatalf("error = %v, want ErrSignupAlreadyUsed", err)
 		}
 	})
@@ -512,7 +512,7 @@ func TestSignupComplete(t *testing.T) {
 		f := newSignupFixture(t)
 		token := f.issueSignup(t, "racer@example.test", f.clock.Now().Add(usecase.SignupTTL))
 		f.signups.failNextProvision(domain.ErrTokenExpired)
-		if _, err := f.svc.Complete(context.Background(), token, "Ade & Kris", "Ade", "SGD", "a-long-enough-password"); !errors.Is(err, domain.ErrTokenExpired) {
+		if _, err := f.svc.Complete(context.Background(), token, "Ade & Kris", "Ade", "SGD", "Asia/Singapore", "a-long-enough-password"); !errors.Is(err, domain.ErrTokenExpired) {
 			t.Fatalf("error = %v, want domain.ErrTokenExpired", err)
 		}
 		if f.sessions.count() != 0 {

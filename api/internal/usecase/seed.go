@@ -156,7 +156,9 @@ func ensureHouseholdAndAndreas(ctx context.Context, d SeedDeps) (domain.Househol
 		return domain.Household{}, "", fmt.Errorf("check for existing seed: %w", err)
 	}
 
-	blueprint, err := NewSignupBlueprint(householdName, "Andreas", "SGD")
+	// Asia/Singapore because the design's household lives there, the same
+	// reason its currency is SGD.
+	blueprint, err := NewSignupBlueprint(householdName, "Andreas", "SGD", "Asia/Singapore")
 	if err != nil {
 		return domain.Household{}, "", fmt.Errorf("build the seed blueprint: %w", err)
 	}

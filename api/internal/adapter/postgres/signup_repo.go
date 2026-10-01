@@ -137,6 +137,7 @@ func (r *SignupRepo) Provision(ctx context.Context, signupID, passwordHash strin
 		PrimaryCurrency:       b.PrimaryCurrency,
 		ShowSecondaryCurrency: b.ShowSecondaryCurrency,
 		SecondaryCurrency:     b.SecondaryCurrency,
+		Timezone:              b.Timezone,
 	})
 	if err != nil {
 		return usecase.ProvisionedHousehold{}, translate(err, "create household for signup")

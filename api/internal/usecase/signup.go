@@ -333,13 +333,13 @@ func checkSignupLive(details SignupDetails, now time.Time) error {
 // SignIn and InviteService.Accept use, so it's indistinguishable from
 // theirs.
 func (s *SignupService) Complete(ctx context.Context, token, householdName, displayName,
-	currency, password string) (SignInResult, error) {
+	currency, timezone, password string) (SignInResult, error) {
 	now := s.d.Clock.Now()
 
 	if err := validatePassword(password); err != nil {
 		return SignInResult{}, err
 	}
-	blueprint, err := NewSignupBlueprint(householdName, displayName, currency)
+	blueprint, err := NewSignupBlueprint(householdName, displayName, currency, timezone)
 	if err != nil {
 		return SignInResult{}, err
 	}

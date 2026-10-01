@@ -416,6 +416,12 @@ var domainErrorResponses = []domainErrorResponse{
 		message:   "That FX rate mode is not valid.",
 	},
 	{
+		sentinels: []error{domain.ErrInvalidTimezone},
+		status:    http.StatusUnprocessableEntity,
+		code:      "INVALID_TIMEZONE",
+		message:   "That time zone is not recognised.",
+	},
+	{
 		// 502 rather than 500: the failure is upstream of this service, not
 		// a bug in it -- though not always "go look at Mailpit, not here":
 		// a stray path segment in MAILPIT_API_URL surfaces as this same

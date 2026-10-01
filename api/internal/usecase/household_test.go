@@ -271,10 +271,11 @@ func TestUpdatePersistsEveryFieldItIsGiven(t *testing.T) {
 		ShowSecondaryCurrency: !current.ShowSecondaryCurrency,
 		SecondaryCurrency:     "EUR",
 		FXRateMode:            "manual",
+		Timezone:              "America/Sao_Paulo",
 	}
 	if want.Name == current.Name || want.FamilyName == current.FamilyName ||
 		want.PrimaryCurrency == current.PrimaryCurrency || want.SecondaryCurrency == current.SecondaryCurrency ||
-		want.FXRateMode == current.FXRateMode {
+		want.FXRateMode == current.FXRateMode || want.Timezone == current.Timezone {
 		t.Fatal("test setup bug: every field must differ from the seeded value to prove Update didn't drop it")
 	}
 
@@ -379,5 +380,33 @@ func TestThePrimaryCurrencyStillChangesWhenNothingIsHeld(t *testing.T) {
 	changed.PrimaryCurrency = "USD"
 	if _, err := f.householdSvc.Update(ctx, changed); err != nil {
 		t.Fatalf("Update: %v", err)
+	}
+}
+
+// "" and "Local" are the two names Go's own loader accepts and Hearth must
+// not: one loads as UTC, the other as the server's zone.
+func TestUpdateRefusesATimezoneItCannotLoadAndKeepsTheStoredOne(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+
+	current, err := f.householdSvc.Get(ctx, f.householdID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+
+	for _, zone := range []string{"", "Local", "Mars/Olympus_Mons"} {
+		bad := current
+		bad.Timezone = zone
+		if _, err := f.householdSvc.Update(ctx, bad); !errors.Is(err, domain.ErrInvalidTimezone) {
+			t.Fatalf("Update(timezone %q) error = %v, want domain.ErrInvalidTimezone", zone, err)
+		}
+	}
+
+	fetched, err := f.householdSvc.Get(ctx, f.householdID)
+	if err != nil {
+		t.Fatalf("Get after the refused updates: %v", err)
+	}
+	if fetched.Timezone != current.Timezone {
+		t.Fatalf("Timezone = %q after three refused updates, want %q unchanged", fetched.Timezone, current.Timezone)
 	}
 }

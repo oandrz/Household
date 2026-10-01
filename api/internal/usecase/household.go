@@ -78,6 +78,10 @@ func (s *HouseholdService) Get(ctx context.Context, householdID string) (domain.
 // FXRateMode gets the same treatment for the same reason: the database's own
 // CHECK (fx_rate_mode IN ('auto', 'manual')) would otherwise turn a bad value
 // into an unmapped 500.
+//
+// Timezone must be a zone domain.ParseTimezone can load. Changing it rewrites
+// no stored date: it only changes which day counts as "today" from the next
+// request on.
 func (s *HouseholdService) Update(ctx context.Context, h domain.Household) (domain.Household, error) {
 	primary, err := normalizeCurrency(h.PrimaryCurrency)
 	if err != nil {
@@ -94,6 +98,9 @@ func (s *HouseholdService) Update(ctx context.Context, h domain.Household) (doma
 	case "auto", "manual":
 	default:
 		return domain.Household{}, ErrInvalidFXRateMode
+	}
+	if _, err := domain.ParseTimezone(h.Timezone); err != nil {
+		return domain.Household{}, err
 	}
 	h.PrimaryCurrency = primary
 	h.SecondaryCurrency = secondary

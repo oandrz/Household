@@ -18,7 +18,9 @@ type HouseholdRepository interface {
 	// column defaults: a self-serve household needs different values than
 	// Seed's. h.ID is ignored (the database assigns it), and h.FXRateMode
 	// is ignored (the column default 'auto' is the only value the CHECK
-	// constraint makes safe to assume at creation time).
+	// constraint makes safe to assume at creation time). h.Timezone is
+	// written as given: validate it with domain.ParseTimezone first, as
+	// NewSignupBlueprint does. An empty one is refused by the database.
 	Create(ctx context.Context, h domain.Household) (domain.Household, error)
 }
 

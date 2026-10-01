@@ -12,6 +12,12 @@ import (
 	"os/signal"
 	"syscall"
 	"time"
+	// The zone database, compiled into the binary. Every authenticated
+	// request loads the household's time zone by name; on an image with no
+	// zoneinfo files that load fails and the request is a 500. Don't remove
+	// this because the tests pass without it: a developer's machine has the
+	// files, a minimal container may not.
+	_ "time/tzdata"
 
 	"github.com/andreasoentoro/hearth/api/internal/adapter/clock"
 	"github.com/andreasoentoro/hearth/api/internal/adapter/crypto"

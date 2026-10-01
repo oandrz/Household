@@ -313,6 +313,7 @@ type householdResponse struct {
 	ShowSecondaryCurrency bool   `json:"showSecondaryCurrency"`
 	SecondaryCurrency     string `json:"secondaryCurrency"`
 	FXRateMode            string `json:"fxRateMode"`
+	Timezone              string `json:"timezone"`
 }
 
 func (env *testEnv) getHousehold(t *testing.T, session *http.Cookie) householdResponse {
@@ -343,6 +344,7 @@ func TestUpdateHouseholdIsARealPatch(t *testing.T) {
 		rec := env.authed(t, http.MethodPatch, "/api/v1/household", map[string]any{
 			"name": "The Oentoros", "familyName": "Oentoro", "primaryCurrency": "SGD",
 			"showSecondaryCurrency": false, "secondaryCurrency": "IDR", "fxRateMode": "manual",
+			"timezone": "Pacific/Auckland",
 		}, session, csrf)
 		if rec.Code != http.StatusOK {
 			t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
@@ -352,7 +354,8 @@ func TestUpdateHouseholdIsARealPatch(t *testing.T) {
 			t.Fatalf("decode: %v (body = %s)", err, rec.Body.String())
 		}
 		if got.Name != "The Oentoros" || got.FamilyName != "Oentoro" || got.PrimaryCurrency != "SGD" ||
-			got.ShowSecondaryCurrency || got.SecondaryCurrency != "IDR" || got.FXRateMode != "manual" {
+			got.ShowSecondaryCurrency || got.SecondaryCurrency != "IDR" || got.FXRateMode != "manual" ||
+			got.Timezone != "Pacific/Auckland" {
 			t.Fatalf("household = %+v, want every field updated to what was sent", got)
 		}
 	})
@@ -380,7 +383,8 @@ func TestUpdateHouseholdIsARealPatch(t *testing.T) {
 			got.PrimaryCurrency != before.PrimaryCurrency ||
 			got.ShowSecondaryCurrency != before.ShowSecondaryCurrency ||
 			got.SecondaryCurrency != before.SecondaryCurrency ||
-			got.FXRateMode != before.FXRateMode {
+			got.FXRateMode != before.FXRateMode ||
+			got.Timezone != before.Timezone {
 			t.Fatalf("PATCHing only familyName changed other fields: before = %+v, after = %+v", before, got)
 		}
 	})
@@ -398,6 +402,37 @@ func TestUpdateHouseholdIsARealPatch(t *testing.T) {
 		rec := env.authed(t, http.MethodPatch, "/api/v1/household",
 			map[string]any{"fxRateMode": "weekly"}, session, csrf)
 		assertErrorResponse(t, rec, http.StatusUnprocessableEntity, "INVALID_FX_RATE_MODE")
+	})
+
+	// "" and "Local" are in the list on purpose: Go loads both without an
+	// error (as UTC, and as the server's own zone), so only an explicit
+	// refusal keeps them out of the column.
+	t.Run("a time zone that is not an IANA name reports 422 and changes nothing", func(t *testing.T) {
+		before := env.getHousehold(t, session)
+		for _, zone := range []string{"", "Local", "Mars/Olympus_Mons", "+08:00"} {
+			rec := env.authed(t, http.MethodPatch, "/api/v1/household",
+				map[string]any{"timezone": zone}, session, csrf)
+			assertErrorResponse(t, rec, http.StatusUnprocessableEntity, "INVALID_TIMEZONE")
+		}
+		if after := env.getHousehold(t, session); after.Timezone != before.Timezone {
+			t.Fatalf("timezone = %q after four refused writes, want %q unchanged", after.Timezone, before.Timezone)
+		}
+	})
+
+	t.Run("the me bundle carries the time zone the frontend computes today in", func(t *testing.T) {
+		rec := env.authedGet(t, "/api/v1/auth/me", session)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("GET /auth/me: status = %d, body = %s", rec.Code, rec.Body.String())
+		}
+		var me struct {
+			Household householdResponse `json:"household"`
+		}
+		if err := json.NewDecoder(rec.Body).Decode(&me); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		if want := env.getHousehold(t, session).Timezone; me.Household.Timezone != want || want == "" {
+			t.Fatalf("me.household.timezone = %q, GET /household says %q", me.Household.Timezone, want)
+		}
 	})
 }
 

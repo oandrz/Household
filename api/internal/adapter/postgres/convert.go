@@ -149,7 +149,7 @@ func toStoredUser(id pgtype.UUID, email, passwordHash *string, displayName, avat
 }
 
 func toDomainHousehold(id pgtype.UUID, name, familyName, primaryCurrency string,
-	showSecondaryCurrency bool, secondaryCurrency, fxRateMode string) domain.Household {
+	showSecondaryCurrency bool, secondaryCurrency, fxRateMode, timezone string) domain.Household {
 	return domain.Household{
 		ID:                    uuidToString(id),
 		Name:                  name,
@@ -158,6 +158,7 @@ func toDomainHousehold(id pgtype.UUID, name, familyName, primaryCurrency string,
 		ShowSecondaryCurrency: showSecondaryCurrency,
 		SecondaryCurrency:     secondaryCurrency,
 		FXRateMode:            fxRateMode,
+		Timezone:              timezone,
 	}
 }
 

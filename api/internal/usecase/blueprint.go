@@ -34,10 +34,12 @@ type HouseholdBlueprint struct {
 	PrimaryCurrency       string
 	SecondaryCurrency     string
 	ShowSecondaryCurrency bool
-	OwnerDisplayName      string
-	OwnerRole             domain.Role
-	OwnerCapabilities     domain.Capabilities
-	Notifications         NotificationPreferences
+	// Timezone is the IANA zone the household keeps its calendar in.
+	Timezone          string
+	OwnerDisplayName  string
+	OwnerRole         domain.Role
+	OwnerCapabilities domain.Capabilities
+	Notifications     NotificationPreferences
 }
 
 // DefaultNotificationPreferences is every flag on, which is what the design
@@ -55,7 +57,12 @@ func DefaultNotificationPreferences() NotificationPreferences {
 // NewSignupBlueprint validates and assembles the blueprint for a self-serve
 // household. Every rule it applies is here rather than in the handler or the
 // repository, so there is one place to read what a new household looks like.
-func NewSignupBlueprint(householdName, displayName, currency string) (HouseholdBlueprint, error) {
+//
+// timezone is required, and an unknown or empty one is refused rather than
+// replaced with UTC. A household quietly placed on UTC sees the wrong date
+// for as many hours a day as it lives away from Greenwich, with nothing on
+// screen to say why.
+func NewSignupBlueprint(householdName, displayName, currency, timezone string) (HouseholdBlueprint, error) {
 	name := strings.TrimSpace(householdName)
 	if name == "" {
 		return HouseholdBlueprint{}, ErrHouseholdNameRequired
@@ -71,6 +78,9 @@ func NewSignupBlueprint(householdName, displayName, currency string) (HouseholdB
 	// path, since it must keep accepting stored data.
 	code, err := domain.ParseSelectableCurrency(currency)
 	if err != nil {
+		return HouseholdBlueprint{}, err
+	}
+	if _, err := domain.ParseTimezone(timezone); err != nil {
 		return HouseholdBlueprint{}, err
 	}
 
@@ -90,6 +100,7 @@ func NewSignupBlueprint(householdName, displayName, currency string) (HouseholdB
 		// the missing picker a visible gap, not a surprise.
 		SecondaryCurrency:     code,
 		ShowSecondaryCurrency: false,
+		Timezone:              timezone,
 		OwnerDisplayName:      owner,
 		OwnerRole:             domain.RoleOwner,
 		// An owner must hold every capability -- domain.NewMembership enforces
@@ -111,5 +122,6 @@ func (b HouseholdBlueprint) Household() domain.Household {
 		PrimaryCurrency:       b.PrimaryCurrency,
 		ShowSecondaryCurrency: b.ShowSecondaryCurrency,
 		SecondaryCurrency:     b.SecondaryCurrency,
+		Timezone:              b.Timezone,
 	}
 }

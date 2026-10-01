@@ -31,6 +31,9 @@ type householdDTO struct {
 	ShowSecondaryCurrency bool   `json:"showSecondaryCurrency"`
 	SecondaryCurrency     string `json:"secondaryCurrency"`
 	FXRateMode            string `json:"fxRateMode"`
+	// Timezone is the IANA zone the frontend computes "today" in, so that a
+	// form's default date is the same day the server will accept.
+	Timezone string `json:"timezone"`
 }
 
 func toHouseholdDTO(h domain.Household) householdDTO {
@@ -42,6 +45,7 @@ func toHouseholdDTO(h domain.Household) householdDTO {
 		ShowSecondaryCurrency: h.ShowSecondaryCurrency,
 		SecondaryCurrency:     h.SecondaryCurrency,
 		FXRateMode:            h.FXRateMode,
+		Timezone:              h.Timezone,
 	}
 }
 

@@ -88,6 +88,10 @@ type Household struct {
 	ShowSecondaryCurrency bool
 	SecondaryCurrency     string
 	FXRateMode            string // "auto" or "manual"; inert until a live provider exists
+	// Timezone is the IANA name of the zone this household keeps its calendar
+	// in, such as "Asia/Singapore". It decides which day "today" is for every
+	// member (TodayIn). Validate it with ParseTimezone before storing it.
+	Timezone string
 }
 
 type Membership struct {

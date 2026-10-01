@@ -36,6 +36,7 @@ type updateHouseholdRequest struct {
 	ShowSecondaryCurrency *bool   `json:"showSecondaryCurrency"`
 	SecondaryCurrency     *string `json:"secondaryCurrency"`
 	FXRateMode            *string `json:"fxRateMode"`
+	Timezone              *string `json:"timezone"`
 }
 
 // handleUpdateHousehold reads the current record and applies only the
@@ -80,6 +81,9 @@ func handleUpdateHousehold(deps Deps) http.HandlerFunc {
 		}
 		if req.FXRateMode != nil {
 			current.FXRateMode = *req.FXRateMode
+		}
+		if req.Timezone != nil {
+			current.Timezone = *req.Timezone
 		}
 
 		updated, err := deps.Households.Update(r.Context(), current)

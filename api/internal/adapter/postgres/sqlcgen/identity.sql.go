@@ -96,10 +96,10 @@ func (q *Queries) CountRecentMagicLinks(ctx context.Context, arg CountRecentMagi
 
 const createHousehold = `-- name: CreateHousehold :one
 INSERT INTO households (name, family_name, primary_currency,
-                        show_secondary_currency, secondary_currency)
-VALUES ($1, $2, $3, $4, $5)
+                        show_secondary_currency, secondary_currency, timezone)
+VALUES ($1, $2, $3, $4, $5, $6)
 RETURNING id, name, family_name, primary_currency,
-          show_secondary_currency, secondary_currency, fx_rate_mode
+          show_secondary_currency, secondary_currency, fx_rate_mode, timezone
 `
 
 type CreateHouseholdParams struct {
@@ -108,6 +108,7 @@ type CreateHouseholdParams struct {
 	PrimaryCurrency       string
 	ShowSecondaryCurrency bool
 	SecondaryCurrency     string
+	Timezone              string
 }
 
 type CreateHouseholdRow struct {
@@ -118,6 +119,7 @@ type CreateHouseholdRow struct {
 	ShowSecondaryCurrency bool
 	SecondaryCurrency     string
 	FxRateMode            string
+	Timezone              string
 }
 
 func (q *Queries) CreateHousehold(ctx context.Context, arg CreateHouseholdParams) (CreateHouseholdRow, error) {
@@ -127,6 +129,7 @@ func (q *Queries) CreateHousehold(ctx context.Context, arg CreateHouseholdParams
 		arg.PrimaryCurrency,
 		arg.ShowSecondaryCurrency,
 		arg.SecondaryCurrency,
+		arg.Timezone,
 	)
 	var i CreateHouseholdRow
 	err := row.Scan(
@@ -137,6 +140,7 @@ func (q *Queries) CreateHousehold(ctx context.Context, arg CreateHouseholdParams
 		&i.ShowSecondaryCurrency,
 		&i.SecondaryCurrency,
 		&i.FxRateMode,
+		&i.Timezone,
 	)
 	return i, err
 }
@@ -419,7 +423,7 @@ func (q *Queries) ExtendSession(ctx context.Context, arg ExtendSessionParams) er
 
 const getHousehold = `-- name: GetHousehold :one
 SELECT id, name, family_name, primary_currency, show_secondary_currency,
-       secondary_currency, fx_rate_mode
+       secondary_currency, fx_rate_mode, timezone
 FROM households WHERE id = $1
 `
 
@@ -431,6 +435,7 @@ type GetHouseholdRow struct {
 	ShowSecondaryCurrency bool
 	SecondaryCurrency     string
 	FxRateMode            string
+	Timezone              string
 }
 
 func (q *Queries) GetHousehold(ctx context.Context, id pgtype.UUID) (GetHouseholdRow, error) {
@@ -444,6 +449,7 @@ func (q *Queries) GetHousehold(ctx context.Context, id pgtype.UUID) (GetHousehol
 		&i.ShowSecondaryCurrency,
 		&i.SecondaryCurrency,
 		&i.FxRateMode,
+		&i.Timezone,
 	)
 	return i, err
 }
@@ -1206,10 +1212,10 @@ func (q *Queries) TouchSession(ctx context.Context, arg TouchSessionParams) erro
 const updateHousehold = `-- name: UpdateHousehold :one
 UPDATE households
 SET name = $2, family_name = $3, primary_currency = $4, show_secondary_currency = $5,
-    secondary_currency = $6, fx_rate_mode = $7
+    secondary_currency = $6, fx_rate_mode = $7, timezone = $8
 WHERE id = $1
 RETURNING id, name, family_name, primary_currency, show_secondary_currency,
-          secondary_currency, fx_rate_mode
+          secondary_currency, fx_rate_mode, timezone
 `
 
 type UpdateHouseholdParams struct {
@@ -1220,6 +1226,7 @@ type UpdateHouseholdParams struct {
 	ShowSecondaryCurrency bool
 	SecondaryCurrency     string
 	FxRateMode            string
+	Timezone              string
 }
 
 type UpdateHouseholdRow struct {
@@ -1230,6 +1237,7 @@ type UpdateHouseholdRow struct {
 	ShowSecondaryCurrency bool
 	SecondaryCurrency     string
 	FxRateMode            string
+	Timezone              string
 }
 
 func (q *Queries) UpdateHousehold(ctx context.Context, arg UpdateHouseholdParams) (UpdateHouseholdRow, error) {
@@ -1241,6 +1249,7 @@ func (q *Queries) UpdateHousehold(ctx context.Context, arg UpdateHouseholdParams
 		arg.ShowSecondaryCurrency,
 		arg.SecondaryCurrency,
 		arg.FxRateMode,
+		arg.Timezone,
 	)
 	var i UpdateHouseholdRow
 	err := row.Scan(
@@ -1251,6 +1260,7 @@ func (q *Queries) UpdateHousehold(ctx context.Context, arg UpdateHouseholdParams
 		&i.ShowSecondaryCurrency,
 		&i.SecondaryCurrency,
 		&i.FxRateMode,
+		&i.Timezone,
 	)
 	return i, err
 }
