@@ -14,6 +14,7 @@
 import { Link, useMatchRoute, useNavigate } from "@tanstack/react-router";
 import type { Me, Space } from "../auth/schemas";
 import { useSignOut } from "../auth/useAuth";
+import { BrandMark } from "../../components/BrandMark";
 import { PowerIcon } from "../../components/icons";
 
 // One entry per built page of each space, in the design's order. A space
@@ -183,7 +184,7 @@ export function Sidebar({ me }: { me: Me }) {
           the day a palette does -- so do not re-add it from the design
           file. */}
       <div className="flex items-center gap-2.5 px-2.5 pb-[18px]">
-        <div className="h-7 w-7 rounded-lg bg-accent" />
+        <BrandMark size="shell" />
         <div className="text-[15px] font-semibold tracking-[-0.01em]">
           Hearth
         </div>

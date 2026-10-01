@@ -16,6 +16,7 @@ import { apiErrorMessage } from "../../api/errorMessage";
 import { Field } from "../../components/Field";
 import { type Currency, type SignUpPreview } from "./schemas";
 import { useCompleteSignUp, useCurrencies, useSignUpPreview } from "./useAuth";
+import { BrandMark } from "../../components/BrandMark";
 
 function currencyLabel(c: Currency) {
   return c.symbol ? `${c.code} (${c.symbol}) — ${c.name}` : `${c.code} — ${c.name}`;
@@ -65,7 +66,7 @@ function SignUpTokenError({ error }: { error: unknown }) {
           track shrink to the viewport instead. */}
       <div className="w-full min-w-0 flex flex-col items-center gap-[22px]">
         <div className="flex items-center gap-2.5">
-          <div className="h-[30px] w-[30px] rounded-[9px] bg-accent" />
+          <BrandMark size="auth" />
           <div className="text-[17px] font-semibold tracking-[-0.01em]">Hearth</div>
         </div>
         <div className="w-full max-w-[428px] rounded-2xl border border-hairline bg-card px-8 pb-[26px] pt-[30px] text-center shadow-[var(--shadow-auth-card)]">
@@ -363,7 +364,7 @@ export function SignUpCompleteScreen({ token }: { token: string }) {
           track shrink to the viewport instead. */}
       <div className="w-full min-w-0 flex flex-col items-center gap-[22px]">
         <div className="flex items-center gap-2.5">
-          <div className="h-[30px] w-[30px] rounded-[9px] bg-accent" />
+          <BrandMark size="auth" />
           <div className="text-[17px] font-semibold tracking-[-0.01em]">Hearth</div>
         </div>
 

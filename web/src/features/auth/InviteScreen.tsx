@@ -26,6 +26,7 @@ import {
 } from "./copy";
 import { invitePreviewSchema, type InvitePreview } from "./schemas";
 import { useAcceptInvite, useMe } from "./useAuth";
+import { BrandMark } from "../../components/BrandMark";
 
 async function fetchInvitePreview(token: string): Promise<InvitePreview> {
   const body = await apiFetch<unknown>(`/api/v1/invites/${encodeURIComponent(token)}`);
@@ -50,7 +51,7 @@ function AuthShell({ children }: { children: ReactNode }) {
           track shrink to the viewport instead. */}
       <div className="w-full min-w-0 flex flex-col items-center gap-[22px]">
         <div className="flex items-center gap-2.5">
-          <div className="h-[30px] w-[30px] rounded-[9px] bg-accent" />
+          <BrandMark size="auth" />
           <div className="text-[17px] font-semibold tracking-[-0.01em]">Hearth</div>
         </div>
         <div className="w-full max-w-[428px] rounded-2xl border border-hairline bg-card px-8 pb-[26px] pt-[30px] shadow-[var(--shadow-auth-card)]">
