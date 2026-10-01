@@ -81,6 +81,16 @@ export function toMinorUnits(input: string, currency: string): number | null {
 
   const cents = fraction.padEnd(2, "0");
   const minor = Number(whole) * MINOR_UNITS_PER_MAJOR + Number(cents);
+
+  // A JavaScript number holds whole numbers exactly only up to 2^53 - 1. Past
+  // that this sum is already rounded, so sending it would post a different
+  // figure from the one typed -- the same thing the no-floats rule above
+  // exists to prevent. The server refuses amounts far below this (its own
+  // ceiling, domain.MaxAmountMinor), so nothing valid is lost here; this
+  // check is about what the browser can represent, not a second copy of that
+  // ceiling.
+  if (!Number.isSafeInteger(minor)) return null;
+
   return negative ? -minor : minor;
 }
 
@@ -110,6 +120,8 @@ export function minorUnitsToInputValue(amountMinor: number, currency: string): s
   return negative ? `-${value}` : value;
 }
 
+const AMOUNT_TOO_LARGE_MESSAGE = "That amount is larger than Hearth can record. Check it for extra digits.";
+
 // Chooses the message for a monetary field toMinorUnits refused: "not a
 // number" when that is what actually went wrong, or the currency-specific
 // message when the figure is a real number but has more decimals than the
@@ -124,7 +136,19 @@ export function minorUnitsToInputValue(amountMinor: number, currency: string): s
 // risk toMinorUnits's own comment warns about, just for the error message
 // instead of the parsed value.
 export function describeAmountError(input: string, currency: string, example: string): string {
-  const hasADecimalPoint = /^-?\d+\.\d+$/.test(input.trim().replace(/,/g, ""));
+  const trimmed = input.trim().replace(/,/g, "");
+  // A well-formed number that toMinorUnits refused for its size, not its
+  // shape: asking the person to "enter an amount" would be wrong, they did.
+  // `+ 99` stands for the most cents the figure could carry, so this agrees
+  // with toMinorUnits' own safe-integer check. The sentence is the server's
+  // AMOUNT_TOO_LARGE wording, so a person reads the same thing whichever side
+  // refuses.
+  const wholeDigits = /^-?(\d+)(\.\d+)?$/.exec(trimmed)?.[1];
+  if (wholeDigits !== undefined && !Number.isSafeInteger(Number(wholeDigits) * MINOR_UNITS_PER_MAJOR + 99)) {
+    return AMOUNT_TOO_LARGE_MESSAGE;
+  }
+
+  const hasADecimalPoint = /^-?\d+\.\d+$/.test(trimmed);
   if (NO_DECIMAL_CURRENCIES.has(currency) && hasADecimalPoint) {
     return `${currency} doesn't use cents. Remove the decimal point.`;
   }
