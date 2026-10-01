@@ -160,7 +160,7 @@ export const OVERVIEW_COPY = {
   // trade-off already stated above: a couple of one-liners here, not a
   // coupling from Overview's copy module to Marriage's.
   visionThemeLabel: (year: number) => `${year} theme`,
-  visionThemeQuote: (theme: string) => `"${theme}"`,
+  visionThemeQuote: (theme: string) => `“${theme}”`,
 
   // NextRetroCard.tsx's own check-in strip (design's "Vision check-in:
   // 2026 theme — "Slow down together""). Split into a label and a value
@@ -168,6 +168,6 @@ export const OVERVIEW_COPY = {
   // (dc.html: a plain "Vision check-in:" followed by a <b> for the rest) --
   // only the value carries emphasis.
   visionCheckInLabel: "Vision check-in:",
-  visionCheckInTheme: (year: number, theme: string) => `${year} theme — "${theme}"`,
+  visionCheckInTheme: (year: number, theme: string) => `${year} theme — “${theme}”`,
 } as const;
 

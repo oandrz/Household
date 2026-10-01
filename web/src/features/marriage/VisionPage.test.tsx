@@ -111,7 +111,7 @@ describe("VisionPage", () => {
 
     const hero = await screen.findByTestId("vision-hero");
     expect(hero).toHaveTextContent("2026 theme");
-    expect(hero).toHaveTextContent('"Slow down together"');
+    expect(hero).toHaveTextContent('“Slow down together”');
     expect(hero).toHaveTextContent("Fewer commitments, more presence.");
   });
 
@@ -123,7 +123,7 @@ describe("VisionPage", () => {
     renderPage(visionFixture({ description: "" }));
 
     const hero = await screen.findByTestId("vision-hero");
-    expect(hero).toHaveTextContent('"Slow down together"');
+    expect(hero).toHaveTextContent('“Slow down together”');
     expect(within(hero).queryByTestId("vision-hero-description")).not.toBeInTheDocument();
   });
 

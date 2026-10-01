@@ -123,7 +123,7 @@ function RetroHistoryRow({
             summary.actionCount > 0
               ? `${summary.actionCount} action${summary.actionCount === 1 ? "" : "s"}`
               : null,
-            summary.quote ? `"${summary.quote}"` : null,
+            summary.quote ? `“${summary.quote}”` : null,
           ]
             .filter(Boolean)
             .join(" · ")}

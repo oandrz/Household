@@ -184,7 +184,7 @@ describe("InviteScreen", () => {
 
     expect(
       await screen.findByText(
-        "We couldn't find that invite. Check the link, or ask whoever invited you to send a new one.",
+        "We couldn’t find that invite. Check the link, or ask whoever invited you to send a new one.",
       ),
     ).toBeInTheDocument();
   });
@@ -199,7 +199,7 @@ describe("InviteScreen", () => {
     });
     renderInvite();
 
-    await screen.findByText(/We couldn't find that invite/);
+    await screen.findByText(/We couldn’t find that invite/);
     expect(
       screen.queryByText(/Accepting this invite will sign them out/),
     ).not.toBeInTheDocument();

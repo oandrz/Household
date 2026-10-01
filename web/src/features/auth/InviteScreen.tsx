@@ -67,7 +67,7 @@ function InvitePreviewError({ error }: { error: unknown }) {
   if (error instanceof ApiError) {
     if (error.status === 404) {
       message =
-        "We couldn't find that invite. Check the link, or ask whoever invited you to send a new one.";
+        "We couldn’t find that invite. Check the link, or ask whoever invited you to send a new one.";
     } else if (error.status === 410) {
       message =
         "This invite has expired. Ask whoever invited you to send a new one.";
