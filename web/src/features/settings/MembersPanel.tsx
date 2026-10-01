@@ -257,11 +257,11 @@ export function MembersPanel({ openPartnerInvite = false }: { openPartnerInvite?
           <button
             type="button"
             onClick={() => setInviteRole("limited")}
-            // min-h-11/sm:min-h-0: a button this size (no padding at all)
+            // min-h-11/lg:min-h-0: a button this size (no padding at all)
             // falls short of the 44px floor on a phone -- the same gap
             // TransactionFilters.tsx's own SELECT_CLASS comment measures
             // for a padded control; here there's no padding to begin with.
-            className="min-h-11 text-xs font-semibold text-accent sm:min-h-0"
+            className="min-h-11 text-xs font-semibold text-accent lg:min-h-0"
           >
             + Invite
           </button>

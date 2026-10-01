@@ -83,11 +83,11 @@ export function PortfolioPage() {
         <div className="flex flex-wrap gap-2">
           <Link
             to="/money/portfolio/report"
-            className="min-h-11 rounded-lg border border-hairline px-3.5 py-2 text-[13px] font-semibold text-ink sm:min-h-0"
+            className="min-h-11 rounded-lg border border-hairline px-3.5 py-2 text-[13px] font-semibold text-ink lg:min-h-0"
           >
             How each did
           </Link>
-          <button type="button" className="min-h-11 rounded-lg bg-accent px-3.5 py-2 text-[13px] font-semibold text-white sm:min-h-0" onClick={() => setModalHolding("new")}>
+          <button type="button" className="min-h-11 rounded-lg bg-accent px-3.5 py-2 text-[13px] font-semibold text-white lg:min-h-0" onClick={() => setModalHolding("new")}>
             Add holding
           </button>
         </div>
@@ -126,7 +126,7 @@ export function PortfolioPage() {
             Add a holding for each thing you own — a stock, gold, anything with a
             price — then record what you paid and what it is worth today.
           </p>
-          <button type="button" className="mt-4 min-h-11 rounded-lg bg-accent px-3.5 py-2 text-[13px] font-semibold text-white sm:min-h-0" onClick={() => setModalHolding("new")}>
+          <button type="button" className="mt-4 min-h-11 rounded-lg bg-accent px-3.5 py-2 text-[13px] font-semibold text-white lg:min-h-0" onClick={() => setModalHolding("new")}>
             Add your first holding
           </button>
         </div>
@@ -257,21 +257,21 @@ function HoldingRow(props: {
       </dl>
 
       <div className="flex flex-wrap gap-2">
-        <button type="button" className="min-h-11 rounded-lg border border-hairline bg-card px-3.5 py-2 text-[13px] font-semibold text-ink sm:min-h-0" onClick={props.onOpenLots}>
+        <button type="button" className="min-h-11 rounded-lg border border-hairline bg-card px-3.5 py-2 text-[13px] font-semibold text-ink lg:min-h-0" onClick={props.onOpenLots}>
           Entries &amp; prices
         </button>
-        <button type="button" className="min-h-11 rounded-lg border border-hairline bg-card px-3.5 py-2 text-[13px] font-semibold text-ink sm:min-h-0" onClick={props.onOpenIncome}>
+        <button type="button" className="min-h-11 rounded-lg border border-hairline bg-card px-3.5 py-2 text-[13px] font-semibold text-ink lg:min-h-0" onClick={props.onOpenIncome}>
           Dividends &amp; fees
         </button>
-        <button type="button" className="min-h-11 rounded-lg border border-hairline bg-card px-3.5 py-2 text-[13px] font-semibold text-ink sm:min-h-0" onClick={props.onEdit}>
+        <button type="button" className="min-h-11 rounded-lg border border-hairline bg-card px-3.5 py-2 text-[13px] font-semibold text-ink lg:min-h-0" onClick={props.onEdit}>
           Edit
         </button>
         {archived ? (
-          <button type="button" className="min-h-11 rounded-lg border border-hairline bg-card px-3.5 py-2 text-[13px] font-semibold text-ink sm:min-h-0" onClick={props.onRestore} disabled={busy}>
+          <button type="button" className="min-h-11 rounded-lg border border-hairline bg-card px-3.5 py-2 text-[13px] font-semibold text-ink lg:min-h-0" onClick={props.onRestore} disabled={busy}>
             Restore
           </button>
         ) : (
-          <button type="button" className="min-h-11 rounded-lg border border-hairline bg-card px-3.5 py-2 text-[13px] font-semibold text-ink sm:min-h-0" onClick={props.onArchive} disabled={busy}>
+          <button type="button" className="min-h-11 rounded-lg border border-hairline bg-card px-3.5 py-2 text-[13px] font-semibold text-ink lg:min-h-0" onClick={props.onArchive} disabled={busy}>
             Archive
           </button>
         )}
