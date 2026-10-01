@@ -157,7 +157,7 @@ func handleGetBudgetMonth(deps Deps) http.HandlerFunc {
 			return
 		}
 
-		view, err := deps.Budgets.Month(r.Context(), scope.HouseholdID, month, deps.Clock.Now())
+		view, err := deps.Budgets.Month(r.Context(), scope.HouseholdID, month, scope.Today)
 		if err != nil {
 			MapDomainError(w, r, err)
 			return
@@ -225,7 +225,7 @@ func handleRolloverBudgetMonth(deps Deps) http.HandlerFunc {
 			return
 		}
 
-		contribution, err := deps.Budgets.RollOver(r.Context(), scope.HouseholdID, month, req.GoalID, deps.Clock.Now())
+		contribution, err := deps.Budgets.RollOver(r.Context(), scope.HouseholdID, month, req.GoalID, scope.Today)
 		if err != nil {
 			MapDomainError(w, r, err)
 			return
@@ -236,7 +236,7 @@ func handleRolloverBudgetMonth(deps Deps) http.HandlerFunc {
 
 // handleBudgetHistory serves the History modal's table: the current month
 // plus up to `months` closed months walked back from it. The anchor is
-// always the real current month (deps.Clock.Now()) since the route takes
+// always the household's current month (Scope.Today) since the route takes
 // no month parameter of its own -- so this always answers "history as of
 // right now," never relative to whichever month the Budget screen happens
 // to show.
@@ -261,7 +261,7 @@ func handleBudgetHistory(deps Deps) http.HandlerFunc {
 			months = maxHistoryMonths
 		}
 
-		today := deps.Clock.Now()
+		today := scope.Today
 		rows, err := deps.Budgets.History(r.Context(), scope.HouseholdID, today, today, months)
 		if err != nil {
 			MapDomainError(w, r, err)

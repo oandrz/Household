@@ -124,7 +124,7 @@ func handleListAccounts(deps Deps) http.HandlerFunc {
 			return
 		}
 
-		summary, err := deps.Accounts.Summary(r.Context(), scope.HouseholdID, views, deps.Clock.Now())
+		summary, err := deps.Accounts.Summary(r.Context(), scope.HouseholdID, views, scope.Today)
 		if err != nil {
 			MapDomainError(w, r, err)
 			return

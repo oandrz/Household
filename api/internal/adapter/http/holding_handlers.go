@@ -745,7 +745,7 @@ func handleHoldingReport(deps Deps) http.HandlerFunc {
 			count = parsed
 		}
 
-		view, err := deps.Holdings.Report(r.Context(), scope.HouseholdID, kind, count, deps.Clock.Now())
+		view, err := deps.Holdings.Report(r.Context(), scope.HouseholdID, kind, count, scope.Today)
 		if err != nil {
 			MapDomainError(w, r, err)
 			return
@@ -760,7 +760,7 @@ func handleHoldingReport(deps Deps) http.HandlerFunc {
 				Label:   p.Label(),
 				Start:   p.Start().Format(holdingDateLayout),
 				End:     p.End().Format(holdingDateLayout),
-				Current: p.IsCurrent(deps.Clock.Now()),
+				Current: p.IsCurrent(scope.Today),
 			})
 		}
 

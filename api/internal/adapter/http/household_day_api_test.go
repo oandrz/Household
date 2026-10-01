@@ -51,6 +51,20 @@ func monthEndClockAfter(months int) (clk *movableClock, utcMonth time.Time) {
 	return &movableClock{now: anchor}, firstOfMonth
 }
 
+// quarterEndClock is monthEndClock on the last day of a calendar quarter, for
+// the portfolio report: 23:00 UTC, when Singapore is already in the next
+// quarter. utcQuarterStart is the first day of the quarter the server is in.
+func quarterEndClock() (clk *movableClock, utcQuarterStart time.Time) {
+	now := time.Now().UTC()
+	quarterStart := time.Date(now.Year(), time.Month((int(now.Month())-1)/3*3+1), 1, 0, 0, 0, 0, time.UTC)
+	anchor := quarterStart.AddDate(0, 3, -1).Add(23 * time.Hour)
+	if anchor.Before(now) {
+		quarterStart = quarterStart.AddDate(0, 3, 0)
+		anchor = quarterStart.AddDate(0, 3, -1).Add(23 * time.Hour)
+	}
+	return &movableClock{now: anchor}, quarterStart
+}
+
 // setTimezone moves the household to another zone through the API, the way
 // an owner does it in Settings.
 func (env *testEnv) setTimezone(t *testing.T, session, csrf *http.Cookie, zone string) {
@@ -353,6 +367,262 @@ func TestStartRetroBeginsTheMonthJustEndedInTheHouseholdsZone(t *testing.T) {
 		}
 		if created.Retro.Month != monthJustEnded {
 			t.Errorf("started %s, want %s", created.Retro.Month, monthJustEnded)
+		}
+	})
+}
+
+// QA ISSUE-006, Goals. "Actual this month S$0.00" stood beside a contribution
+// dated today, because the month the server summed was not the household's.
+func TestGoalsThisMonthIsTheHouseholdsMonth(t *testing.T) {
+	clk, utcMonth := monthEndClock()
+	env := newTestEnvWithClock(t, clk)
+	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
+	env.setTimezone(t, session, csrf, "Asia/Singapore")
+
+	householdToday := utcMonth.AddDate(0, 1, 0).Format("2006-01-02") // the 1st, in Singapore
+
+	// Due in the server's month and exactly affordable in one instalment, so
+	// its status depends on whether that month is still running: on track
+	// while it is, behind once it has passed.
+	goal := env.mustCreateGoal(t, session, csrf, map[string]any{
+		"name": "Emergency fund", "targetMinor": 100_000, "currency": "SGD",
+		"targetMonth": utcMonth.Format("2006-01"), "plannedMonthlyMinor": 100_000,
+	}).Goal
+	rec := env.authed(t, http.MethodPost, "/api/v1/goals/"+goal.ID+"/contributions",
+		map[string]any{"amountMinor": 2_500, "occurredOn": householdToday}, session, csrf)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("add contribution: status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+
+	list := func(t *testing.T) goalsListResponseBody {
+		t.Helper()
+		rec := env.authedGet(t, "/api/v1/goals", session)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("GET /goals: status = %d, body = %s", rec.Code, rec.Body.String())
+		}
+		return decodeGoalsList(t, rec)
+	}
+
+	t.Run("on Singapore today's contribution counts, and last month's target has passed", func(t *testing.T) {
+		got := list(t)
+		if got.Summary.ActualThisMonthMinor != 2_500 {
+			t.Errorf("actualThisMonthMinor = %d, want 2500", got.Summary.ActualThisMonthMinor)
+		}
+		if len(got.Goals) != 1 || got.Goals[0].Status != "behind" {
+			t.Errorf("goals = %+v, want the one goal, behind", got.Goals)
+		}
+	})
+
+	// Archive and restore answer with the goal's card. The stamp is an
+	// instant, but the card's status is judged by the household's day.
+	t.Run("restoring a goal answers with a card judged by the household's day", func(t *testing.T) {
+		if rec := env.authed(t, http.MethodPost, "/api/v1/goals/"+goal.ID+"/archive", nil, session, csrf); rec.Code != http.StatusOK {
+			t.Fatalf("archive: status = %d, body = %s", rec.Code, rec.Body.String())
+		}
+		rec := env.authed(t, http.MethodPost, "/api/v1/goals/"+goal.ID+"/restore", nil, session, csrf)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("restore: status = %d, body = %s", rec.Code, rec.Body.String())
+		}
+		if got := decodeGoal(t, rec).Goal; got.Status != "behind" {
+			t.Errorf("status = %s, want behind", got.Status)
+		}
+	})
+
+	// The control: on UTC the server's month is still running, so the
+	// contribution is next month's and the goal can still make its date.
+	t.Run("on UTC the same goal is on track and nothing was added this month", func(t *testing.T) {
+		env.setTimezone(t, session, csrf, "UTC")
+		got := list(t)
+		if got.Summary.ActualThisMonthMinor != 0 {
+			t.Errorf("actualThisMonthMinor = %d, want 0", got.Summary.ActualThisMonthMinor)
+		}
+		if len(got.Goals) != 1 || got.Goals[0].Status != "on_track" {
+			t.Errorf("goals = %+v, want the one goal, on track", got.Goals)
+		}
+	})
+}
+
+// QA ISSUE-006, Portfolio. The report called Q3 the current quarter on the
+// first morning of Q4.
+func TestThePortfolioReportsCurrentPeriodIsTheHouseholds(t *testing.T) {
+	clk, utcQuarterStart := quarterEndClock()
+	env := newTestEnvWithClock(t, clk)
+	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
+
+	currentPeriod := func(t *testing.T) (current, last reportPeriodBody) {
+		t.Helper()
+		rec := env.authedGet(t, "/api/v1/holdings/report?kind=quarter", session)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("GET report: status = %d, body = %s", rec.Code, rec.Body.String())
+		}
+		periods := decodeReport(t, rec).Periods
+		if len(periods) == 0 {
+			t.Fatal("the report has no periods")
+		}
+		var found []reportPeriodBody
+		for _, p := range periods {
+			if p.Current {
+				found = append(found, p)
+			}
+		}
+		if len(found) != 1 {
+			t.Fatalf("%d periods are marked current, want exactly one: %+v", len(found), periods)
+		}
+		return found[0], periods[len(periods)-1]
+	}
+
+	// Two things are checked each time: which period is flagged current, and
+	// that the series ends on it. They come from two separate reads of
+	// "today" in the handler, and must not disagree.
+	t.Run("on UTC it is the quarter the server is in", func(t *testing.T) {
+		current, last := currentPeriod(t)
+		if want := utcQuarterStart.Format("2006-01-02"); current.Start != want || last.Start != want {
+			t.Errorf("current starts %s and the series ends on %s, want both %s", current.Start, last.Start, want)
+		}
+	})
+
+	t.Run("on Singapore it is the quarter that has just begun there", func(t *testing.T) {
+		env.setTimezone(t, session, csrf, "Asia/Singapore")
+		current, last := currentPeriod(t)
+		if want := utcQuarterStart.AddDate(0, 3, 0).Format("2006-01-02"); current.Start != want || last.Start != want {
+			t.Errorf("current starts %s and the series ends on %s, want both %s", current.Start, last.Start, want)
+		}
+	})
+}
+
+// QA ISSUE-006, Budget. Which month is "this month" decides the days left,
+// whether a month is closed, and so whether its unspent money can be rolled
+// into a goal.
+func TestTheBudgetsCurrentMonthIsTheHouseholds(t *testing.T) {
+	clk, utcMonth := monthEndClock()
+	env := newTestEnvWithClock(t, clk)
+	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
+
+	category, _ := env.firstExpenseCategory(t, session)
+	path := monthPath(utcMonth)
+	env.mustPutBudget(t, session, csrf, path, map[string]any{
+		"lines": []map[string]any{{"categoryId": category, "capMinor": 40_000}},
+	})
+	goal := env.mustCreateGoal(t, session, csrf, map[string]any{
+		"name": "Holiday", "targetMinor": 500_000, "currency": "SGD",
+	}).Goal
+
+	type monthBody struct {
+		DaysLeft int `json:"daysLeft"`
+	}
+	type historyBody struct {
+		Months []struct {
+			Month  string `json:"month"`
+			Closed bool   `json:"closed"`
+		} `json:"months"`
+	}
+	read := func(t *testing.T, target string, into any) {
+		t.Helper()
+		rec := env.authedGet(t, target, session)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("GET %s: status = %d, body = %s", target, rec.Code, rec.Body.String())
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), into); err != nil {
+			t.Fatalf("decode %s: %v", target, err)
+		}
+	}
+	closedInHistory := func(t *testing.T) bool {
+		t.Helper()
+		var history historyBody
+		read(t, "/api/v1/budgets/history", &history)
+		for _, m := range history.Months {
+			if m.Month == utcMonth.Format("2006-01") {
+				return m.Closed
+			}
+		}
+		t.Fatalf("history has no row for %s: %+v", utcMonth.Format("2006-01"), history)
+		return false
+	}
+
+	// The control: on UTC it is the last day of the budgeted month.
+	t.Run("on UTC the month has one day left, is open, and cannot be rolled over", func(t *testing.T) {
+		var month monthBody
+		read(t, path, &month)
+		if month.DaysLeft != 1 {
+			t.Errorf("daysLeft = %d, want 1 on the last day of the month", month.DaysLeft)
+		}
+		if closedInHistory(t) {
+			t.Error("history marks the month closed while it is still running")
+		}
+		rec := env.authed(t, http.MethodPost, path+"/rollover", map[string]any{"goalId": goal.ID}, session, csrf)
+		assertErrorResponse(t, rec, http.StatusUnprocessableEntity, "ROLLOVER_MONTH_OPEN")
+	})
+
+	t.Run("on Singapore the month is over, closed, and rolls over dated the household's today", func(t *testing.T) {
+		env.setTimezone(t, session, csrf, "Asia/Singapore")
+		var month monthBody
+		read(t, path, &month)
+		if month.DaysLeft != 0 {
+			t.Errorf("daysLeft = %d, want 0 for a month that has ended", month.DaysLeft)
+		}
+		if !closedInHistory(t) {
+			t.Error("history marks the month open after it has ended")
+		}
+		rec := env.authed(t, http.MethodPost, path+"/rollover", map[string]any{"goalId": goal.ID}, session, csrf)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("rollover: status = %d, body = %s", rec.Code, rec.Body.String())
+		}
+		var rolled contributionResponseBody
+		if err := json.Unmarshal(rec.Body.Bytes(), &rolled); err != nil {
+			t.Fatalf("decode rollover: %v", err)
+		}
+		if want := utcMonth.AddDate(0, 1, 0).Format("2006-01-02"); rolled.Contribution.OccurredOn != want {
+			t.Errorf("the rollover is dated %s, want the household's today %s", rolled.Contribution.OccurredOn, want)
+		}
+	})
+}
+
+// QA ISSUE-006, Finances. The twelve-month net worth trend ends on "this
+// month", which is the household's.
+func TestTheNetWorthTrendEndsOnTheHouseholdsMonth(t *testing.T) {
+	clk, utcMonth := monthEndClock()
+	env := newTestEnvWithClock(t, clk)
+	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
+	env.mustCreateAccount(t, session, csrf, map[string]any{
+		"nickname": "DBS Everyday", "type": "cash",
+		"openingBalanceMinor": 824_055, "openingBalanceCurrency": "SGD",
+		"openingBalanceAsOf": utcMonth.Format("2006-01-02"),
+	})
+
+	lastTrendMonth := func(t *testing.T) string {
+		t.Helper()
+		rec := env.authedGet(t, "/api/v1/accounts", session)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("GET /accounts: status = %d, body = %s", rec.Code, rec.Body.String())
+		}
+		var got struct {
+			Summary *struct {
+				Trend *struct {
+					Points []struct {
+						Month string `json:"month"`
+					} `json:"points"`
+				} `json:"trend"`
+			} `json:"summary"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		if got.Summary == nil || got.Summary.Trend == nil || len(got.Summary.Trend.Points) == 0 {
+			t.Fatalf("no trend in %s", rec.Body.String())
+		}
+		points := got.Summary.Trend.Points
+		return points[len(points)-1].Month
+	}
+
+	t.Run("on UTC it ends on the server's month", func(t *testing.T) {
+		if got, want := lastTrendMonth(t), utcMonth.Format("2006-01"); got != want {
+			t.Errorf("the trend ends on %s, want %s", got, want)
+		}
+	})
+	t.Run("on Singapore it ends on the month that has begun there", func(t *testing.T) {
+		env.setTimezone(t, session, csrf, "Asia/Singapore")
+		if got, want := lastTrendMonth(t), utcMonth.AddDate(0, 1, 0).Format("2006-01"); got != want {
+			t.Errorf("the trend ends on %s, want %s", got, want)
 		}
 	})
 }
