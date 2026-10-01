@@ -10,6 +10,27 @@ in three months or someone new.
 
 ## 1. Where things stand
 
+> **One calendar per household is built, on branch `fix/qa-2026-10-01`, since
+> 2026-10-01. Not pushed, not merged, not deployed.** It fixes QA ISSUE-002 to
+> ISSUE-006: a household stores an IANA time zone and both the server and the
+> frontend work out "today" in it ([ADR 12](adr/0012-one-calendar-per-household.md),
+> spec `docs/superpowers/specs/2026-10-01-hearth-household-calendar-design.md`,
+> build-order steps 1 to 7). Walked in a real browser on a separate stack.
+>
+> **What is next is step 8 of that spec, three owner decisions already made
+> and not started:** refuse a future-dated transaction, bill payment and goal
+> contribution; never offer a retro for a month before the household was
+> created; and on the 1st of a month show last month's still-open retro draft
+> on Overview. Each is a ⬜ row in `docs/FEATURE_TRACKER.md`.
+>
+> **Before this is deployed:** migration `00022_household_timezone.sql` sets
+> every existing household to `Asia/Singapore`. That is the owner's decision
+> for the households that exist today. Run it against a restored production
+> dump first, as `00011`'s comment asks of any migration that touches a table
+> holding real rows, and check no household on the box belongs somewhere
+> else. The sign-up form and the API must be deployed together: the server
+> now refuses a sign-up that sends no time zone.
+
 > **Hearth is in production, since 2026-08-15.**
 > <https://oink.mywire.org> — one Hetzner CX23 in Falkenstein, `5.75.239.188`,
 > running the Compose stack behind Caddy. A real household exists on it and was

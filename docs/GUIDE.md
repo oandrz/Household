@@ -138,7 +138,18 @@ switches. Children show their age. Email addresses are visible to owners only.
 **Spaces** — the spaces in the sidebar and who each is for.
 
 **Currency & region** — your primary currency, whether to show a second currency
-alongside it, and how the exchange rate is obtained.
+alongside it, how the exchange rate is obtained, and your household's **time
+zone**.
+
+The time zone decides which day is "today" for everyone in the household. It
+is set from your browser when you create the household, and an owner can
+change it here; the line under the control shows today's date in the zone you
+have picked, so you can check it before you save. Every date Hearth works out
+follows it: the date a new transaction or payment starts on, which month the
+ledger and the budget open on, which bills count as paid this month, which
+month a retro is for. A member who is travelling sees the household's date,
+not their own: one household, one calendar. Changing the zone does not alter
+anything already saved.
 
 **Notifications** — four reminders: bills due, overspending, the monthly
 check-in, and the weekly summary.
@@ -166,7 +177,7 @@ for dollars, `1200` for yen. Put the category after `#` and the account
 after `@`; quote a name with spaces. Leave `@account` out and the bot uses
 your only cash account — if you have more than one it asks which. The bot
 answers with what it saved, and the row appears in Transactions dated today
-with you as the payer.
+(by your household's time zone, see Settings) with you as the payer.
 
 If the install has a language model configured (an open-weight model
 through OpenRouter), you can also just say it —
@@ -229,6 +240,11 @@ unique within a household.
 
 **An invite will not send.** If the address already belongs to a member, Hearth
 refuses rather than sending a link that could never be accepted.
+
+**"That date is in the future."** A holding purchase, sale, price or dividend,
+and an account's starting balance, cannot be dated after today, and "today"
+is your household's, by the time zone in Settings. If today's date is being
+refused, the time zone is probably wrong: check the date shown under it.
 
 **Nothing loads at all.** Check the stack is up with `make ps`, and the logs with
 `make logs`.
