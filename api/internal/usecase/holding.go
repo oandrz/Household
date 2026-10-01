@@ -177,7 +177,7 @@ func (s *HoldingService) RecordEvent(ctx context.Context, e domain.HoldingEvent,
 	// transaction, not a separate read before it -- two sales of 30 from a
 	// holding of 50 are legal alone, illegal together, and check-then-write
 	// lets both through. InsertWithFold supplies the lock.
-	return s.d.Events.InsertWithFold(ctx, e, func(withThisOne []domain.HoldingEvent) error {
+	return s.d.Events.InsertWithFold(ctx, e, func(withThisOne []domain.HoldingEvent, _ []domain.Valuation) error {
 		_, err := holding.Position(withThisOne, primaryCurrency)
 		return err
 	})
@@ -202,7 +202,7 @@ func (s *HoldingService) DeleteEvent(ctx context.Context, householdID, holdingID
 	// Same reasoning as RecordEvent: the remainder is folded inside the
 	// delete's own transaction, so a concurrent write cannot slip between the
 	// check and the removal.
-	return s.d.Events.DeleteWithFold(ctx, householdID, holdingID, eventID, func(remaining []domain.HoldingEvent) error {
+	return s.d.Events.DeleteWithFold(ctx, householdID, holdingID, eventID, func(remaining []domain.HoldingEvent, _ []domain.Valuation) error {
 		_, err := holding.Position(remaining, primaryCurrency)
 		return err
 	})
@@ -226,7 +226,9 @@ func (s *HoldingService) RecordValuation(ctx context.Context, v domain.Valuation
 	if err := v.Validate(holding.Currency, primaryCurrency); err != nil {
 		return domain.Valuation{}, err
 	}
-	return s.d.Valuations.Upsert(ctx, v)
+	return s.d.Valuations.UpsertWithFold(ctx, v, func([]domain.HoldingEvent, []domain.Valuation) error {
+		return nil
+	})
 }
 
 func (s *HoldingService) ListEvents(ctx context.Context, householdID, holdingID string) ([]domain.HoldingEvent, error) {

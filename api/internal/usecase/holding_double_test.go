@@ -136,9 +136,13 @@ func (d *holdingRepoDouble) CountLiveForAccount(_ context.Context, householdID, 
 
 // --- HoldingEventRepository -------------------------------------------------
 
+// holdingEventRepoDouble reads prices from the valuation double because the
+// real repository hands a usecase.HoldingFold the holding's prices as well as
+// its events. newHoldingFixture joins the two.
 type holdingEventRepoDouble struct {
-	rows []domain.HoldingEvent
-	n    int
+	rows       []domain.HoldingEvent
+	n          int
+	valuations *valuationRepoDouble
 }
 
 func newHoldingEventRepoDouble() *holdingEventRepoDouble { return &holdingEventRepoDouble{} }
@@ -180,21 +184,25 @@ func (d *holdingEventRepoDouble) Insert(_ context.Context, e domain.HoldingEvent
 }
 
 // InsertWithFold mirrors the real repository's contract: fold sees the
-// events that WOULD exist, and the insert happens only if it accepts. A
-// single goroutine cannot exercise the lock, so this double only pins the
-// ordering -- fold before write, and fold's refusal preventing the write.
-// The lock is proved against real Postgres in
-// postgres/holding_repo_test.go's racing-disposals test.
+// events and prices that WOULD exist, and the insert happens only if it
+// accepts. A single goroutine cannot exercise the lock, so this double only
+// pins the ordering -- fold before write, and fold's refusal preventing the
+// write. The lock is proved against real Postgres in
+// postgres/holding_repo_test.go's racing tests.
 func (d *holdingEventRepoDouble) InsertWithFold(
 	ctx context.Context,
 	e domain.HoldingEvent,
-	fold func([]domain.HoldingEvent) error,
+	fold usecase.HoldingFold,
 ) (domain.HoldingEvent, error) {
 	existing, err := d.ListByHolding(ctx, e.HouseholdID, e.HoldingID)
 	if err != nil {
 		return domain.HoldingEvent{}, err
 	}
-	if err := fold(append(existing, e)); err != nil {
+	prices, err := d.valuations.ListByHolding(ctx, e.HouseholdID, e.HoldingID)
+	if err != nil {
+		return domain.HoldingEvent{}, err
+	}
+	if err := fold(append(existing, e), prices); err != nil {
 		return domain.HoldingEvent{}, err
 	}
 	return d.Insert(ctx, e)
@@ -203,7 +211,7 @@ func (d *holdingEventRepoDouble) InsertWithFold(
 func (d *holdingEventRepoDouble) DeleteWithFold(
 	ctx context.Context,
 	householdID, holdingID, eventID string,
-	fold func([]domain.HoldingEvent) error,
+	fold usecase.HoldingFold,
 ) error {
 	existing, err := d.ListByHolding(ctx, householdID, holdingID)
 	if err != nil {
@@ -221,7 +229,11 @@ func (d *holdingEventRepoDouble) DeleteWithFold(
 	if !found {
 		return domain.ErrNotFound
 	}
-	if err := fold(remaining); err != nil {
+	prices, err := d.valuations.ListByHolding(ctx, householdID, holdingID)
+	if err != nil {
+		return err
+	}
+	if err := fold(remaining, prices); err != nil {
 		return err
 	}
 	return d.Delete(ctx, householdID, holdingID, eventID)
@@ -239,9 +251,12 @@ func (d *holdingEventRepoDouble) Delete(_ context.Context, householdID, holdingI
 
 // --- HoldingValuationRepository ---------------------------------------------
 
+// valuationRepoDouble reads events from the event double for the same reason
+// the event double reads prices from this one.
 type valuationRepoDouble struct {
-	rows []domain.Valuation
-	n    int
+	rows   []domain.Valuation
+	n      int
+	events *holdingEventRepoDouble
 }
 
 func newValuationRepoDouble() *valuationRepoDouble { return &valuationRepoDouble{} }
@@ -289,11 +304,35 @@ func (d *valuationRepoDouble) ListLatest(_ context.Context, householdID string) 
 	return out, nil
 }
 
-// Upsert mirrors the UNIQUE (holding_id, as_of) key: a second price for one
-// day replaces the first rather than joining it.
-func (d *valuationRepoDouble) Upsert(_ context.Context, v domain.Valuation) (domain.Valuation, error) {
+// UpsertWithFold mirrors the real repository's contract: fold sees the
+// holding's events and its prices as they WOULD be -- the new price in, the
+// row for the same day out -- and the write happens only if it accepts. The
+// UNIQUE (holding_id, as_of) key is mirrored too: a second price for one day
+// replaces the first rather than joining it.
+func (d *valuationRepoDouble) UpsertWithFold(
+	ctx context.Context,
+	v domain.Valuation,
+	fold usecase.HoldingFold,
+) (domain.Valuation, error) {
+	events, err := d.events.ListByHolding(ctx, v.HouseholdID, v.HoldingID)
+	if err != nil {
+		return domain.Valuation{}, err
+	}
+	after := []domain.Valuation{}
+	for _, existing := range d.rows {
+		if existing.HouseholdID != v.HouseholdID || existing.HoldingID != v.HoldingID {
+			continue
+		}
+		if !sameCalendarDay(existing.AsOf, v.AsOf) {
+			after = append(after, existing)
+		}
+	}
+	if err := fold(events, append(after, v)); err != nil {
+		return domain.Valuation{}, err
+	}
+
 	for i, existing := range d.rows {
-		if existing.HoldingID == v.HoldingID && existing.AsOf.Equal(v.AsOf) {
+		if existing.HoldingID == v.HoldingID && sameCalendarDay(existing.AsOf, v.AsOf) {
 			v.ID = existing.ID
 			d.rows[i] = v
 			return v, nil
@@ -303,6 +342,15 @@ func (d *valuationRepoDouble) Upsert(_ context.Context, v domain.Valuation) (dom
 	v.ID = "valuation-" + strconv.Itoa(d.n)
 	d.rows = append(d.rows, v)
 	return v, nil
+}
+
+// sameCalendarDay compares the year, month and day each value shows in its
+// own location, which is how the real repository builds the as_of key. A
+// price typed at 15:00 and a stored one at midnight are the same day's price.
+func sameCalendarDay(a, b time.Time) bool {
+	ay, am, ad := a.Date()
+	by, bm, bd := b.Date()
+	return ay == by && am == bm && ad == bd
 }
 
 func (d *valuationRepoDouble) Delete(_ context.Context, householdID, valuationID string) error {

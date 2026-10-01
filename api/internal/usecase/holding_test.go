@@ -67,6 +67,10 @@ func newHoldingFixture(t *testing.T, primaryCurrency string) *holdingFixture {
 		householdID: "hh",
 		accountID:   "acct",
 	}
+	// Each double reads the other's rows, as the real repositories read both
+	// tables inside one transaction.
+	f.events.valuations = f.valuations
+	f.valuations.events = f.events
 	f.svc = usecase.NewHoldingService(usecase.HoldingDeps{
 		Holdings:   f.holdings,
 		Events:     f.events,

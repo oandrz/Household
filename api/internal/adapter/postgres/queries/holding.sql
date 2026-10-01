@@ -59,11 +59,12 @@ WHERE household_id = $1 AND account_id = $2 AND archived_at IS NULL;
 -- name: CountHoldingsForHousehold :one
 SELECT COUNT(*)::bigint FROM holdings WHERE household_id = $1;
 
--- LockHolding takes a row lock on one holding so that two writers folding its
--- events cannot both pass a check the other is about to invalidate. It returns
--- the currency only because a query must return something; the lock is the
--- point. Callers use it inside a transaction with InsertHoldingEvent or
--- DeleteHoldingEvent -- see HoldingEventRepository.InsertWithFold.
+-- LockHolding takes a row lock on one holding so that two writers of its
+-- events or its prices cannot both pass a check the other is about to
+-- invalidate. It returns the currency only because a query must return
+-- something; the lock is the point. Callers use it inside a transaction with
+-- InsertHoldingEvent, DeleteHoldingEvent or UpsertValuation -- see
+-- usecase.HoldingFold.
 -- name: LockHolding :one
 SELECT currency FROM holdings
 WHERE household_id = $1 AND id = $2
