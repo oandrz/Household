@@ -50,8 +50,9 @@ type completeSignUpRequest struct {
 	HouseholdName   string `json:"householdName"`
 	DisplayName     string `json:"displayName"`
 	PrimaryCurrency string `json:"primaryCurrency"`
-	// Timezone is the browser's IANA zone. The form has no field for it: the
-	// screen reads it from the device, and an owner can change it in Settings.
+	// Timezone is the browser's IANA zone. The form shows no field for it
+	// unless the device's zone cannot be used: the screen reads it from the
+	// device, and an owner can change it in Settings.
 	Timezone string `json:"timezone"`
 	Password string `json:"password"`
 }

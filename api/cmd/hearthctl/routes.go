@@ -38,7 +38,7 @@ var routeTable = []route{
 	{"DELETE", "/auth/tokens/{id}", "browser session+csrf", "-"},
 	{"GET", "/currencies", "public", "-"},
 	{"GET", "/household", "session", "-"},
-	{"PATCH", "/household", "owner+csrf", `{"name"?,"familyName"?,"primaryCurrency"?,"showSecondaryCurrency"?,"secondaryCurrency"?,"fxRateMode"?}`},
+	{"PATCH", "/household", "owner+csrf", `{"name"?,"familyName"?,"primaryCurrency"?,"showSecondaryCurrency"?,"secondaryCurrency"?,"fxRateMode"?,"timezone"?}`},
 	{"GET", "/household/members", "session", "-"},
 	{"POST", "/household/members/invite", "owner+browser session+csrf", `{"name","role","capabilities":[...],"channel":"profile"|"email"|"telegram","email"?}` + " -> {id?,expiresAt?,link?}"},
 	{"PATCH", "/household/members/{id}", "owner+browser session+csrf", `{"role"?,"capabilities"?}`},

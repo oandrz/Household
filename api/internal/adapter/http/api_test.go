@@ -39,12 +39,14 @@ var invitePreAuthRoutes = map[string]bool{
 	"POST /api/v1/invites/{token}/accept": true,
 }
 
-// movableClock is a controllable usecase.Clock, with two callers:
+// movableClock is a controllable usecase.Clock. Its callers:
 // TestSessionCookiesSlideWhenExtended fast-forwards time to prove cookies
-// slide near expiry, and TestOwnerSeesTheTwelveMonthTrend pins it to a
-// stable instant for an exact twelve-month window.
+// slide near expiry, TestOwnerSeesTheTwelveMonthTrend pins it to a stable
+// instant for an exact twelve-month window, and the household-calendar
+// tests (household_day_api_test.go) stop it at 23:00 UTC on a day, month,
+// quarter or year boundary.
 //
-// Both anchor on real now, and a third must too: session expiry is enforced
+// All of them anchor on real now or later, and a new one must too: session expiry is enforced
 // by Postgres's now() in GetLiveSession's WHERE clause, not by this clock.
 // Pinning it to an absolute past date still signs in against real wall time
 // and fails one SessionTTL later -- this has happened.
