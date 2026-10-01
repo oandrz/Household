@@ -151,8 +151,8 @@ func (s *HoldingService) SetArchived(ctx context.Context, householdID, holdingID
 
 // RecordEvent validates an acquisition or disposal against its holding and
 // the household's primary currency, then refuses it if it would leave the
-// position oversold. today is a parameter for the same reason as
-// SetArchived's.
+// position oversold. today is the household's calendar day, passed in by
+// the caller so that this service reads no clock.
 func (s *HoldingService) RecordEvent(ctx context.Context, e domain.HoldingEvent, today time.Time) (domain.HoldingEvent, error) {
 	if err := refuseFutureDate(e.OccurredOn, today); err != nil {
 		return domain.HoldingEvent{}, err
@@ -318,14 +318,13 @@ func (s *HoldingService) primaryCurrency(ctx context.Context, householdID string
 	return household.PrimaryCurrency, nil
 }
 
-// refuseFutureDate compares CALENDAR DAYS, not instants: a household
-// recording this morning's purchase must not be refused because the clock
-// reads a later hour. This project has shipped that off-by-one three times.
+// refuseFutureDate refuses a purchase, sale, price or income row dated after
+// the household's today. today is the household's calendar day, which the
+// caller works out from its time zone (domain.TodayIn); the comparison is on
+// calendar days (domain.IsAfterDay), so today itself is always allowed.
 func refuseFutureDate(date, today time.Time) error {
-	d := time.Date(date.Year(), date.Month(), date.Day(), 0, 0, 0, 0, time.UTC)
-	t := time.Date(today.Year(), today.Month(), today.Day(), 0, 0, 0, 0, time.UTC)
-	if d.After(t) {
-		return fmt.Errorf("%w: %s", domain.ErrHoldingDateInFuture, d.Format(time.DateOnly))
+	if domain.IsAfterDay(date, today) {
+		return fmt.Errorf("%w: %s", domain.ErrHoldingDateInFuture, date.Format(time.DateOnly))
 	}
 	return nil
 }
@@ -361,8 +360,8 @@ type PortfolioReportView struct {
 	Holdings        []HoldingReportRow
 }
 
-// RecordIncome stores one dividend, coupon or charge. today is a parameter
-// for the same reason as SetArchived's.
+// RecordIncome stores one dividend, coupon or charge. today is the
+// household's calendar day, as for RecordEvent.
 func (s *HoldingService) RecordIncome(ctx context.Context, i domain.HoldingIncome, today time.Time) (domain.HoldingIncome, error) {
 	if err := refuseFutureDate(i.ReceivedOn, today); err != nil {
 		return domain.HoldingIncome{}, err

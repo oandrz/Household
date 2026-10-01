@@ -392,7 +392,7 @@ func handleCreateHoldingEvent(deps Deps) http.HandlerFunc {
 			}
 			event.PrimaryAmount = &primary
 		}
-		if _, err := deps.Holdings.RecordEvent(r.Context(), event, deps.Clock.Now()); err != nil {
+		if _, err := deps.Holdings.RecordEvent(r.Context(), event, scope.Today); err != nil {
 			MapDomainError(w, r, err)
 			return
 		}
@@ -494,7 +494,7 @@ func handleCreateHoldingValuation(deps Deps) http.HandlerFunc {
 			}
 			valuation.PrimaryUnitPrice = &primary
 		}
-		if _, err := deps.Holdings.RecordValuation(r.Context(), valuation, deps.Clock.Now()); err != nil {
+		if _, err := deps.Holdings.RecordValuation(r.Context(), valuation, scope.Today); err != nil {
 			MapDomainError(w, r, err)
 			return
 		}
@@ -612,7 +612,7 @@ func handleCreateHoldingIncome(deps Deps) http.HandlerFunc {
 			}
 			income.PrimaryAmount = &primary
 		}
-		created, err := deps.Holdings.RecordIncome(r.Context(), income, deps.Clock.Now())
+		created, err := deps.Holdings.RecordIncome(r.Context(), income, scope.Today)
 		if err != nil {
 			MapDomainError(w, r, err)
 			return
