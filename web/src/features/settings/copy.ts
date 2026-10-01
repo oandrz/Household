@@ -70,6 +70,12 @@ export function currencyLabel(code: string, symbol?: string): string {
   return symbol ? `${code} (${symbol})` : code;
 }
 
+// Shown under the primary currency once the household holds investments, in
+// place of the field. It is the short form of the server's own refusal
+// (PRIMARY_CURRENCY_HELD_BY_HOLDINGS), said before Save instead of after.
+export const PRIMARY_CURRENCY_LOCKED_NOTICE =
+  "Can't be changed while you hold investments. Every holding records what it cost in this currency.";
+
 // telegramPollInterval is TanStack Query's refetchInterval rule for the
 // pending-link status query, pulled out as its own named, directly-testable
 // function: "waiting" and "pending" are the only statuses that can still

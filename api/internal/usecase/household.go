@@ -44,9 +44,8 @@ type HouseholdDeps struct {
 	Households    HouseholdRepository
 	Spaces        SpaceRepository
 	Notifications NotificationRepository
-	// Holdings is consulted for one question only -- does this household hold
-	// anything -- and only when the primary currency is being changed. See
-	// Update.
+	// Holdings is consulted for one question only: does this household hold
+	// anything. See PrimaryCurrencyLocked.
 	Holdings HoldingCounter
 }
 
@@ -198,14 +197,30 @@ func (s *HouseholdService) UpdateNotifications(ctx context.Context, householdID 
 	return s.d.Notifications.Upsert(ctx, householdID, p)
 }
 
-// refusePrimaryCurrencyChangeWhileHolding is the one rule the portfolio adds
-// to this screen: a holding event or valuation stores its cost in whatever
-// currency was primary when it was written, and there is no rate to
-// re-express it under a new one. Changing the primary currency once a
-// household holds anything would strand the portfolio -- the fold would
+// PrimaryCurrencyLocked reports whether the household's primary currency can
+// no longer change, which is true once it holds any investment, archived
+// ones included.
+//
+// A holding event or a valuation stores its cost in whatever currency was
+// primary when it was written, and there is no rate to re-express it under a
+// new one. Changing the currency would strand the portfolio: the fold would
 // refuse every holding, and the only screen that could fix it is the one now
-// broken. Refusing at the edit costs nothing before a household holds
-// anything, which is when a currency actually gets chosen.
+// broken. Refusing costs nothing before a household holds anything, which is
+// when a currency actually gets chosen.
+//
+// Update refuses a change on this same answer, so a screen that shows the
+// lock and the write that enforces it cannot disagree.
+func (s *HouseholdService) PrimaryCurrencyLocked(ctx context.Context, householdID string) (bool, error) {
+	held, err := s.d.Holdings.CountForHousehold(ctx, householdID)
+	if err != nil {
+		return false, err
+	}
+	return held > 0, nil
+}
+
+// refusePrimaryCurrencyChangeWhileHolding is Update's use of
+// PrimaryCurrencyLocked: a request that keeps the currency it already has is
+// let through, and only a real change meets the lock.
 func (s *HouseholdService) refusePrimaryCurrencyChangeWhileHolding(ctx context.Context, householdID, primary string) error {
 	current, err := s.d.Households.Get(ctx, householdID)
 	if err != nil {
@@ -214,11 +229,11 @@ func (s *HouseholdService) refusePrimaryCurrencyChangeWhileHolding(ctx context.C
 	if current.PrimaryCurrency == primary {
 		return nil
 	}
-	held, err := s.d.Holdings.CountForHousehold(ctx, householdID)
+	locked, err := s.PrimaryCurrencyLocked(ctx, householdID)
 	if err != nil {
 		return err
 	}
-	if held > 0 {
+	if locked {
 		return domain.ErrPrimaryCurrencyHeldByHoldings
 	}
 	return nil

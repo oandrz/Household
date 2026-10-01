@@ -676,6 +676,55 @@ func TestAHouseholdHoldingInvestmentsCannotChangeCurrency(t *testing.T) {
 	}
 }
 
+// GET /household tells an owner the currency is locked, so Settings can say so
+// before Save rather than after a 422. It is the same count the refusal above
+// reads, so an archived holding still locks.
+//
+// A limited member is never told. They cannot change the currency at all, and
+// the flag would tell a child without Money that the household holds
+// investments.
+func TestGetHouseholdTellsOnlyAnOwnerThatHoldingsLockTheCurrency(t *testing.T) {
+	env := newTestEnv(t)
+	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
+
+	if env.getHousehold(t, session).PrimaryCurrencyLocked {
+		t.Fatal("primaryCurrencyLocked = true before anything is held, want false")
+	}
+
+	account := newHoldingAccount(t, env, session, csrf, "Brokerage", "investment")
+	rec := env.authed(t, http.MethodPost, "/api/v1/holdings", map[string]any{
+		"accountId": account, "name": "Gold", "instrument": "gold", "unit": "gram",
+	}, session, csrf)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create holding = %d (body = %s)", rec.Code, rec.Body.String())
+	}
+	var created struct {
+		Holding struct {
+			ID string `json:"id"`
+		} `json:"holding"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &created); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	if !env.getHousehold(t, session).PrimaryCurrencyLocked {
+		t.Fatal("primaryCurrencyLocked = false with one holding, want true")
+	}
+
+	rec = env.authed(t, http.MethodPost, "/api/v1/holdings/"+created.Holding.ID+"/archive", nil, session, csrf)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("archive holding = %d (body = %s)", rec.Code, rec.Body.String())
+	}
+	if !env.getHousehold(t, session).PrimaryCurrencyLocked {
+		t.Fatal("primaryCurrencyLocked = false once the only holding is archived, want true: its events still record a cost")
+	}
+
+	limitedSession, _ := env.signIn(t, env.limitedEmail, env.limitedPassword)
+	if env.getHousehold(t, limitedSession).PrimaryCurrencyLocked {
+		t.Fatal("primaryCurrencyLocked = true for a limited member, want false: it would disclose that the household holds investments")
+	}
+}
+
 // A child row belongs to the holding in the URL, not merely to the household.
 // If a delete scoped on (household_id, id) alone, a request naming holding A
 // and a row of holding B would succeed -- inside one household, so no

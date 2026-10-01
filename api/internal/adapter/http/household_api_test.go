@@ -314,6 +314,7 @@ type householdResponse struct {
 	SecondaryCurrency     string `json:"secondaryCurrency"`
 	FXRateMode            string `json:"fxRateMode"`
 	Timezone              string `json:"timezone"`
+	PrimaryCurrencyLocked bool   `json:"primaryCurrencyLocked"`
 }
 
 func (env *testEnv) getHousehold(t *testing.T, session *http.Cookie) householdResponse {

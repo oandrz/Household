@@ -5,8 +5,9 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { stubFetchRoutes } from "../../test/fetchStub";
-import type { Household, Me } from "../auth/schemas";
+import type { Me } from "../auth/schemas";
 import { CurrencyPanel } from "./CurrencyPanel";
+import type { HouseholdSettings } from "./useHousehold";
 
 const ME_URL = "/api/v1/auth/me";
 const HOUSEHOLD_URL = "/api/v1/household";
@@ -26,7 +27,7 @@ function currenciesFixture() {
   };
 }
 
-function householdFixture(overrides: Partial<Household> = {}): Household {
+function householdFixture(overrides: Partial<HouseholdSettings> = {}): HouseholdSettings {
   return {
     id: "h-1",
     name: "Andreas & Christine",
@@ -36,6 +37,7 @@ function householdFixture(overrides: Partial<Household> = {}): Household {
     secondaryCurrency: "IDR",
     fxRateMode: "auto",
     timezone: "Asia/Singapore",
+    primaryCurrencyLocked: false,
     ...overrides,
   };
 }
@@ -111,6 +113,60 @@ describe("CurrencyPanel", () => {
       const targetId = label.getAttribute("for");
       expect(document.getElementById(targetId!)).not.toBeNull();
     });
+  });
+
+  // QA ISSUE-012. The server refuses a currency change once the household
+  // holds investments. An owner used to find that out only after Save.
+  it("shows an owner the currency as locked, with the reason, instead of a field to edit", async () => {
+    const fetchMock = stubFetchRoutes({
+      [`GET ${ME_URL}`]: { status: 200, body: meFixture("owner") },
+      [`GET ${HOUSEHOLD_URL}`]: { status: 200, body: householdFixture({ primaryCurrencyLocked: true }) },
+      [`GET ${CURRENCIES_URL}`]: { status: 200, body: currenciesFixture() },
+    });
+    const { container } = renderPanel();
+
+    expect(await screen.findByText("SGD (S$)")).toBeInTheDocument();
+    expect(
+      screen.getByText("Can't be changed while you hold investments. Every holding records what it cost in this currency."),
+    ).toBeInTheDocument();
+    // No field and no Save for the currency: nothing on screen can send the
+    // request the server would refuse. The time zone's own Save stays.
+    expect(screen.queryByLabelText("Primary currency")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Save" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save time zone" })).toBeInTheDocument();
+    // The wording is still there, as text rather than as a label for a
+    // control that is no longer in the page.
+    expect(screen.getByText("Primary currency")).toBeInTheDocument();
+    container.querySelectorAll("label[for]").forEach((label) => {
+      expect(document.getElementById(label.getAttribute("for")!)).not.toBeNull();
+    });
+    expect(
+      fetchMock.mock.calls.some(([, init]) => (init?.method ?? "GET").toUpperCase() === "PATCH"),
+    ).toBe(false);
+  });
+
+  it("says nothing about a lock to a limited member, who cannot change the currency anyway", async () => {
+    stubFetchRoutes({
+      [`GET ${ME_URL}`]: { status: 200, body: meFixture("limited") },
+      [`GET ${HOUSEHOLD_URL}`]: { status: 200, body: householdFixture() },
+      [`GET ${CURRENCIES_URL}`]: { status: 200, body: currenciesFixture() },
+    });
+    renderPanel();
+
+    await screen.findByText("SGD (S$)");
+    expect(screen.queryByText(/hold investments/)).not.toBeInTheDocument();
+  });
+
+  it("keeps the field for an owner whose household holds no investments", async () => {
+    stubFetchRoutes({
+      [`GET ${ME_URL}`]: { status: 200, body: meFixture("owner") },
+      [`GET ${HOUSEHOLD_URL}`]: { status: 200, body: householdFixture({ primaryCurrencyLocked: false }) },
+      [`GET ${CURRENCIES_URL}`]: { status: 200, body: currenciesFixture() },
+    });
+    renderPanel();
+
+    expect(await screen.findByLabelText("Primary currency")).toHaveValue("SGD");
+    expect(screen.queryByText(/hold investments/)).not.toBeInTheDocument();
   });
 
   it("issues a PATCH toggling showSecondaryCurrency for an owner", async () => {

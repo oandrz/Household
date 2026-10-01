@@ -8,6 +8,25 @@ import (
 	"github.com/andreasoentoro/hearth/api/internal/usecase"
 )
 
+// householdSettingsDTO is GET /household's body: the household, plus what the
+// Settings screen needs to know before it offers a field. It is not the
+// household inside GET /auth/me, which stays a plain householdDTO so that
+// reading who is signed in never counts holdings.
+type householdSettingsDTO struct {
+	householdDTO
+	// PrimaryCurrencyLocked is true when a PATCH that changes primaryCurrency
+	// would be refused with PRIMARY_CURRENCY_HELD_BY_HOLDINGS. It is only ever
+	// true for an owner; see handleGetHousehold.
+	PrimaryCurrencyLocked bool `json:"primaryCurrencyLocked"`
+}
+
+// handleGetHousehold is open to any signed-in member: it renders amounts for
+// anyone who can see a money figure.
+//
+// primaryCurrencyLocked is worked out for an owner only. An owner is the only
+// one who can change the currency, so only an owner has a use for it. For a
+// limited member it stays false: the lock exists because the household holds
+// investments, and a child without Money must not learn that from here.
 func handleGetHousehold(deps Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		scope, ok := RequestScope(r)
@@ -20,7 +39,16 @@ func handleGetHousehold(deps Deps) http.HandlerFunc {
 			MapDomainError(w, r, err)
 			return
 		}
-		WriteJSON(w, http.StatusOK, toHouseholdDTO(h))
+		body := householdSettingsDTO{householdDTO: toHouseholdDTO(h)}
+		if scope.Membership.Role == domain.RoleOwner {
+			locked, err := deps.Households.PrimaryCurrencyLocked(r.Context(), scope.HouseholdID)
+			if err != nil {
+				MapDomainError(w, r, err)
+				return
+			}
+			body.PrimaryCurrencyLocked = locked
+		}
+		WriteJSON(w, http.StatusOK, body)
 	}
 }
 
@@ -46,8 +74,7 @@ type updateHouseholdRequest struct {
 // It sits behind requireSession + requireCSRF + requireOwner: currency and
 // FX settings are household-wide, on the parents' Settings screen, and a
 // limited member (a child) must not change them. GET /household stays open
-// to any authenticated member -- it renders amounts for anyone who can see
-// a money figure, and discloses nothing they can't already see on screen.
+// to any authenticated member; see handleGetHousehold for what it tells whom.
 func handleUpdateHousehold(deps Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		scope, ok := RequestScope(r)

@@ -12,7 +12,7 @@ import { type FormEvent, useState } from "react";
 import { apiErrorMessage } from "../../api/errorMessage";
 import { useCurrencies, useMe } from "../auth/useAuth";
 import { ToggleSwitch } from "../../components/ToggleSwitch";
-import { currencyLabel } from "./copy";
+import { currencyLabel, PRIMARY_CURRENCY_LOCKED_NOTICE } from "./copy";
 import { TimeZoneRow } from "./TimeZoneRow";
 import { useHousehold, useUpdateHousehold } from "./useHousehold";
 
@@ -30,6 +30,12 @@ export function CurrencyPanel() {
   const updateHousehold = useUpdateHousehold();
   const currencies = useCurrencies();
   const isOwner = me.data?.membership.role === "owner";
+  // The server refuses a change of primary currency once the household holds
+  // investments, and GET /household says so. An owner is told here, before
+  // Save, and gets no field to type a change the server would turn down.
+  // The server's refusal stays: this only saves the person the round trip.
+  const currencyLocked = household.data?.primaryCurrencyLocked === true;
+  const canEditCurrency = isOwner && !currencyLocked;
 
   // The served list is the one place a symbol comes from now -- see
   // copy.ts's currencyLabel. An unrecognised or not-yet-loaded code simply
@@ -67,7 +73,7 @@ export function CurrencyPanel() {
 
   const trimmedCurrencyInput = currencyInput.trim().toUpperCase();
   const canSaveCurrency =
-    isOwner &&
+    canEditCurrency &&
     household.isSuccess &&
     CURRENCY_CODE_PATTERN.test(trimmedCurrencyInput) &&
     trimmedCurrencyInput !== household.data.primaryCurrency &&
@@ -102,49 +108,54 @@ export function CurrencyPanel() {
 
       {household.isSuccess && (
         <div className="flex flex-col gap-3.5 text-[13px]">
-          <div className="flex items-center justify-between">
-            {/* <label htmlFor> only when the input it names actually renders
-                (owner-only, below) -- a limited member's browser otherwise
-                has a <label for="primary-currency"> pointing at an id that
-                is never in the DOM, a dangling-label DevTools accessibility
-                issue. A plain <span> carries the same wording without
-                claiming to label a control that isn't there. */}
-            {isOwner ? (
-              <label htmlFor="primary-currency" className="text-ink">
-                Primary currency
-              </label>
-            ) : (
-              <span className="text-ink">Primary currency</span>
-            )}
-            {isOwner ? (
-              <form onSubmit={handleCurrencySubmit} className="flex items-center gap-2">
-                <input
-                  id="primary-currency"
-                  type="text"
-                  value={currencyInput}
-                  disabled={updateHousehold.isPending}
-                  onChange={(event) => {
-                    setCurrencyTouched(true);
-                    setCurrencyInput(event.target.value.toUpperCase().slice(0, 3));
-                  }}
-                  maxLength={3}
-                  // min-h-11/sm:min-h-0: py-2.5 alone measured short of the
-                  // 44px floor at this text size -- TransactionFilters.tsx's
-                  // own SELECT_CLASS comment has the measured numbers.
-                  className="min-h-11 w-16 rounded-lg border border-hairline px-3 py-2.5 text-center font-semibold uppercase text-ink disabled:cursor-not-allowed disabled:opacity-60 sm:min-h-0 sm:py-1.5"
-                />
-                <button
-                  type="submit"
-                  disabled={!canSaveCurrency}
-                  className="min-h-11 rounded-lg bg-accent px-2.5 py-2.5 text-[11px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60 sm:min-h-0 sm:py-1.5"
-                >
-                  Save
-                </button>
-              </form>
-            ) : (
-              <span className="rounded-lg border border-hairline px-3 py-1.5 font-semibold text-ink">
-                {currencyLabel(household.data.primaryCurrency, primarySymbol)}
-              </span>
+          <div className="flex flex-col gap-1.5">
+            <div className="flex items-center justify-between">
+              {/* <label htmlFor> only when the input it names actually renders
+                  (an owner whose currency is not locked, below) -- anyone else's
+                  browser otherwise has a <label for="primary-currency"> pointing
+                  at an id that is never in the DOM, a dangling-label DevTools
+                  accessibility issue. A plain <span> carries the same wording
+                  without claiming to label a control that isn't there. */}
+              {canEditCurrency ? (
+                <label htmlFor="primary-currency" className="text-ink">
+                  Primary currency
+                </label>
+              ) : (
+                <span className="text-ink">Primary currency</span>
+              )}
+              {canEditCurrency ? (
+                <form onSubmit={handleCurrencySubmit} className="flex items-center gap-2">
+                  <input
+                    id="primary-currency"
+                    type="text"
+                    value={currencyInput}
+                    disabled={updateHousehold.isPending}
+                    onChange={(event) => {
+                      setCurrencyTouched(true);
+                      setCurrencyInput(event.target.value.toUpperCase().slice(0, 3));
+                    }}
+                    maxLength={3}
+                    // min-h-11/sm:min-h-0: py-2.5 alone measured short of the
+                    // 44px floor at this text size -- TransactionFilters.tsx's
+                    // own SELECT_CLASS comment has the measured numbers.
+                    className="min-h-11 w-16 rounded-lg border border-hairline px-3 py-2.5 text-center font-semibold uppercase text-ink disabled:cursor-not-allowed disabled:opacity-60 sm:min-h-0 sm:py-1.5"
+                  />
+                  <button
+                    type="submit"
+                    disabled={!canSaveCurrency}
+                    className="min-h-11 rounded-lg bg-accent px-2.5 py-2.5 text-[11px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60 sm:min-h-0 sm:py-1.5"
+                  >
+                    Save
+                  </button>
+                </form>
+              ) : (
+                <span className="rounded-lg border border-hairline px-3 py-1.5 font-semibold text-ink">
+                  {currencyLabel(household.data.primaryCurrency, primarySymbol)}
+                </span>
+              )}
+            </div>
+            {isOwner && currencyLocked && (
+              <p className="text-[11.5px] leading-snug text-muted">{PRIMARY_CURRENCY_LOCKED_NOTICE}</p>
             )}
           </div>
 

@@ -5,10 +5,11 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { stubFetchRoutes } from "../../test/fetchStub";
-import type { Household, Me } from "../auth/schemas";
+import type { Me } from "../auth/schemas";
 import { TimeZoneRow } from "./TimeZoneRow";
+import type { HouseholdSettings } from "./useHousehold";
 
-function householdFixture(timezone = "Asia/Singapore"): Household {
+function householdFixture(timezone = "Asia/Singapore"): HouseholdSettings {
   return {
     id: "h-1",
     name: "Andreas & Christine",
@@ -18,6 +19,7 @@ function householdFixture(timezone = "Asia/Singapore"): Household {
     secondaryCurrency: "IDR",
     fxRateMode: "auto",
     timezone,
+    primaryCurrencyLocked: false,
   };
 }
 

@@ -328,6 +328,31 @@ func TestUpdateNotificationsRoundTripsAllFourFlags(t *testing.T) {
 	}
 }
 
+// The Settings screen asks this before it offers the currency field, so the
+// person is told up front instead of after Save. The answer has to be the one
+// Update acts on: both read the same count.
+func TestThePrimaryCurrencyIsLockedExactlyWhenTheHouseholdHoldsInvestments(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+
+	locked, err := f.householdSvc.PrimaryCurrencyLocked(ctx, f.householdID)
+	if err != nil {
+		t.Fatalf("PrimaryCurrencyLocked with nothing held: %v", err)
+	}
+	if locked {
+		t.Fatal("locked = true with nothing held, want false")
+	}
+
+	f.holdings.n = 1
+	locked, err = f.householdSvc.PrimaryCurrencyLocked(ctx, f.householdID)
+	if err != nil {
+		t.Fatalf("PrimaryCurrencyLocked with one holding: %v", err)
+	}
+	if !locked {
+		t.Fatal("locked = false with one holding, want true")
+	}
+}
+
 // Changing the primary currency while the household holds investments would
 // strand them: a holding event records its cost in the currency AT THE
 // TIME, with no way to re-express it under a new one. The fold would then
