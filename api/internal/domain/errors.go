@@ -176,6 +176,11 @@ var (
 	// a cash account could end up holding 300g of gold.
 	ErrAccountHasHoldings = errors.New("that account holds investments and cannot change type")
 
+	// ErrInvalidTimezone is a household time zone that is not an IANA name
+	// this build can load. It also covers "" and "Local", which Go would load
+	// as UTC and as the server's own zone -- see ParseTimezone.
+	ErrInvalidTimezone = errors.New("that time zone is not recognised")
+
 	ErrUnknownAccountType         = errors.New("unknown account type")
 	ErrAccountNicknameRequired    = errors.New("an account nickname is required")
 	ErrLiabilityBalanceNegative   = errors.New("a debt's balance is the amount owed and cannot be negative")
