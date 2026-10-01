@@ -256,3 +256,26 @@ func TestGoalAddContributionRefusesAnAmountPastTheCeilingOnEitherSide(t *testing
 		}
 	}
 }
+
+// Telegram's /spend and free text reach the ledger through the same
+// TransactionService the web form does, so the chat cannot be a way around
+// the ceiling. The amount here is one ParseAmount can read (it refuses only
+// past 18 digits), so the refusal has to come from the ceiling, and with its
+// own error: the bot answers ErrInvalidAmount with "that amount could not be
+// read", which would be the wrong thing to say about a readable number.
+func TestTelegramSpendRefusesAnAmountPastTheCeiling(t *testing.T) {
+	svc, repo := telegramCommandFixture(t)
+
+	tooLarge := spend(78)
+	tooLarge.AmountText = "1000000000000.01" // one cent past S$1 trillion
+	_, err := svc.LogSpend(context.Background(), tooLarge)
+	if !errors.Is(err, domain.ErrAmountTooLarge) {
+		t.Fatalf("LogSpend = %v, want ErrAmountTooLarge", err)
+	}
+	if errors.Is(err, domain.ErrInvalidAmount) {
+		t.Fatalf("LogSpend = %v, must not also read as an unreadable amount", err)
+	}
+	if len(repo.transactions) != 0 {
+		t.Fatalf("%d transactions were stored, want none", len(repo.transactions))
+	}
+}
