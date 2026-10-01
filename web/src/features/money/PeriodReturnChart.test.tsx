@@ -47,6 +47,35 @@ function bars() {
 }
 
 describe("PeriodReturnChart", () => {
+  // SVG text scales with the chart's width, so a label inside the drawing has
+  // no fixed size. The labels are HTML laid over it instead.
+  it("draws the period labels as HTML outside the SVG, so they keep one size", () => {
+    render(
+      <PeriodReturnChart
+        periods={[period(1), period(2)]}
+        holdings={[holding("Gold", [1000, 2000])]}
+        primaryCurrency="SGD"
+      />,
+    );
+    const svg = document.querySelector<SVGSVGElement>("[data-testid='period-return-chart']");
+    expect(svg?.querySelectorAll("text")).toHaveLength(0);
+    expect(screen.getByText("Q1 2026").tagName).toBe("SPAN");
+    expect(screen.getByText("Q2 2026").tagName).toBe("SPAN");
+  });
+
+  it("colours each holding from the theme's own series tokens", () => {
+    render(
+      <PeriodReturnChart
+        periods={[period(1)]}
+        holdings={[holding("Gold", [1000]), holding("D05", [500])]}
+        primaryCurrency="SGD"
+      />,
+    );
+    const [first, second] = bars();
+    expect(first).toHaveClass("text-accent");
+    expect(second).toHaveClass("text-holding-2");
+  });
+
   it("draws one bar per holding per period", () => {
     render(
       <PeriodReturnChart
