@@ -1,6 +1,9 @@
 package domain
 
-import "fmt"
+import (
+	"fmt"
+	"time"
+)
 
 type Role string
 
@@ -92,6 +95,12 @@ type Household struct {
 	// in, such as "Asia/Singapore". It decides which day "today" is for every
 	// member (TodayIn). Validate it with ParseTimezone before storing it.
 	Timezone string
+	// CreatedAt is the instant the household was created. The database sets
+	// it and nothing changes it afterwards: a repository ignores it on every
+	// write. It is an instant, not a day. Read the day it names with
+	// TodayIn(CreatedAt, Timezone), which is how the retro floor finds the
+	// month the household was created in.
+	CreatedAt time.Time
 }
 
 type Membership struct {

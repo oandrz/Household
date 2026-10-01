@@ -99,7 +99,7 @@ INSERT INTO households (name, family_name, primary_currency,
                         show_secondary_currency, secondary_currency, timezone)
 VALUES ($1, $2, $3, $4, $5, $6)
 RETURNING id, name, family_name, primary_currency,
-          show_secondary_currency, secondary_currency, fx_rate_mode, timezone
+          show_secondary_currency, secondary_currency, fx_rate_mode, timezone, created_at
 `
 
 type CreateHouseholdParams struct {
@@ -120,6 +120,7 @@ type CreateHouseholdRow struct {
 	SecondaryCurrency     string
 	FxRateMode            string
 	Timezone              string
+	CreatedAt             pgtype.Timestamptz
 }
 
 func (q *Queries) CreateHousehold(ctx context.Context, arg CreateHouseholdParams) (CreateHouseholdRow, error) {
@@ -141,6 +142,7 @@ func (q *Queries) CreateHousehold(ctx context.Context, arg CreateHouseholdParams
 		&i.SecondaryCurrency,
 		&i.FxRateMode,
 		&i.Timezone,
+		&i.CreatedAt,
 	)
 	return i, err
 }
@@ -423,7 +425,7 @@ func (q *Queries) ExtendSession(ctx context.Context, arg ExtendSessionParams) er
 
 const getHousehold = `-- name: GetHousehold :one
 SELECT id, name, family_name, primary_currency, show_secondary_currency,
-       secondary_currency, fx_rate_mode, timezone
+       secondary_currency, fx_rate_mode, timezone, created_at
 FROM households WHERE id = $1
 `
 
@@ -436,6 +438,7 @@ type GetHouseholdRow struct {
 	SecondaryCurrency     string
 	FxRateMode            string
 	Timezone              string
+	CreatedAt             pgtype.Timestamptz
 }
 
 func (q *Queries) GetHousehold(ctx context.Context, id pgtype.UUID) (GetHouseholdRow, error) {
@@ -450,6 +453,7 @@ func (q *Queries) GetHousehold(ctx context.Context, id pgtype.UUID) (GetHousehol
 		&i.SecondaryCurrency,
 		&i.FxRateMode,
 		&i.Timezone,
+		&i.CreatedAt,
 	)
 	return i, err
 }
@@ -1215,7 +1219,7 @@ SET name = $2, family_name = $3, primary_currency = $4, show_secondary_currency 
     secondary_currency = $6, fx_rate_mode = $7, timezone = $8
 WHERE id = $1
 RETURNING id, name, family_name, primary_currency, show_secondary_currency,
-          secondary_currency, fx_rate_mode, timezone
+          secondary_currency, fx_rate_mode, timezone, created_at
 `
 
 type UpdateHouseholdParams struct {
@@ -1238,6 +1242,7 @@ type UpdateHouseholdRow struct {
 	SecondaryCurrency     string
 	FxRateMode            string
 	Timezone              string
+	CreatedAt             pgtype.Timestamptz
 }
 
 func (q *Queries) UpdateHousehold(ctx context.Context, arg UpdateHouseholdParams) (UpdateHouseholdRow, error) {
@@ -1261,6 +1266,7 @@ func (q *Queries) UpdateHousehold(ctx context.Context, arg UpdateHouseholdParams
 		&i.SecondaryCurrency,
 		&i.FxRateMode,
 		&i.Timezone,
+		&i.CreatedAt,
 	)
 	return i, err
 }
