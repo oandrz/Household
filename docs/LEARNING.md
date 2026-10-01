@@ -597,6 +597,36 @@ count stays the number of bullets.)
   last sentence, written two months before this fix: a derived "this
   month" computed server-side is a product decision wearing a bug's
   clothes. It was recorded seven times and decided once.
+- **A rule on two of five facts, and a writer that goes round the service
+  that owns the rule (QA ISSUE-013, 2026-10-01).** "A recorded fact may not
+  be dated in the future" was enforced for holdings and for an account's
+  opening balance. A transaction, a bill payment and a goal contribution
+  took any date, so an expense dated 2099 lowered today's balance: a balance
+  sums every row with no upper bound on the date. The obvious fix is one
+  check in `TransactionService`, and it would have left a hole.
+  `BillService.MarkPaid` writes an expense dated `paidOn` through
+  `BillRepository.RecordPayment`, straight into `transactions`, and never
+  passes through `TransactionService`. With the check only where the name
+  suggests, a bill "paid" next year would still have written a future-dated
+  ledger row. **When a rule guards a table, list every writer of the table,
+  not every caller of the service**: `grep 'CreateTransaction('` over the
+  repositories finds two, and `InsertGoalContribution(` finds three (manual,
+  a new goal's starting balance, a budget rollover). The last two are dated
+  today by the server and need no check, which is worth knowing on purpose
+  rather than by luck.
+- **A fixture dated "the 14th of this month" passes for half of every
+  month (2026-10-01).** `TestGoalListReflectsRealDerivedFigures` dated its
+  contribution the 14th of the current month so it would always count as
+  "this month". Once a contribution may not be dated after today, that
+  fixture is in the future from the 1st to the 13th and legal from the 14th
+  on. It failed because this work happened to run on the 1st. Run on the
+  20th it would have gone in green and broken the suite twelve days later,
+  on a change that touched nothing. Six bill tests paid bills on dates in
+  2030 for no reason but that nothing stopped them. **After adding a date
+  rule, grep the fixtures for dates computed from `time.Now()`, not only for
+  literal years**, and ask of each one whether it is legal on the 1st and on
+  the last day of a month. A date that must be "this month and not after
+  today" has one safe value, today.
 
 The **seventh date instance, 2026-09-12 — and the first one a test caught
 before it shipped.** `domain.Period.Contains` needs the calendar day a
@@ -3816,6 +3846,20 @@ sentence read as a reason not to look, and it sat one screen away from the
 tries X; `TestEveryAmountFieldOnTheWireRefusesAFigurePastTheCeiling` is that
 test now, and the comment names the two cases that still reach the row.
 
+**"The account form shows it beside its own field", 2026-10-01.** When the
+future-date error was renamed for every fact, the opening balance kept its
+own sentinel, and the reason went into a doc comment and a commit message:
+the account form shows `INVALID_AS_OF` beside its own field. No form reads
+that code. `grep -rn INVALID_AS_OF web/src` finds nothing, and the account
+form shows the sentence in its one error line like every other form. The
+claim came from a review note and was written down without the grep that
+takes five seconds. It was caught in the browser walk, by looking at where
+the transaction form put the same sentence and then going to see how the
+account form did it "differently". The comment now gives the true reason
+(a separate wire code, named after the field), and a later commit says the
+earlier message was wrong. **A reason for keeping two things apart is a
+claim about both of them. Check the one you did not just edit.**
+
 ---
 
 ### 17. A requirement the plan drops is invisible to every review that reads the plan
@@ -5209,6 +5253,27 @@ route with a missing guard has no second line of defence.
   changes it, which is also the owner's rule for every recorded fact:
   existing rows stay. **When a validation is tightened, ask what already
   stored data fails it, and whether an unrelated edit re-runs it.**
+- **A refusal's sentence can encode the rule it was written under
+  (2026-10-01).** `409 RETRO_NOTHING_TO_START` said "Both this month and last
+  month already have a retro." That was the only way to reach it. Once a
+  retro could not start before the household's creation month, a household
+  created this month reached it with one retro and no last month at all, and
+  the sentence was false. Nothing failed: the test asserts the code, not the
+  words. It was found by reading the response body in a failing test's
+  output. **When a rule gains a condition, grep the user-facing sentences
+  that explain the old rule**: the error table, the copy files and the
+  comments beside both. Four frontend comments said "null means both months
+  have a retro" for the same reason.
+- **A new dependency on a row's age breaks every test that creates the row
+  and uses it at once (2026-10-01).** The retro floor reads
+  `households.created_at`. Every test household is created a moment before
+  the test uses it, so the only retro any of them can start is this month's.
+  Two HTTP tests start two retros in a row and broke. The fix is a helper
+  that backdates the household by direct SQL, not a looser assertion: those
+  tests were about the second and third `POST`, and still are. The same thing
+  met the browser walk, where the seeded household is also created that
+  minute and cannot have a draft for last month until its creation is moved
+  back.
 - **Every authenticated request now depends on one more row being
   readable.** Both auth middlewares read the household to work out its day.
   A zone that cannot be loaded is a 500 on every route, including the
@@ -6779,11 +6844,41 @@ route with a missing guard has no second line of defence.
   "Start September retro" on Singapore time. Both are correct by the rule
   as built (the earlier of last month and this month with no retro), and
   both name a month the household did not exist in. The owner has already
-  decided the floor at the creation month; it is a ⬜ row in the tracker,
-  and this is what it looks like until it is built.
+  decided the floor at the creation month. It was a ⬜ row in the tracker
+  when this was written and was built later the same day: a household
+  created on 1 October is now offered October.
 - **Refs go stale after a re-render.** `fill @e29` after typing into
   another field landed nowhere, and the form then refused to submit for an
   empty amount. Filling by the input's `id` does not have the problem.
+
+### The three calendar rules' browser walk (2026-10-01)
+
+- **Move the household a day behind and the walk shows whose day is used.**
+  With the household on Singapore, the browser on Singapore and the server
+  eight hours behind, "tomorrow is refused" proves little: every clock but
+  the server's agrees. With the household moved to `Pacific/Pago_Pago`, a
+  transaction dated 1 October was refused as "in the future" while the
+  browser and the server were both on 1 October, and one dated 30 September
+  saved. The rows saved earlier that morning were then dated after the
+  household's today without anyone having typed a future date, which is the
+  very case "an edit is checked only when it changes the date" exists for.
+  Editing one's description saved.
+- **A snapshot ref can match two elements.** The browse tool resolves
+  `@e17` by role and name. A row that is itself a button takes its
+  accessible name from everything inside it, including the inner "Mark
+  paid" or "Add contribution" button, so the ref for the inner button
+  matched both and the click was refused. `button[aria-label="Mark Internet
+  paid"]` and `button:text-is("Add contribution")` are exact.
+- **The card had no way to the retro it named.** `NextRetroCard` linked to
+  the Retros page only from its "No retro yet" prompt. A card showing a
+  retro in progress was a dead end, and had been since it shipped. Nothing
+  tested for it, because the tests asserted what the card said. It was
+  found by reading the component for the new state and asking what a
+  person would click. A draft on the card links to the Retros page now.
+- **What was not walked.** `hearthctl transaction add` and `import` against
+  a running stack, and Telegram `/spend`. The first two share the browser's
+  route and the token middleware, pinned by a Go test; the third is dated
+  today by the server and cannot be refused.
 
 ### Provisioning the read-only role on the box (2026-09-05)
 

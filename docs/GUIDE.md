@@ -241,10 +241,28 @@ unique within a household.
 **An invite will not send.** If the address already belongs to a member, Hearth
 refuses rather than sending a link that could never be accepted.
 
-**"That date is in the future."** A holding purchase, sale, price or dividend,
-and an account's starting balance, cannot be dated after today, and "today"
-is your household's, by the time zone in Settings. If today's date is being
-refused, the time zone is probably wrong: check the date shown under it.
+**"That date is in the future."** Anything that has already happened cannot be
+dated after today: a transaction, a bill payment ("paid on"), a contribution
+to a goal, a holding purchase, sale, price or dividend, and an account's
+starting balance. Plans can be dated ahead: a bill's next due date, a goal's
+target month, a budget for a coming month. "Today" is your household's, by
+the time zone in Settings. If today's date is being refused, the time zone is
+probably wrong: check the date shown under it.
+
+An entry saved earlier with a later date is left as it is, and you can still
+correct its description or amount. Only changing its date to another future
+day is refused.
+
+**The Retros page has no "Start retro" button.** There is no month left to
+start. A retro can be started for last month or this month, whichever is
+earlier and has none yet, and never for a month before your household was
+created. A household created in October starts with October's retro; once
+that exists, the next one is November's.
+
+**Overview shows last month's retro.** That is on purpose. When this month has
+no retro yet and last month's is still unfinished, the "Next retro" card shows
+last month's as "In progress" with a link to it, because finishing it comes
+first. The Retros page still lets you start this month's.
 
 **Nothing loads at all.** Check the stack is up with `make ps`, and the logs with
 `make logs`.

@@ -252,11 +252,13 @@ stores an IANA zone, and both the server and the frontend work out "today"
 in it, so they cannot disagree about the date or the month the way a UTC
 server and a browser in Singapore did for eight hours of every day. §4 has
 the middleware step, §5 "The household's calendar" the flow, §6 the column
-and §7 the frontend helper. **Not built:** refusing a future-dated
-transaction, bill payment or goal contribution (only holdings and opening
-balances are refused today), the retro's creation-month floor, and
-Overview's open-draft card on the 1st of a month. All three are owner
-decisions already made and listed in `docs/FEATURE_TRACKER.md`.
+and §7 the frontend helper. Three rules ride on it, all built: a recorded
+fact (a transaction, a bill payment, a goal contribution, a holding's rows,
+an opening balance) may not be dated after the household's today (§5 "The
+household's calendar"); a retro can never be started for a month before the
+household was created (§5 "Retros"); and Overview's "Next retro" card shows
+last month's draft while it is still open and this month has no retro (§5
+"What the frontend loads").
 
 ---
 
@@ -2405,17 +2407,63 @@ Archiving a bill or a goal needs both, and takes both: the stamp from the
 clock, and the household's day for the row it answers with.
 `BillService.SetArchived(at, today)` used to take one value for the two jobs.
 
-**A recorded fact may not be dated after the household's today.** That is
-enforced for holdings (purchase, sale, price, income) and for an account's
-opening balance, both through `domain.IsAfterDay`, which compares calendar
-days so that today itself is always allowed. The opening balance used to
-allow a day past the server's clock, because the server could not know the
-household's today; that slack is gone. On an account edit the date is
-checked only when the edit changes it: a stored date can be after today
-without anyone typing a future date (the household's zone was moved west),
-and the edit form sends the date back with every save. Transactions, bill
-payments and goal contributions still accept any date — see
-`docs/FEATURE_TRACKER.md`.
+**A recorded fact may not be dated after the household's today; a plan
+may.** Facts are a transaction, a bill payment's `paidOn`, a goal
+contribution, a holding's purchase, sale, price and income row, and an
+account's opening balance. Plans are a bill's next due date, a goal's target
+month and a budget month. Every fact goes through one comparison,
+`domain.IsAfterDay`, which compares calendar days so that today itself is
+always allowed, and through one helper, `refuseFutureDate`
+(`usecase/fact_date.go`), which answers `domain.ErrDateInFuture`: `422
+INVALID_DATE`, "That date is in the future." (The opening balance keeps its
+own `ErrOpeningBalanceInFuture`, only because it answers with its own wire
+code, `INVALID_AS_OF`, named after the field. The sentence is the same.)
+
+```mermaid
+flowchart LR
+    Web["Browser form"] --> HTTP
+    CLI["hearthctl add / CSV import"] --> HTTP
+    HTTP["HTTP handler<br/>passes scope.Today"] --> TS["TransactionService<br/>Create / CreateOrReplay / Update"]
+    HTTP --> BS["BillService.MarkPaid"]
+    HTTP --> GS["GoalService.AddContribution"]
+    HTTP --> HS["HoldingService<br/>RecordEvent / RecordValuation / RecordIncome"]
+    TG["Telegram /spend and free text"] --> TC["TelegramCommandService<br/>works out today, dates the row today"]
+    TC --> TS
+    TS --> R["refuseFutureDate(date, today)"]
+    BS --> R
+    GS --> R
+    HS --> R
+    R -->|"date after today"| E["ErrDateInFuture<br/>422 INVALID_DATE"]
+    R -->|"today or earlier"| W["the write"]
+```
+
+Three things about it are not obvious from the picture.
+
+- **The check is in the service, never in a handler or a form**, so every
+  channel gets it: a browser, `hearthctl` and its CSV import (the same
+  `POST /transactions`), and Telegram. No frontend form has a rule of its
+  own; each shows the server's sentence as it arrives.
+- **A bill payment needs its own check.** `MarkPaid` writes an expense dated
+  `paidOn` through `BillRepository.RecordPayment`, which never passes through
+  `TransactionService`. Without the check in `BillService` that expense would
+  be the one ledger row with no date rule at all. The bill's due date is a
+  plan and is not checked: paying a bill before it is due is ordinary.
+- **An edit is checked only when it changes the date.** A stored date can be
+  after today without anyone typing a future date: the row was saved before
+  this rule, or the household's zone was moved west afterwards. The edit form
+  sends the date back with every save, so `TransactionService.Update` and
+  `AccountService.Update` compare the patch with the stored day and check
+  only a day that differs. Such a row can still have its description
+  corrected. That is why the date rule is not inside the shared `validate`,
+  which runs on every edit.
+
+Balances, a goal's total and the net worth trend still sum with no upper
+bound on the date (`AccountRepository.MonthlyMovements`' own comment): the
+rule is at the write, and a stored row dated after today counts in all of
+them alike.
+
+The opening balance used to allow a day past the server's clock, because the
+server could not know the household's today; that slack is gone.
 
 **The frontend computes the same day from the same zone** (§5 "What the
 frontend loads"), so a form's default date is a date the server accepts, and
@@ -3123,11 +3171,13 @@ sequenceDiagram
     participant Svc as RetroService
     participant RRepo as RetroRepository
     participant ARepo as RetroActionRepository
+    participant HRepo as HouseholdRepository
     participant DB as Postgres
 
     B1->>H: POST /api/v1/retros
     H->>Svc: Start(householdID, today)
-    Svc->>Svc: StartableMonth -- earlier of {prev, current}<br/>with no retro row (domain, pure)
+    Svc->>HRepo: Get(householdID) -- created_at and time zone
+    Svc->>Svc: StartableMonth -- earlier of {prev, current}<br/>with no retro row, never before the<br/>household's creation month (domain, pure)
     Svc->>RRepo: Create(householdID, month)
     RRepo->>DB: INSERT retros (version=1) -- ErrAlreadyExists<br/>on the UNIQUE(household_id, month) clash
 
@@ -3166,6 +3216,21 @@ sequenceDiagram
     Svc->>ARepo: Add(in) -- action + assignees, one transaction
     Note over ARepo,DB: July's own row is untouched and stays<br/>unticked (decision 4) -- carriedFrom is<br/>provenance only, ON DELETE SET NULL
 ```
+
+**The month a retro starts on is the server's to choose, and it never
+reaches back before the household existed.** `POST /retros` carries no month.
+`RetroService.Start` picks the earlier of {last month, this month} that has no
+retro yet, both of them the household's months (`Scope.Today`), and skips a
+month before the one the household was created in. For that it reads the
+household through `HouseholdRepository`: `domain.Household.CreatedAt` is the
+creation instant, and `domain.TodayIn(CreatedAt, Timezone)` is the day it
+names in the zone the household keeps now. So a household created on 1
+October is offered October, and after October's retro exists the next `POST`
+answers `409 RETRO_NOTHING_TO_START` rather than filing September, which the
+household was not there for. `GET /retros` computes `startMonth` with the
+same function, so the page's button and the API's refusal cannot disagree.
+Retros that already exist for earlier months are untouched: the floor is on
+starting one, not on reading or editing one.
 
 **The `version` guard exists because a retro is one shared draft with no
 per-line ownership** (decision 1) — either partner can open it and type into
@@ -3495,6 +3560,19 @@ reuses `useRetros` the same way again, against `/marriage/retros`'s own
 cache entry, reading `openActionCount` rather than `actionCount` — the two
 disagree the moment a retro's actions are partly ticked, and
 `docs/LEARNING.md` carries the gap between them as its own entry.
+
+**Which retro `NextRetroCard` shows is decided in the card, from that one
+list, in this order:** this month's retro if there is one; else last month's
+retro if it is still a draft; else a prompt to start the month the server
+offers (`startMonth`). The second step is why Overview on the 1st of a month
+shows "September retro · In progress" rather than "No retro yet this month"
+while September is unfinished. Only last month's draft is brought forward,
+never an older one, so the card cannot name a month the Retros page is
+offering to *start*. A draft on the card links to `/marriage/retros`. The
+page may offer to start the new month beside that draft; the card names the
+one thing that needs attention and the page offers everything that can be
+done. "This month" and "last month" are the household's
+(`monthIn(useHouseholdZone())`, and `monthBefore` for the one before it).
 
 **`RetrosPage` itself, not just Overview's card, now fires a second request
 of its own.** It mounts `AgreementsToDiscuss` unconditionally (spec decision

@@ -234,6 +234,29 @@ month other than the one shown (a UX item, not a clock defect).
 4. **Overview on the 1st with last month's draft still open shows the open
    draft**, not a prompt for the new month. This changes the Overview card spec.
 
+### How decisions 2 to 4 were built (step 8, 2026-10-01)
+
+- **Decision 2.** One helper, `refuseFutureDate` in `usecase/fact_date.go`,
+  and one error, `domain.ErrDateInFuture` (it was `ErrHoldingDateInFuture`;
+  renamed because it is no longer about holdings). `TransactionService.Create`,
+  `CreateOrReplay` and `Update`, `BillService.MarkPaid` and
+  `GoalService.AddContribution` each take the household's `today` and call it.
+  `Update` calls it only when the patch changes the stored day. The wire
+  answer is the one holdings already gave: `422 INVALID_DATE`, "That date is
+  in the future." The forms show that sentence as it arrives; none has a rule
+  of its own. `TransactionDeps.Clock` was unused and is gone.
+- **Decision 3.** `domain.StartableMonth` takes the household's creation day
+  and skips a candidate month before the creation month. `RetroService` reads
+  the household for it, so `domain.Household` now carries `CreatedAt` (the
+  column already existed). The creation day is the creation instant read in
+  the zone the household keeps now; the zone at sign-up is not stored.
+- **Decision 4.** No API change: `GET /retros` already lists last month's
+  retro. `NextRetroCard` shows this month's retro, else last month's while it
+  is a draft, else the prompt. Read as "whenever this month has no retro and
+  last month's is still a draft", not only on the 1st: a draft still open on
+  the 5th is still the thing to finish. A draft on the card links to the
+  Retros page.
+
 ## ADR 12 (text to add as `docs/adr/0012-one-calendar-per-household.md`)
 
 **Status:** accepted, 2026-10-01.

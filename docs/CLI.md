@@ -188,8 +188,16 @@ person goes to stderr. A 204 prints nothing.
   Every command still takes its `--date` explicitly, so nothing here guesses
   one. But the server judges a date against the household's own calendar day,
   worked out from its time zone, for a token exactly as for a browser. A
-  holding event, price or income row, or an account's opening balance, dated
-  after that day is refused with 422 (`INVALID_DATE`, `INVALID_AS_OF`). A
+  transaction, a bill payment's `paidOn`, a goal contribution, a holding
+  event, price or income row, or an account's opening balance, dated after
+  that day is refused with 422 (`INVALID_DATE`; `INVALID_AS_OF` for the
+  opening balance). A plan may be dated ahead: a bill's `nextDue`, a goal's
+  `targetMonth`, a budget month. A `PATCH /transactions/<id>` is checked only
+  when it changes the date, so a row stored with a later date can still have
+  its other fields corrected. In `transaction import`, a row dated after
+  today is not caught by `--dry-run` (the CLI does not know the household's
+  day): the server refuses that row, it is listed under `failed`, the other
+  rows are still created, and the exit code is 3. A
   request that names no month (`api GET /transactions`) gets the household's
   current month. Read the zone with `hearthctl api GET /household`; an owner
   changes it with

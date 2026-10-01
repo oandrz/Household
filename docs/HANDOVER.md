@@ -17,11 +17,24 @@ in three months or someone new.
 > spec `docs/superpowers/specs/2026-10-01-hearth-household-calendar-design.md`,
 > build-order steps 1 to 7). Walked in a real browser on a separate stack.
 >
-> **What is next is step 8 of that spec, three owner decisions already made
-> and not started:** refuse a future-dated transaction, bill payment and goal
-> contribution; never offer a retro for a month before the household was
-> created; and on the 1st of a month show last month's still-open retro draft
-> on Overview. Each is a ⬜ row in `docs/FEATURE_TRACKER.md`.
+> **Step 8 of that spec, the three owner-decided rules, is built on the same
+> branch, also 2026-10-01, also not pushed.** A transaction, a bill payment
+> and a goal contribution dated after the household's today are refused
+> (`422 INVALID_DATE`; the date half of QA ISSUE-013); a retro can never be
+> started for a month before the household was created; and Overview's "Next
+> retro" card shows last month's draft while it is still open and this month
+> has no retro. Each was a ⬜ row in `docs/FEATURE_TRACKER.md` and is ✅ now.
+> Walked in a real browser on a separate stack.
+>
+> **Left from QA ISSUE-013:** a transaction description takes 600 characters
+> without complaint, and unknown JSON fields in a request body are ignored
+> rather than refused. Neither is started.
+>
+> **One thing to know when this branch meets `tablet-touch-targets`.**
+> `NextRetroCard.tsx` gained a second link that copies its neighbour's
+> `min-h-11 … sm:min-h-0`. That branch moves the touch-size reset to `lg:`
+> and has a test that fails on any `sm:` reset, so the new link needs the
+> same one-word change when the two are merged.
 >
 > **Before this is deployed:** migration `00022_household_timezone.sql` sets
 > every existing household to `Asia/Singapore`. That is the owner's decision

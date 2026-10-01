@@ -69,12 +69,22 @@ pin both halves.
   on who opened the page is kept. The household's zone decides it, not the
   caller's.
 
-Point 6 is enforced today for holdings (purchase, sale, price, income) and for
-an account's opening balance. Transactions, bill payments and goal
-contributions still accept any date; bringing them under the rule is listed in
-`docs/FEATURE_TRACKER.md`. When it is, existing rows stay, and an edit is
-checked only when it changes the date, which is already how an account's
-opening balance behaves.
+Point 6 is enforced for every fact it lists. Each write refuses a date after
+the household's today with `422` and "That date is in the future.": a
+holding's purchase, sale, price and income row, a transaction (created or
+edited, from the browser, `hearthctl` or its CSV import), a bill payment's
+`paidOn`, and a goal contribution use `domain.ErrDateInFuture`; an account's
+opening balance uses its own `domain.ErrOpeningBalanceInFuture`. A Telegram
+`/spend` is dated the household's today by the server, so it cannot be ahead.
+
+Rows stored before the rule stay as they are, and so does a row the rule would
+now refuse because the household moved its zone west. An edit is checked only
+when it changes the date, so such a row can still have its description or
+amount corrected. The edit form sends the date back with every save, so
+"changed" means "differs from the stored day", not "the request carries a
+date". Balances, a goal's total and the net worth trend still sum with no
+upper bound on the date: the rule is at the write, and a stored row dated
+after today counts.
 
 ## Rejected
 
