@@ -424,6 +424,7 @@ func run() error {
 				Accounts:     accountSvc,
 				Categories:   categorySvc,
 				Transactions: transactionSvc,
+				Households:   households,
 				Clock:        sysClock,
 				Nudges:       nudgeRepoIfEnabled(cfg, nudgeRepo),
 			}),

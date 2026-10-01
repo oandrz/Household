@@ -42,7 +42,12 @@ type TelegramCommandDeps struct {
 	Accounts     *AccountService
 	Categories   *CategoryService
 	Transactions *TransactionService
-	Clock        Clock
+	// Households supplies the zone a chat command is dated in. A chat has
+	// no browser to say what day it is, so this service works out the
+	// household's today itself, the way the HTTP middleware does for a web
+	// request (ADR 12).
+	Households HouseholdRepository
+	Clock      Clock
 	// Nudges is nil when the daily digest is not configured; /nudges then
 	// answers that there is nothing to turn off.
 	Nudges NudgeRepository
@@ -98,7 +103,12 @@ func (e *ResolutionError) Error() string {
 // commands; the key is this plus the update id.
 const TelegramUpdateKeyPrefix = "telegram-update-"
 
+// LogSpend writes one /spend or /income, dated the household's today.
 func (s *TelegramCommandService) LogSpend(ctx context.Context, in TelegramSpend) (TelegramSpendResult, error) {
+	today, err := s.householdToday(ctx, in.HouseholdID)
+	if err != nil {
+		return TelegramSpendResult{}, err
+	}
 	account, err := s.resolveAccount(ctx, in.HouseholdID, in.AccountName)
 	if err != nil {
 		return TelegramSpendResult{}, err
@@ -119,7 +129,7 @@ func (s *TelegramCommandService) LogSpend(ctx context.Context, in TelegramSpend)
 		IdempotencyKey:     fmt.Sprintf("%s%d", TelegramUpdateKeyPrefix, in.UpdateID),
 		HouseholdID:        in.HouseholdID,
 		Kind:               string(in.Kind),
-		OccurredOn:         s.d.Clock.Now().UTC().Truncate(24 * time.Hour),
+		OccurredOn:         today,
 		Description:        in.Description,
 		CategoryID:         categoryID,
 		PaidByMembershipID: in.MembershipID,
@@ -139,6 +149,18 @@ func (s *TelegramCommandService) LogSpend(ctx context.Context, in TelegramSpend)
 		return TelegramSpendResult{}, err
 	}
 	return TelegramSpendResult{Transaction: created, AccountName: account.Nickname, MinorUnits: units, Replayed: replayed}, nil
+}
+
+// householdToday is the calendar day it is for this household right now.
+// An unloadable zone is an error and nothing is written: dating the row by
+// the server's clock instead would file it under the wrong day, and on the
+// 1st of a month under the wrong month's budget.
+func (s *TelegramCommandService) householdToday(ctx context.Context, householdID string) (time.Time, error) {
+	household, err := s.d.Households.Get(ctx, householdID)
+	if err != nil {
+		return time.Time{}, err
+	}
+	return domain.TodayIn(s.d.Clock.Now(), household.Timezone)
 }
 
 // Balances is /balance: every live account with its current balance.
