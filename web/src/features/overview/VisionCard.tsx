@@ -14,7 +14,7 @@
 // them in array order too), so nothing here invents a "show on overview"
 // flag, and there is no "which three of six" question to answer.
 //
-// Owns its own useVision(currentVisionYear()) call rather than taking a
+// Owns its own useVision call for the household's year rather than taking a
 // prop from OverviewPage, the same NextRetroCard.tsx/NextBillCard.tsx shape
 // -- and for the identical reason NextRetroCard.tsx's own header comment
 // gives for useRetros: useVision (marriage/useVision.ts) takes no `enabled`
@@ -26,7 +26,8 @@
 // two independently-mounted callers sharing one cache entry by key, neither
 // importing the other.
 import { Link } from "@tanstack/react-router";
-import { currentVisionYear } from "../marriage/visionQueryKeys";
+import { useHouseholdZone } from "../auth/useHouseholdZone";
+import { yearIn } from "../../lib/householdDate";
 import { useVision } from "../marriage/useVision";
 import type { VisionPillar } from "../marriage/visionSchemas";
 import { OVERVIEW_COPY } from "./copy";
@@ -57,7 +58,7 @@ function overviewLine(pillar: VisionPillar): { label: string; figure: string | n
 }
 
 export function VisionCard() {
-  const vision = useVision(currentVisionYear());
+  const vision = useVision(yearIn(useHouseholdZone()));
 
   // Covers "still loading" and "errored" in one guard, the same
   // NextRetroCard.tsx convention: this card has no loading spinner or error

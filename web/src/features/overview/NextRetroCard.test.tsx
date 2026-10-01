@@ -6,19 +6,24 @@
 // header comment explains why that hook is mounted per-component rather than
 // lifted to OverviewPage.
 import { screen, waitFor } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { renderWithRouter } from "../../test/renderWithRouter";
 import { stubFetchRoutes, type RouteResponse } from "../../test/fetchStub";
-import { currentMonth } from "../money/month";
+import { meRoute } from "../../test/meFixture";
+import { monthIn, yearIn } from "../../lib/householdDate";
 import { monthNameOnly, nextMonthName } from "../marriage/retroCopy";
 import type { RetroSummary, RetrosResponse } from "../marriage/retroSchemas";
-import { currentVisionYear } from "../marriage/visionQueryKeys";
 import type { Vision } from "../marriage/visionSchemas";
 import { OVERVIEW_COPY } from "./copy";
 import { NextRetroCard } from "./NextRetroCard";
 
-const MONTH = currentMonth();
-const YEAR = currentVisionYear();
+// The household these tests sign in as keeps its calendar in this zone, and
+// the component reads "this month" and "this year" in it. The expected month
+// and year are worked out in the same zone, so the two cannot disagree on the
+// day the suite happens to run.
+const ZONE = "Asia/Singapore";
+const MONTH = monthIn(ZONE);
+const YEAR = yearIn(ZONE);
 
 // A minimal, schema-valid RetroSummary (retroSummarySchema's own required
 // fields) -- every field present rather than optional, matching
@@ -65,12 +70,22 @@ function visionFixture(overrides: Partial<Vision> = {}): Vision {
 
 function renderCard(retrosResponse: RetrosResponse, extraRoutes: Record<string, RouteResponse | RouteResponse[]> = {}) {
   const fetchMock = stubFetchRoutes({
+    ...meRoute(ZONE),
     "GET /api/v1/retros": { status: 200, body: retrosResponse },
     [`GET /api/v1/marriage/vision?year=${YEAR}`]: { status: 200, body: { vision: visionFixture() } },
     ...extraRoutes,
   });
   return { fetchMock, ...renderWithRouter(<NextRetroCard />) };
 }
+
+const ORIGINAL_TZ = process.env.TZ;
+
+afterEach(() => {
+  vi.useRealTimers();
+  vi.unstubAllGlobals();
+  if (ORIGINAL_TZ === undefined) delete process.env.TZ;
+  else process.env.TZ = ORIGINAL_TZ;
+});
 
 describe("NextRetroCard", () => {
   // actionCount (3) and openActionCount (2) are deliberately DIFFERENT
@@ -221,5 +236,29 @@ describe("NextRetroCard", () => {
       await waitFor(() => expect(visionRequested).toBe(true));
       expect(screen.queryByTestId("vision-checkin-strip")).not.toBeInTheDocument();
     });
+  });
+
+  // "This month's retro" is the household's month. On the household's 1
+  // October, October's draft is the current one, though the browser in Los
+  // Angeles, and the server's UTC clock, are still in September.
+  it("treats the household's month as the current one, whatever zone the browser is in", async () => {
+    process.env.TZ = "America/Los_Angeles";
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-09-30T23:00:00Z"));
+    stubFetchRoutes({
+      ...meRoute("Asia/Singapore"),
+      "GET /api/v1/retros": {
+        status: 200,
+        body: retrosFixture({
+          retros: [summaryFixture({ month: "2026-10", finished: false, actionCount: 1, openActionCount: 1 })],
+        }),
+      },
+      "GET /api/v1/marriage/vision?year=2026": { status: 200, body: { vision: visionFixture({ year: 2026 }) } },
+    });
+    renderWithRouter(<NextRetroCard />);
+
+    const card = await screen.findByTestId("next-retro-card");
+    await waitFor(() => expect(card).toHaveTextContent("October retro"));
+    expect(card).toHaveTextContent(OVERVIEW_COPY.nextRetroInProgress);
   });
 });

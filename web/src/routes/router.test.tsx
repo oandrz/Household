@@ -298,10 +298,9 @@ describe("the real route tree", () => {
   // that fails until moneyBudgetRoute is added to addChildren.
   it("mounts the Budget page at /money/budget for a caller who has the money capability", async () => {
     // Task 12 wired BudgetPage to useBudget/useCurrencies, so this now needs
-    // both stubbed -- BudgetPage.tsx's own currentMonth() reads the real
-    // calendar, so `Date` is faked to a fixed July 2026 day first (the same
-    // `toFake: ["Date"]` convention AccountModal.test.tsx's own today()
-    // tests use) to pin which month it requests.
+    // both stubbed -- BudgetPage.tsx opens on the household's current month,
+    // so `Date` is faked to a fixed mid-July 2026 day first (`toFake:
+    // ["Date"]` only, so timers stay real) to pin which month it requests.
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(new Date("2026-07-15T12:00:00Z"));
     stubFetchRoutes({
@@ -572,7 +571,7 @@ describe("the real route tree", () => {
   // that actually proves marriageVisionRoute exists and mounts the real
   // VisionPage, not a 404.
   it("mounts the Vision page at /marriage/vision for a caller who has the marriage capability", async () => {
-    // VisionPage.tsx's own currentVisionYear() reads the real calendar, so
+    // VisionPage.tsx opens on the household's current year, so
     // `Date` is faked first (the Budget test's own `toFake: ["Date"]`
     // convention above) to pin which year it requests.
     vi.useFakeTimers({ toFake: ["Date"] });

@@ -2,15 +2,18 @@ import { fireEvent, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { renderWithRouter } from "../../test/renderWithRouter";
 import { stubFetchRoutes, type RouteResponse } from "../../test/fetchStub";
-import { currentMonth } from "../money/month";
+import { monthIn, yearIn } from "../../lib/householdDate";
 import type { RetrosResponse } from "../marriage/retroSchemas";
-import { currentVisionYear } from "../marriage/visionQueryKeys";
 import type { Vision } from "../marriage/visionSchemas";
 import { OVERVIEW_COPY } from "./copy";
 import { OverviewPage } from "./OverviewPage";
 
-const MONTH = currentMonth();
-const YEAR = currentVisionYear();
+// The page reads "this month" and "this year" in the household's zone, so
+// the expected values are worked out in the same one. It is on meBody()
+// below.
+const ZONE = "Asia/Singapore";
+const MONTH = monthIn(ZONE);
+const YEAR = yearIn(ZONE);
 
 function meBody(overrides: { role?: string; capabilities?: string[] } = {}) {
   return {
@@ -23,6 +26,7 @@ function meBody(overrides: { role?: string; capabilities?: string[] } = {}) {
       showSecondaryCurrency: false,
       secondaryCurrency: "",
       fxRateMode: "static",
+      timezone: ZONE,
     },
     membership: {
       id: "m1",
@@ -369,7 +373,7 @@ describe("OverviewPage", () => {
     expect(await screen.findByTestId("vision-card")).toHaveTextContent('"Slow down together"');
     expect(screen.getByTestId("vision-checkin-strip")).toHaveTextContent("Slow down together");
     // VisionCard.tsx and NextRetroCard.tsx each own an independent
-    // useVision(currentVisionYear()) call, but both read the identical
+    // useVision call for the household's year, but both read the identical
     // ["vision", year] TanStack Query key from the one QueryClient this page
     // mounts under -- so the two calls dedupe into a single network request,
     // not two. This is the assertion that actually proves that, rather than

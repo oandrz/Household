@@ -355,7 +355,7 @@ describe("BillModal", () => {
 
   // A settled one-off (paid, no next occurrence) has nextDue: null --
   // billDTO's own comment on why that field is never dropped from the DTO.
-  // Prefilling the date input from `bill.nextDue ?? today()` would silently
+  // Prefilling the date input with today whenever nextDue is null would silently
   // turn null into today's date, so an edit that never touches Next due
   // (renaming the bill, say) would still PATCH a nextDue the household never
   // chose and un-settle it -- docs/LEARNING.md pattern 1, in the one field

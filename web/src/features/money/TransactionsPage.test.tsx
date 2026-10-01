@@ -10,6 +10,7 @@ import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { renderWithRouter } from "../../test/renderWithRouter";
 import { stubFetchRoutes, type RouteResponse } from "../../test/fetchStub";
+import { meRoute } from "../../test/meFixture";
 import { TransactionsPage } from "./TransactionsPage";
 import type { Account } from "./schemas";
 import type { MonthSummary, Transaction } from "./transactionSchemas";
@@ -771,5 +772,28 @@ describe("TransactionsPage", () => {
       "Couldn't load your transactions.",
     );
     expect(screen.queryByTestId("transactions-owner-only")).not.toBeInTheDocument();
+  });
+
+  // "Today" in a day heading is the household's today. At 23:00 UTC on 30
+  // September a row dated 1 October is today's for a household in Singapore,
+  // though the browser, in Los Angeles, is still on the 30th.
+  it("marks the household's today in the day headings, whatever zone the browser is in", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    // 23:00 UTC on 30 September: 16:00 that day in Los Angeles, where the
+    // browser is, and 07:00 on 1 October in Singapore, where the household is.
+    process.env.TZ = "America/Los_Angeles";
+    vi.setSystemTime(new Date("2026-09-30T23:00:00Z"));
+    renderPage({
+      transactions: [
+        expenseFixture({ id: "txn-1", occurredOn: "2026-10-01" }),
+        expenseFixture({ id: "txn-2", occurredOn: "2026-09-30" }),
+      ],
+      summary: { count: 2, spentMinor: 10460, month: "2026-10" },
+      extraRoutes: meRoute("Asia/Singapore"),
+    });
+
+    expect(await screen.findByText("Today · Oct 1")).toBeInTheDocument();
+    expect(screen.getByText("Sep 30")).toBeInTheDocument();
+    expect(screen.queryByText("Today · Sep 30")).not.toBeInTheDocument();
   });
 });

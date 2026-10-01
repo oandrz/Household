@@ -23,10 +23,10 @@
 // requires here -- there is no `enabled: false` idle state for this
 // component to sit in.
 import { Link } from "@tanstack/react-router";
-import { currentMonth } from "../money/month";
+import { useHouseholdZone } from "../auth/useHouseholdZone";
+import { monthIn, yearIn } from "../../lib/householdDate";
 import { monthNameOnly, nextMonthName } from "../marriage/retroCopy";
 import { useRetros } from "../marriage/useRetros";
-import { currentVisionYear } from "../marriage/visionQueryKeys";
 import { useVision } from "../marriage/useVision";
 import { OVERVIEW_COPY } from "./copy";
 
@@ -34,12 +34,13 @@ export function NextRetroCard() {
   const retros = useRetros();
   // The check-in strip's own data (design's "Vision check-in: 2026 theme —
   // 'Slow down together'", drawn inside this same card). A second,
-  // independent useVision(currentVisionYear()) call rather than one shared
+  // independent useVision call for the household's year rather than one shared
   // with VisionCard.tsx -- VisionCard.tsx's own header comment explains why
   // that hook has to be mounted per-component (no `enabled` option to gate
   // it centrally) and why two independent callers on the same query key cost
   // one request, not two.
-  const vision = useVision(currentVisionYear());
+  const zone = useHouseholdZone();
+  const vision = useVision(yearIn(zone));
 
   // Same three-states-as-one guard NextBillCard.tsx uses: still loading, or
   // errored (a household owner is the only caller this route usually sees,
@@ -51,7 +52,7 @@ export function NextRetroCard() {
   if (!retros.data) return null;
 
   const { data } = retros;
-  // "Current" here is literally this calendar month, not `data.startMonth`
+  // "Current" here is literally the household's calendar month, not `data.startMonth`
   // -- those answer different questions. A retro already exists for this
   // month whenever `retros` (newest-month-first, retro_repo.go's own
   // ORDER BY) carries a row for it; `startMonth` only ever names a month
@@ -60,7 +61,7 @@ export function NextRetroCard() {
   // retro in the first few days of a new one. Reading `data.startMonth`
   // directly in the empty branch below (rather than re-deriving it here)
   // is what keeps that priority correct without duplicating it.
-  const current = data.retros.find((r) => r.month === currentMonth());
+  const current = data.retros.find((r) => r.month === monthIn(zone));
 
   return (
     <section

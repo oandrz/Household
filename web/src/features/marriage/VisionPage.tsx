@@ -19,11 +19,17 @@ import { MilestoneGrid } from "./MilestoneGrid";
 import { PillarCard } from "./PillarCard";
 import { VisionModal } from "./VisionModal";
 import { VISION_COPY } from "./visionCopy";
-import { currentVisionYear } from "./visionQueryKeys";
+import { useHouseholdZone } from "../auth/useHouseholdZone";
+import { yearIn } from "../../lib/householdDate";
 import { useVision } from "./useVision";
 
 export function VisionPage() {
-  const [year, setYear] = useState(currentVisionYear());
+  // The page opens on the household's current year. null means "no other
+  // year has been picked", and the current year is then worked out on every
+  // render, never stored at mount (BudgetPage.tsx's month does the same).
+  const householdYear = yearIn(useHouseholdZone());
+  const [chosenYear, setYear] = useState<number | null>(null);
+  const year = chosenYear ?? householdYear;
   const vision = useVision(year);
   // Whether the Edit-vision modal is open -- a plain boolean rather than
   // the modal's own component instance, since it takes no id or other prop
