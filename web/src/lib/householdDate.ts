@@ -76,3 +76,13 @@ export function longDateIn(zone: string, now: Date = new Date()): string {
   const read = (type: Intl.DateTimeFormatPartTypes) => parts.find((p) => p.type === type)?.value ?? "";
   return `${read("weekday")}, ${read("day")} ${read("month")} ${read("year")}`;
 }
+
+// The month before a "YYYY-MM" month: "2026-10" -> "2026-09", "2027-01" ->
+// "2026-12". Worked out from the two numbers, never through a Date: a Date
+// is built in the browser's zone, and this file exists so that zone decides
+// nothing.
+export function monthBefore(month: string): string {
+  const [year, monthNumber] = month.split("-").map(Number);
+  if (monthNumber === 1) return `${year - 1}-12`;
+  return `${year}-${String(monthNumber - 1).padStart(2, "0")}`;
+}

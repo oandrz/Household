@@ -3,7 +3,7 @@
 // else, and the clock is stopped at an instant where the two are on
 // different dates.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { longDateIn, monthIn, monthNameIn, todayIn, yearIn } from "./householdDate";
+import { longDateIn, monthBefore, monthIn, monthNameIn, todayIn, yearIn } from "./householdDate";
 
 const ORIGINAL_TZ = process.env.TZ;
 
@@ -95,5 +95,31 @@ describe("longDateIn", () => {
 
     expect(longDateIn("Asia/Singapore")).toBe("Thu, 1 Oct 2026");
     expect(longDateIn("Pacific/Pago_Pago")).toBe("Wed, 30 Sep 2026");
+  });
+});
+
+describe("monthBefore", () => {
+  it("is the month before, with the month zero-padded", () => {
+    expect(monthBefore("2026-10")).toBe("2026-09");
+    expect(monthBefore("2026-03")).toBe("2026-02");
+  });
+
+  it("walks January back to December of the year before", () => {
+    expect(monthBefore("2027-01")).toBe("2026-12");
+  });
+
+  // The answer is worked out from the two numbers and never through a Date,
+  // so the zone the browser is set to cannot move it by a month.
+  it("does not depend on the browser's time zone", () => {
+    const original = process.env.TZ;
+    try {
+      for (const zone of ["Pacific/Kiritimati", "Pacific/Pago_Pago", "America/Los_Angeles"]) {
+        process.env.TZ = zone;
+        expect(monthBefore("2026-10")).toBe("2026-09");
+      }
+    } finally {
+      if (original === undefined) delete process.env.TZ;
+      else process.env.TZ = original;
+    }
   });
 });

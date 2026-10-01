@@ -238,6 +238,91 @@ describe("NextRetroCard", () => {
     });
   });
 
+  // The card answers "what is there to do about retros right now". With no
+  // retro yet this month and last month's still a draft, that is: finish
+  // last month's. A prompt to start the new month would step over the one
+  // still open. Checked on the household's 1 October, the morning the QA
+  // walk found the card saying "No retro yet this month" over an unfinished
+  // September.
+  describe("when this month has no retro and last month's is still a draft", () => {
+    function renderOnTheFirstOfOctober(retros: RetroSummary[], startMonth: string | null) {
+      process.env.TZ = "America/Los_Angeles";
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(new Date("2026-09-30T23:00:00Z"));
+      stubFetchRoutes({
+        ...meRoute("Asia/Singapore"),
+        "GET /api/v1/retros": { status: 200, body: retrosFixture({ retros, startMonth }) },
+        "GET /api/v1/marriage/vision?year=2026": { status: 200, body: { vision: visionFixture({ year: 2026 }) } },
+      });
+      renderWithRouter(<NextRetroCard />);
+    }
+
+    it("shows last month's open draft and a way to it, not a prompt for the new month", async () => {
+      renderOnTheFirstOfOctober(
+        [summaryFixture({ month: "2026-09", finished: false, actionCount: 3, openActionCount: 2 })],
+        "2026-10",
+      );
+
+      const card = await screen.findByTestId("next-retro-card");
+      await waitFor(() => expect(card).toHaveTextContent("September retro"));
+      expect(card).toHaveTextContent(OVERVIEW_COPY.nextRetroInProgress);
+      expect(card).toHaveTextContent(OVERVIEW_COPY.nextRetroActions(2, "October"));
+      expect(card).not.toHaveTextContent(OVERVIEW_COPY.nextRetroNone);
+      expect(screen.queryByRole("link", { name: OVERVIEW_COPY.nextRetroStart("October") })).not.toBeInTheDocument();
+
+      const link = screen.getByRole("link", { name: OVERVIEW_COPY.nextRetroContinue("September") });
+      expect(link).toHaveAttribute("href", "/marriage/retros");
+    });
+
+    // Last month's retro is finished, so there is nothing open to go back
+    // to: the card prompts for this month, as it always did.
+    it("prompts for this month when last month's retro is finished", async () => {
+      renderOnTheFirstOfOctober([summaryFixture({ month: "2026-09", finished: true })], "2026-10");
+
+      expect(await screen.findByText(OVERVIEW_COPY.nextRetroNone)).toBeInTheDocument();
+      expect(screen.getByRole("link", { name: OVERVIEW_COPY.nextRetroStart("October") })).toBeInTheDocument();
+      expect(screen.getByTestId("next-retro-card")).not.toHaveTextContent("September retro");
+    });
+
+    // This month's retro always wins: once October is started, the card is
+    // about October, even with September still open beside it.
+    it("shows this month's retro once it exists, even with last month's still open", async () => {
+      renderOnTheFirstOfOctober(
+        [
+          summaryFixture({ id: "retro-oct", month: "2026-10", finished: false }),
+          summaryFixture({ id: "retro-sep", month: "2026-09", finished: false }),
+        ],
+        null,
+      );
+
+      const card = await screen.findByTestId("next-retro-card");
+      await waitFor(() => expect(card).toHaveTextContent("October retro"));
+      expect(card).not.toHaveTextContent("September retro");
+      expect(screen.getByRole("link", { name: OVERVIEW_COPY.nextRetroContinue("October") })).toHaveAttribute(
+        "href",
+        "/marriage/retros",
+      );
+    });
+
+    // Only last month's draft is brought forward. An older one is not: the
+    // Retros page offers last month to start, and the card says the same.
+    it("does not bring forward a draft older than last month", async () => {
+      renderOnTheFirstOfOctober([summaryFixture({ month: "2026-08", finished: false })], "2026-09");
+
+      expect(await screen.findByText(OVERVIEW_COPY.nextRetroNone)).toBeInTheDocument();
+      expect(screen.getByRole("link", { name: OVERVIEW_COPY.nextRetroStart("September") })).toBeInTheDocument();
+      expect(screen.getByTestId("next-retro-card")).not.toHaveTextContent("August retro");
+    });
+  });
+
+  // A finished retro has nothing to continue, so it gets no link.
+  it("offers no way to continue a finished retro", async () => {
+    renderCard(retrosFixture({ retros: [summaryFixture({ month: MONTH, finished: true })] }));
+
+    await screen.findByTestId("next-retro-card");
+    expect(screen.queryByRole("link", { name: OVERVIEW_COPY.nextRetroContinue(monthNameOnly(MONTH)) })).not.toBeInTheDocument();
+  });
+
   // "This month's retro" is the household's month. On the household's 1
   // October, October's draft is the current one, though the browser in Los
   // Angeles, and the server's UTC clock, are still in September.
