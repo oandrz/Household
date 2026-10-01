@@ -658,11 +658,11 @@ func TestBillsMarkPaidDefaultsAmountAdvancesNextDueAndAnswersPaymentAndBill(t *t
 
 	created := env.mustCreateBill(t, session, csrf, map[string]any{
 		"name": "Internet", "amountMinor": 45_000, "cadence": "monthly",
-		"nextDue": "2030-01-15", "payFromAccountId": accountID,
+		"nextDue": "2026-01-15", "payFromAccountId": accountID,
 	})
 
 	paid := env.mustPayBill(t, session, csrf, created.Bill.ID, map[string]any{
-		"paidOn": "2030-01-16",
+		"paidOn": "2026-01-16",
 	})
 
 	if paid.Payment.AmountMinor != 45_000 {
@@ -671,14 +671,14 @@ func TestBillsMarkPaidDefaultsAmountAdvancesNextDueAndAnswersPaymentAndBill(t *t
 	if paid.Payment.BillID != created.Bill.ID {
 		t.Fatalf("payment.billId = %q, want %q", paid.Payment.BillID, created.Bill.ID)
 	}
-	if paid.Payment.DueOn != "2030-01-15" {
-		t.Fatalf("payment.dueOn = %q, want 2030-01-15 -- the occurrence settled, not paidOn", paid.Payment.DueOn)
+	if paid.Payment.DueOn != "2026-01-15" {
+		t.Fatalf("payment.dueOn = %q, want 2026-01-15 -- the occurrence settled, not paidOn", paid.Payment.DueOn)
 	}
-	if paid.Payment.PaidOn != "2030-01-16" {
-		t.Fatalf("payment.paidOn = %q, want 2030-01-16", paid.Payment.PaidOn)
+	if paid.Payment.PaidOn != "2026-01-16" {
+		t.Fatalf("payment.paidOn = %q, want 2026-01-16", paid.Payment.PaidOn)
 	}
-	if paid.Bill.NextDue == nil || *paid.Bill.NextDue != "2030-02-15" {
-		t.Fatalf("bill.nextDue = %v, want 2030-02-15", paid.Bill.NextDue)
+	if paid.Bill.NextDue == nil || *paid.Bill.NextDue != "2026-02-15" {
+		t.Fatalf("bill.nextDue = %v, want 2026-02-15", paid.Bill.NextDue)
 	}
 	if paid.Bill.Settled {
 		t.Fatal("bill.settled = true, want false: a monthly bill always has a next occurrence")
@@ -698,20 +698,20 @@ func TestBillsMarkPaidTwiceOnTheSameOccurrenceIsConflict(t *testing.T) {
 
 	created := env.mustCreateBill(t, session, csrf, map[string]any{
 		"name": "Netflix", "amountMinor": 1_998, "cadence": "monthly",
-		"nextDue": "2030-01-05", "payFromAccountId": accountID,
+		"nextDue": "2026-01-05", "payFromAccountId": accountID,
 	})
 	env.mustPayBill(t, session, csrf, created.Bill.ID, map[string]any{
-		"amountMinor": 1_998, "paidOn": "2030-01-05",
+		"amountMinor": 1_998, "paidOn": "2026-01-05",
 	})
 
 	patchRec := env.authed(t, http.MethodPatch, "/api/v1/bills/"+created.Bill.ID,
-		map[string]any{"nextDue": "2030-01-05"}, session, csrf)
+		map[string]any{"nextDue": "2026-01-05"}, session, csrf)
 	if patchRec.Code != http.StatusOK {
 		t.Fatalf("patch nextDue back to the paid occurrence: status = %d, body = %s", patchRec.Code, patchRec.Body.String())
 	}
 
 	rec := env.authed(t, http.MethodPost, "/api/v1/bills/"+created.Bill.ID+"/pay",
-		map[string]any{"amountMinor": 1_998, "paidOn": "2030-01-06"}, session, csrf)
+		map[string]any{"amountMinor": 1_998, "paidOn": "2026-01-06"}, session, csrf)
 	assertErrorResponse(t, rec, http.StatusConflict, "ALREADY_EXISTS")
 }
 
@@ -792,8 +792,8 @@ func TestBillsMarkPaidInAnotherHouseholdIsNotFound(t *testing.T) {
 		name string
 		body map[string]any
 	}{
-		{"amount supplied", map[string]any{"amountMinor": 1_000, "paidOn": "2030-01-01"}},
-		{"amount omitted", map[string]any{"paidOn": "2030-01-01"}},
+		{"amount supplied", map[string]any{"amountMinor": 1_000, "paidOn": "2026-01-01"}},
+		{"amount omitted", map[string]any{"paidOn": "2026-01-01"}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -846,17 +846,17 @@ func TestBillsMarkPaidRefusesASettledOneOffWithNamedMessage(t *testing.T) {
 	accountID := env.mustCreateAccountID(t, session, csrf)
 	created := env.mustCreateBill(t, session, csrf, map[string]any{
 		"name": "Renew passport", "amountMinor": 7_000, "cadence": "one_off",
-		"nextDue": "2030-01-01", "payFromAccountId": accountID,
+		"nextDue": "2026-01-01", "payFromAccountId": accountID,
 	})
 	paid := env.mustPayBill(t, session, csrf, created.Bill.ID, map[string]any{
-		"amountMinor": 7_000, "paidOn": "2030-01-01",
+		"amountMinor": 7_000, "paidOn": "2026-01-01",
 	})
 	if paid.Bill.NextDue != nil {
 		t.Fatalf("nextDue after settling = %v, want nil", paid.Bill.NextDue)
 	}
 
 	rec := env.authed(t, http.MethodPost, "/api/v1/bills/"+created.Bill.ID+"/pay",
-		map[string]any{"amountMinor": 7_000, "paidOn": "2030-01-02"}, session, csrf)
+		map[string]any{"amountMinor": 7_000, "paidOn": "2026-01-02"}, session, csrf)
 	body := assertErrorResponse(t, rec, http.StatusUnprocessableEntity, "BILL_SETTLED")
 	if body.Error.Message == "You do not have permission to do that." {
 		t.Fatalf("message = %q, want a bill-settled specific message, not the generic FORBIDDEN one", body.Error.Message)
@@ -902,10 +902,10 @@ func TestBillsUndoDeletesThePaymentRewindsNextDueAndAnswers204WithNoBody(t *test
 
 	created := env.mustCreateBill(t, session, csrf, map[string]any{
 		"name": "Gym", "amountMinor": 8_000, "cadence": "monthly",
-		"nextDue": "2030-01-20", "payFromAccountId": accountID,
+		"nextDue": "2026-01-20", "payFromAccountId": accountID,
 	})
 	paid := env.mustPayBill(t, session, csrf, created.Bill.ID, map[string]any{
-		"amountMinor": 8_000, "paidOn": "2030-01-20",
+		"amountMinor": 8_000, "paidOn": "2026-01-20",
 	})
 
 	rec := env.authed(t, http.MethodDelete,
@@ -928,8 +928,8 @@ func TestBillsUndoDeletesThePaymentRewindsNextDueAndAnswers204WithNoBody(t *test
 	if found == nil {
 		t.Fatalf("bill %s missing from GET /bills after undo", created.Bill.ID)
 	}
-	if found.NextDue == nil || *found.NextDue != "2030-01-20" {
-		t.Fatalf("nextDue after undo = %v, want rewound to 2030-01-20", found.NextDue)
+	if found.NextDue == nil || *found.NextDue != "2026-01-20" {
+		t.Fatalf("nextDue after undo = %v, want rewound to 2026-01-20", found.NextDue)
 	}
 }
 
@@ -947,24 +947,24 @@ func TestBillsUndoRefusesAnOlderPaymentNamingTheUndoable(t *testing.T) {
 
 	created := env.mustCreateBill(t, session, csrf, map[string]any{
 		"name": "Netflix", "amountMinor": 1_998, "cadence": "monthly",
-		"nextDue": "2030-01-15", "payFromAccountId": accountID,
+		"nextDue": "2026-01-15", "payFromAccountId": accountID,
 	})
 	first := env.mustPayBill(t, session, csrf, created.Bill.ID, map[string]any{
-		"amountMinor": 1_998, "paidOn": "2030-01-15",
+		"amountMinor": 1_998, "paidOn": "2026-01-15",
 	})
 	env.mustPayBill(t, session, csrf, created.Bill.ID, map[string]any{
-		"amountMinor": 1_998, "paidOn": "2030-02-15",
+		"amountMinor": 1_998, "paidOn": "2026-02-15",
 	})
 
 	rec := env.authed(t, http.MethodDelete,
 		"/api/v1/bills/"+created.Bill.ID+"/payments/"+first.Payment.ID, nil, session, csrf)
 	body := assertErrorResponse(t, rec, http.StatusConflict, "BILL_PAYMENT_NOT_LATEST")
-	if !strings.Contains(body.Error.Message, "2030-02-15") {
-		t.Fatalf("message = %q, want it to name 2030-02-15, the payment that IS undoable", body.Error.Message)
+	if !strings.Contains(body.Error.Message, "2026-02-15") {
+		t.Fatalf("message = %q, want it to name 2026-02-15, the payment that IS undoable", body.Error.Message)
 	}
 	gotDue, _ := body.Error.Details["undoableDueOn"].(string)
-	if gotDue != "2030-02-15" {
-		t.Fatalf("details.undoableDueOn = %q, want 2030-02-15", gotDue)
+	if gotDue != "2026-02-15" {
+		t.Fatalf("details.undoableDueOn = %q, want 2026-02-15", gotDue)
 	}
 }
 

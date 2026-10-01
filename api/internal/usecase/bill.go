@@ -672,7 +672,14 @@ func (s *BillService) SetArchived(ctx context.Context, householdID, billID strin
 // pay-from account each mean something different to the household. Reason
 // is what the HTTP layer switches on to answer each with its own message,
 // without disturbing an errors.Is(err, domain.ErrForbidden) caller.
-func (s *BillService) MarkPaid(ctx context.Context, in MarkPayment) (BillPaymentView, error) {
+//
+// in.PaidOn may not be after today, the household's calendar day: a payment
+// is a recorded fact (refuseFutureDate). The check is here and not left to
+// TransactionService: the expense RecordPayment writes is dated PaidOn and
+// never passes through that service, so this is the only date check it
+// gets. The bill's due date is a plan and is not checked: paying a bill
+// before it is due is ordinary.
+func (s *BillService) MarkPaid(ctx context.Context, in MarkPayment, today time.Time) (BillPaymentView, error) {
 	if in.AmountMinor != nil && *in.AmountMinor <= 0 {
 		return BillPaymentView{}, domain.ErrBillAmountNotPositive
 	}
@@ -680,6 +687,9 @@ func (s *BillService) MarkPaid(ctx context.Context, in MarkPayment) (BillPayment
 		if err := domain.CheckAmountWithinLimit(*in.AmountMinor); err != nil {
 			return BillPaymentView{}, err
 		}
+	}
+	if err := refuseFutureDate(in.PaidOn, today); err != nil {
+		return BillPaymentView{}, err
 	}
 	rec, err := s.deps.Bills.Get(ctx, in.HouseholdID, in.BillID)
 	if err != nil {

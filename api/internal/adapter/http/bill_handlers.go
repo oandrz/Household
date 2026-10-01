@@ -353,7 +353,7 @@ func handleMarkBillPaid(deps Deps) http.HandlerFunc {
 			BillID:      id,
 			AmountMinor: req.AmountMinor,
 			PaidOn:      paidOn,
-		})
+		}, today)
 		if err != nil {
 			writeMarkPaidError(w, r, err)
 			return

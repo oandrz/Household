@@ -153,7 +153,7 @@ func TestBillMarkPaidRefusesAnAmountPastTheCeiling(t *testing.T) {
 
 	_, err := svc.MarkPaid(context.Background(), usecase.MarkPayment{
 		HouseholdID: "h1", BillID: "bill-1", AmountMinor: int64Ptr(onePastTheCeiling), PaidOn: day("2026-08-08"),
-	})
+	}, afterEveryPayment)
 	if !errors.Is(err, domain.ErrAmountTooLarge) {
 		t.Fatalf("MarkPaid = %v, want ErrAmountTooLarge", err)
 	}
