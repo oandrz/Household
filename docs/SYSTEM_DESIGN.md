@@ -902,7 +902,7 @@ in one file.
 | `BudgetRepository` | `adapter/postgres` | Fourteenth. `Get` returns `domain.ErrNotFound` for an unbudgeted month, which the service turns into the empty state, not an error; `Upsert` replaces one household-month wholesale in a single transaction — parent row upserted on `(household_id, month)`, every existing line deleted, every new line inserted, category ownership validated first — never a merge, so a category the caller left out of the payload is unambiguously gone after the call; `History` returns the closed months in range that actually have a budget row, never zero-filled; `RollOverToGoal` writes a `goal_contributions` row **and** stamps `budgets.rolled_over_at`/`rollover_goal_id` in one transaction — the stamp is a conditional `UPDATE ... WHERE rolled_over_at IS NULL`, so a second concurrent call finds no row to update and answers `ErrRolloverAlreadyDone` rather than writing a second contribution (§5) |
 | `GoalRepository` | `adapter/postgres` | Fifteenth. `List`/`Get` return each goal's stored fields plus the one figure only SQL can cheaply supply — the summed `contributed` — leaving percent, status and required-monthly to `domain.` arithmetic in the service; `Create` writes the goal and, when a starting balance is given, its opening contribution in one transaction, so a goal with a missing opening contribution cannot exist; `DeleteContribution` clears a rolled-over month's stamp in the same transaction as the delete when the row being removed is that month's rollover (§5). The port's own doc comment carries a warning no other repository needs: `goal_contributions.household_id` has no database-level constraint tying it to its own `goal_id`'s household, so every method that reads or writes a contribution filters by `household_id` **and** `goal_id` together, never by contribution id alone |
 | `BillRepository` | `adapter/postgres` | Sixteenth. `List`'s `includeArchived` is the same UNION-not-filter-swap contract as `AccountRepository`/`GoalRepository`. `RecordPayment` writes the expense (`transactions`), the payment (`bill_payments`) and the advanced `next_due` in one transaction — a bill left advanced with no payment, or a payment with no expense, is not a state this port can produce; `UndoPayment` reverses all three the same way, refusing any payment that is not the bill's most recent with `*domain.BillPaymentNotLatestError`. `MonthTotals` cannot come from `bills` alone — a bill already paid this month has `next_due` in the *next* one — so it unions `bill_payments` (by `due_on`) with still-unpaid live bills (by `next_due`); the two halves filter archived bills differently on purpose (§5). `bill_payments.household_id` carries the same unenforced-by-the-database warning as `goal_contributions`: every method filters by `household_id` **and** `bill_id` together, never by payment id alone (§6) |
-| `HoldingRepository`, `HoldingEventRepository`, `HoldingValuationRepository` | `adapter/postgres` (all three in `holding_repo.go`) | Seventeenth to nineteenth — three narrow ports over three tables rather than one object with fifteen methods, the same interface-segregation rule the nine before them follow. `HoldingRepository.List`'s `includeArchived` is the UNION-not-filter-swap contract again. **`HoldingEventRepository` is the one worth reading twice.** `ListByHolding` returns events ordered `(occurred_on, created_at, id)` and the port's doc comment calls that a CONTRACT, not a preference: `occurred_on` is a date, so buying and selling the same morning is a tie, and `domain.Holding.Position` sorts *stably* — it keeps whatever order it is handed. On identical same-day events, buy-then-sell realises 750 where sell-then-buy realises 1000, so the repository's ORDER BY is what makes a household's realised gain deterministic. `InsertWithFold`/`DeleteWithFold` exist because reading, folding and writing as three calls is not equivalent to doing them atomically: they take a row lock on the holding, list its events inside the same transaction, and hand them to the caller's fold, writing only if it accepts. The fold stays in the domain; the port owns the transaction and the lock, never the rule (§5) |
+| `HoldingRepository`, `HoldingEventRepository`, `HoldingValuationRepository` | `adapter/postgres` (all three in `holding_repo.go`) | Seventeenth to nineteenth — three narrow ports over three tables rather than one object with fifteen methods, the same interface-segregation rule the nine before them follow. `HoldingRepository.List`'s `includeArchived` is the UNION-not-filter-swap contract again. **`HoldingEventRepository` is the one worth reading twice.** `ListByHolding` returns events ordered `(occurred_on, created_at, id)` and the port's doc comment calls that a CONTRACT, not a preference: `occurred_on` is a date, so buying and selling the same morning is a tie, and `domain.Holding.Position` sorts *stably* — it keeps whatever order it is handed. On identical same-day events, buy-then-sell realises 750 where sell-then-buy realises 1000, so the repository's ORDER BY is what makes a household's realised gain deterministic. `InsertWithFold`/`DeleteWithFold` exist because reading, folding and writing as three calls is not equivalent to doing them atomically: they take a row lock on the holding, read its events **and its prices** inside the same transaction, and hand both to the caller's rule, a `usecase.HoldingFold`, writing only if it accepts. **`HoldingValuationRepository` has no plain `Upsert`.** Its one write is `UpsertWithFold`, which takes the *same* row lock and calls the same kind of fold, so a price write and an event write on one holding never overlap and there is no unguarded way to store a price. `HoldingFold`'s doc comment is the contract, written once: both arguments are the holding's rows as they *would be* after the write (a new event appended, a deleted one taken out, a new price in place of the row for the same calendar day), and the fold does no I/O because it runs holding the lock and a pool connection. The rule stays in the service and the domain; the ports own the transaction and the lock, never the rule (§5) |
 | `HoldingIncomeRepository` | `adapter/postgres` (`holding_repo.go`) | Twentieth. The dividends a holding paid and the charges made against it. **It has no ordering contract and no fold-inside-the-write**, and the contrast with `HoldingEventRepository` directly above is the point: income enters no average-cost pool, so no invariant spans two rows, no order changes the answer, and there is nothing for a lock to protect. Addition is commutative; the event fold is not |
 | `HoldingCounter` | `adapter/postgres` (`*HoldingRepo` already satisfies it) | Unnumbered, like `AccountLookup`/`GoalProgressReader` — a narrow port for one question asked in the opposite direction. It now answers two: whether an ACCOUNT still holds anything (which stops an account's type changing under its holdings), and whether a HOUSEHOLD does (which stops its primary currency changing under them — every holding event records its cost in the currency the books were kept in at the time, and nothing in the data can restate it). `AccountService` patches an account's `Type` freely, so without this an owner could turn a brokerage into a cash account while it still held 300g of gold, leaving holdings anchored to a type `HoldingService` would never have accepted. One method: does this account still hold anything. `AccountDeps.Holdings` is **required, not optional** — a nil there would silently disable the guard, and a guard you can switch off by forgetting a field is not a guard |
 | `AccountLookup`, `CategoryLookup` | `adapter/postgres` (`*AccountRepo` and `*CategoryRepo` already satisfy them) | Narrower ports `TransactionService` depends on instead of the full repositories above — interface segregation: it needs an account's currency and household, and whether a category id belongs to this household and what kind it is, never `List` or `EnsureSeeded`. `BillService.MarkPaid` depends on this same `AccountLookup`, for the same reason and to the same effect: the pay-from account's currency, not a value Bills stores of its own (§5). `BillService.Create`/`Update` depend on the same `CategoryLookup` too: a bill's category is copied onto the real expense `MarkPaid` writes, so it has to satisfy the ledger's own rule — this household's, and an expense category — or the spend lands in Budget's `Spent` and in no category row at all |
@@ -1428,8 +1428,7 @@ rows, and a link redemption writes neither.
 | POST | `/holdings/{id}/archive`, `/holdings/{id}/restore` | session · money · owner · CSRF |
 | POST | `/holdings/{id}/events` | session · money · owner · CSRF |
 | DELETE | `/holdings/{id}/events/{eventId}` | session · money · owner · CSRF |
-| POST | `/holdings/{id}/valuations` | session · money · owner · CSRF — POST but it **upserts**, and answers **200, never 201**: one price per holding per day, so a second write for the same date is a correction rather than a new thing |
-| DELETE | `/holdings/{id}/valuations/{valuationId}` | session · money · owner · CSRF — routed, but no screen calls it yet (`docs/FEATURE_TRACKER.md` names the gap) |
+| POST | `/holdings/{id}/valuations` | session · money · owner · CSRF — POST but it **upserts**, and answers **200, never 201**: one price per holding per day, so a second write for the same date is a correction rather than a new thing. **There is no route that deletes a price**: `HoldingValuationRepository.Delete` exists and nothing calls it, so a wrong price is corrected by posting the same date again, and a price recorded against the wrong day cannot be removed (`docs/FEATURE_TRACKER.md` names the gap) |
 | GET | `/holdings/report` | session · money · owner — `?kind=quarter\|half\|year`, `?count=` optional. **Registered before the `/holdings/{id}/…` routes and not shadowed by them**: chi prefers a static segment over a parameter, and a test says so rather than a comment hoping so. The window length defaults on the SERVER (6 quarters, 4 halves, 3 years) because the browser holding a second copy of that rule would be free to drift from the one the chart's bar budget was chosen against |
 | GET | `/holdings/{id}/income` | session · money · owner |
 | POST | `/holdings/{id}/income` | session · money · owner · CSRF — 201, and it does **not** upsert the way a valuation does: two dividends in one quarter are two payments, not a correction of each other |
@@ -3046,57 +3045,108 @@ bill autopaying with no named person makes that the common case, not the
 exception, so the grouping now emits an explicit `Unattributed` row rather
 than silently under-counting the month's spend.
 
-### Portfolio — the position is folded on read, and the fold runs inside the write
+### Portfolio — the position is folded on read, and the rule runs inside the write
 
 A holding stores no running total. What it holds, what that cost and what
 selling has realised are all folded from its events on every read, the same
 "composed on read, not stored" choice Accounts makes for net worth — and for the
 same reason: a stored total is a second source of truth that drifts.
 
+Three writes can change what a holding is: recording a purchase or sale,
+deleting one, and recording a price. All three follow the sequence below. The
+diagram shows a price; an event write differs only in the repository it calls
+(`HoldingEventRepo.InsertWithFold` or `DeleteWithFold`) and the statement it
+ends with.
+
 ```mermaid
 sequenceDiagram
     participant W as Web
     participant H as "HTTP: money + owner"
     participant S as HoldingService
-    participant R as "HoldingEventRepo"
+    participant R as "HoldingValuationRepo"
     participant DB as Postgres
 
-    W->>H: "POST /holdings/{id}/events"
-    H->>S: "RecordEvent(event, today)"
+    W->>H: "POST /holdings/{id}/valuations"
+    H->>S: "RecordValuation(price, today)"
     S->>S: "refuse a date after the household's today"
     S->>S: "Validate against the holding's currency<br/>and the household's primary"
-    S->>R: "InsertWithFold(event, fold)"
+    S->>R: "UpsertWithFold(price, holdingRule)"
     R->>DB: BEGIN
     R->>DB: "SELECT ... FROM holdings FOR UPDATE"
-    Note over R,DB: A second writer blocks HERE, before it<br/>can fold a position the first is consuming
+    Note over R,DB: A second writer of this holding's events OR prices<br/>blocks HERE, before it can read what the first is changing
     R->>DB: "SELECT events ORDER BY (occurred_on, created_at, id)"
-    R-->>S: "fold(existing + this one)"
-    S->>S: "domain.Holding.Position — refuses an oversell"
-    R->>DB: "INSERT the event, then COMMIT"
-    R-->>W: "the whole holding, re-folded"
+    R->>DB: "SELECT prices"
+    R-->>S: "holdingRule(events, prices as they would be)"
+    S->>S: "domain.Holding.Position — refuses an oversell,<br/>reports the most ever held"
+    S->>S: "domain.CheckHoldingValueWithinLimit —<br/>most ever held x every price, at most MaxAmountMinor"
+    alt the rule refuses
+        R->>DB: ROLLBACK
+        R-->>W: "422, nothing stored"
+    else the rule accepts
+        R->>DB: "upsert the price, then COMMIT"
+        R-->>W: "the whole holding, re-folded"
+    end
 ```
 
-**Three things in that diagram are the feature, and each looks like a detail.**
+**Four things in that diagram are the feature, and each looks like a detail.**
 
-**The lock is not decoration.** Reading the events, folding them and inserting as
-three separate calls is not equivalent to doing them atomically: two sales of 30
-from a holding of 50 are each legal alone and illegal together, so both would
-fold the same starting position and both commit — leaving events that cannot be
-folded at all, which is a page that throws every time it loads and can only be
-fixed from the page that is broken. `InsertWithFold` holds the row lock from
-before the fold until after the insert. `DeleteWithFold` does the same in the
-other direction, for removing a purchase a later sale was costed against.
+**The lock is not decoration, and it is one lock for both tables.** Reading the
+events, folding them and inserting as three separate calls is not equivalent to
+doing them atomically: two sales of 30 from a holding of 50 are each legal alone
+and illegal together, so both would fold the same starting position and both
+commit — leaving events that cannot be folded at all, which is a page that
+throws every time it loads and can only be fixed from the page that is broken.
+The same is true across the two tables: a purchase of 100,000 units and a price
+of S$10 billion a unit are each legal alone and together make a holding worth
+more than the ceiling. So `InsertWithFold`, `DeleteWithFold` and
+`UpsertWithFold` all lock the same `holdings` row before they read anything,
+and hold it until their write has committed. One lock per transaction, always
+taken first, so there is no lock order to get wrong and nothing to deadlock on.
 
-**The fold stays in the domain.** The repository owns the transaction and the
-lock; the rule it enforces is the caller's own closure, which is
-`domain.Holding.Position`. An adapter that decided what "oversold" means would
-be authorisation's mistake in a different costume.
+**The rule runs before the write, on the rows as they would be.** The
+repository hands the service's rule (`holdingRule`, a `usecase.HoldingFold`)
+the events and prices as they will read once the write lands: the new event
+appended, the deleted one gone, the new price in place of that day's old one.
+If the rule refuses, the transaction rolls back and nothing is stored. Checking
+after storing is not equivalent: every holding write answers by re-reading the
+whole portfolio, so a stored row the reads cannot compute fails its own
+response and every read after it.
+
+**The rule stays in the service and the domain.** The repository owns the
+transaction and the lock; the rule is the caller's closure. It has two halves.
+`domain.Holding.Position` folds the events and refuses an oversell.
+`domain.CheckHoldingValueWithinLimit` then takes the largest quantity the
+holding has *ever* held (`Position.PeakHeld`) and multiplies it by *every*
+recorded price, native and household-currency, refusing a product above
+`domain.MaxAmountMinor` with 422 `HOLDING_VALUE_TOO_LARGE`. It uses the peak
+and every price because the period report below multiplies the quantity held
+at each period's end by the latest price inside that period: neither is
+today's figure. It is deliberately stricter than the reads need (it refuses
+some pairs no read multiplies) so that it does not have to repeat the report's
+choice of period and price. An adapter that decided what "oversold" or "too
+valuable" means would be authorisation's mistake in a different costume.
 
 **The ORDER BY is a contract.** `occurred_on` is a date, so buying and selling
 the same morning is a tie, and `Position` sorts *stably* — it keeps whatever
 order it is handed. The repository breaks the tie by the order the events were
 actually recorded, and the answer depends on it: on identical same-day events,
 buy-then-sell realises 750 where sell-then-buy realises 1000.
+
+**"The same day" for a price is the upsert key's day.** A price is unique per
+`(holding_id, as_of)`, and `as_of` is the calendar day the request's value
+shows in its own location (`dateOnly`). `UpsertWithFold` decides which stored
+row the new price replaces with that same conversion on both sides. Compared
+any other way, a corrected, lower price would be judged against the very row
+it is about to replace, and re-entering a day's price is the only repair for a
+price that is too high.
+
+**A holding already past the limit refuses every write except the repair.**
+Nothing in the database stops such a row existing (no constraint mirrors the
+rule yet), so one written before the rule existed would refuse a purchase, a
+sale and a price for any other day. (A dividend or fee is still accepted:
+income never passes through the rule.) The two ways out are deleting the
+purchase that made it too large, or re-entering the offending day's price
+lower.
 
 Reads compose the same way. `GET /holdings` issues three queries — every
 holding, every event, every latest price — and folds each position in memory,
@@ -4370,6 +4420,14 @@ Notes that are not obvious from the shapes:
   any value, so a row written before the ceiling existed, or by hand, can
   still make a read fail. The reads fail loudly on purpose rather than show
   a clamped total.
+- **A holding's worth has the same ceiling, and it is a rule across two
+  tables.** Quantity times unit price is a product of two figures that each
+  pass the per-amount ceiling, so no column check can express it. Every write
+  to `holding_events` or `holding_valuations` checks, under the holding's row
+  lock and before it stores anything, that the most the holding ever held
+  times every recorded price stays within `domain.MaxAmountMinor`
+  (`domain.CheckHoldingValueWithinLimit`, 422 `HOLDING_VALUE_TOO_LARGE`; the
+  Portfolio flow in §5). No database constraint mirrors this one either.
 - **`accounts.owner_membership_id` is nullable and means shared, not unset.**
   There is deliberately no separate `is_shared` boolean — a row that both
   names an owner and claims to be shared would have nothing to resolve that

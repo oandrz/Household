@@ -148,6 +148,30 @@ and the lock. Prices must be read inside the lock.
 2. Portfolio does not get a per-holding "value unavailable" state now. Revisit
    if the production audit finds a row the operator cannot correct.
 
+## Build record (2026-10-01, branch `fix/qa-2026-10-01`)
+
+Build-order steps 1 to 4 are built. Step 5 (CHECK constraints) is not, by
+decision: it waits for the production audit below. No migration.
+
+How the build differs from the table above, and why:
+
+- The service's closure builder is named `holdingRule`.
+- The prices handed to the fold are in no promised order. The rule checks
+  every price, so it needs none, and promising one would be a contract
+  nothing uses.
+- `HoldingValuationRepo.ListByHolding` and the guarded writes share one
+  `listValuations` helper, and all three guarded writes share
+  `lockHoldingAndRead`, so there is one copy of "lock, then read both".
+- `LockHolding`'s SQL comment named only the event writes. It now names the
+  price write, and sqlc was regenerated for that comment. No query changed.
+- The explicit held add returns `ErrInvalidQuantity` as specified. Its
+  sentence on the wire is still the generic quantity one ("Enter a quantity
+  as a number, up to nine decimal places"), which does not describe the
+  case. Left as specified; a better sentence needs its own sentinel.
+- `HoldingEventRepository.Insert` and `Delete` (unguarded) are still on the
+  port. Only tests call them. The design removed the unguarded price write
+  and did not mention these two, so they were left and reported.
+
 ## Audit SQL for the operator (run read-only against production before deploy)
 
 Ran clean (zero rows) against the local dev database. If the preflight returns

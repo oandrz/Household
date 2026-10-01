@@ -253,6 +253,18 @@ An entry saved earlier with a later date is left as it is, and you can still
 correct its description or amount. Only changing its date to another future
 day is refused.
 
+**"That would make this holding worth more than Hearth can record."** A
+holding's worth is how many units you hold times the price of one. Hearth
+records at most 1,000,000,000,000 (a trillion) of any currency for one
+holding, counting the most you have ever held of it against every price you
+have recorded for it. You can meet this message when saving a price, when
+recording a purchase, or when removing a sale (removing a sale puts those
+units back). It almost always means extra digits: check whether the price is
+for one unit rather than the whole holding, and whether the quantity is
+right. Nothing was saved, so there is nothing to undo. To correct a price
+that is already saved, save that same day's price again with the right
+figure.
+
 **The Retros page has no "Start retro" button.** There is no month left to
 start. A retro can be started for last month or this month, whichever is
 earlier and has none yet, and never for a month before your household was

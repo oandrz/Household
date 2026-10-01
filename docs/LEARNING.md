@@ -549,18 +549,75 @@ count stays the number of bullets.)
   big" was never asked, on any of twenty amount fields. Fixed with one rule,
   `domain.MaxAmountMinor` and `CheckAmountWithinLimit`, called beside every
   existing sign check, and a 422 `AMOUNT_TOO_LARGE`.
-  **The fourth, found by the sibling hunt and still open:** a holding's
-  market value is quantity times unit price, and both can sit inside the
-  ceiling while their product does not (100,000 units at S$1 trillion each).
-  Probed on a real stack: the price is stored, its own `POST` answers 500,
-  and `GET /holdings` answers 500 from then on. A per-field ceiling cannot
-  close it; it needs a rule across events and valuations, which is a design
-  question, so it is recorded in the tracker row rather than patched.
+  **The fourth, found by the sibling hunt and closed the same day:** a
+  holding's market value is quantity times unit price, and both can sit
+  inside the ceiling while their product does not (100,000 units at S$1
+  trillion each). Probed on a real stack: the price is stored, its own
+  `POST` answers 500, and `GET /holdings` answers 500 from then on. A
+  per-field ceiling cannot close it; it needed a rule across events and
+  valuations, which was a design question, so it went to the architect
+  first and was built from
+  `docs/superpowers/specs/2026-10-01-hearth-holding-value-limit-design.md`.
+  The next bullet is what building it taught.
   What would have caught the third sooner: asking of every number a caller
   sends, "what is the largest value this accepts, and what does the code do
   with it next?" — the lower bound had a test on every field and the upper
   bound had none. And a read that adds up stored rows should be tried once
   with the largest row a write will accept.
+- **A product of two bounded figures is not bounded, and a rule across two
+  tables needs both tables' writers behind one lock (2026-10-01).** Closing
+  the fourth overflow above. Four things were wrong at once, and fixing any
+  one alone would have left the defect reachable:
+  - **The price write had no lock and no check at all.** Events were already
+    written through `InsertWithFold` (lock the holding, read, check, write).
+    Prices went through a plain `Upsert`. The rule "quantity × price fits"
+    reads both tables, so a check on the event side only would have been
+    passed by a purchase and a price arriving together: each is legal alone.
+    Both repositories now take the same `holdings` row lock first, and the
+    plain `Upsert` was removed rather than kept beside `UpsertWithFold`.
+  - **Checking after storing is not a check.** Every holding write answers
+    by re-reading the whole portfolio. The stored price made that re-read
+    overflow, so the write's own response was the 500, and the row was
+    already committed. The rule has to see the rows *as they would be* and
+    refuse before the write. That is why the repository builds "the prices
+    after this upsert" in memory and hands that to the rule.
+  - **"Held now" was the wrong quantity, and "latest price" the wrong
+    price.** The period report prices the quantity held at each period's
+    end with the latest price inside that period. A holding of 100,000
+    units sold down to 1 still has a quarter where 100,000 were held. So
+    the rule uses the most ever held (`Position.PeakHeld`) and every
+    recorded price. It refuses a few pairs no read multiplies; the
+    alternative was repeating the report's choice of period and price
+    inside the rule and keeping the two in step.
+  - **An overflow is "too large", but it must not *look* like an overflow.**
+    `Quantity.Value` reports a product that does not fit as
+    `ErrAmountOverflow`, which the HTTP table answers with a 500 from a row
+    far above the holdings rows. Wrapping that error inside the new
+    `ErrHoldingValueTooLarge` would have matched the 500 row first and
+    turned the fix back into the defect for exactly the probe figure. The
+    domain test asserts both halves: it *is* `ErrHoldingValueTooLarge` and
+    it is *not* `ErrAmountOverflow`.
+
+  **The sibling the design named and the build confirmed:** "the same day"
+  for a price. A corrected price must be judged without the row it
+  replaces, or the only repair for a too-high price is refused. The stored
+  key is the calendar day the request's value shows in its own location, so
+  the comparison has to use that same conversion on both sides.
+
+  **Siblings still open, listed for a follow-up issue rather than fixed
+  here:** three percentages multiply an amount by 100 with no overflow
+  check: `domain/budget.go` (`spentMinor * 100`), `domain/goal.go`
+  (`contributedMinor*100`) and `usecase/nudge.go` (`c.Spent.Amount * 100`).
+  Each needs a sum past 9.2e16, which is 923 rows at the ceiling, and the
+  result is a wrong percentage rather than a failed page. And the port
+  still has `HoldingEventRepository.Insert` and `Delete`, the unguarded
+  twins of `InsertWithFold` and `DeleteWithFold`; only tests call them.
+
+  What would have caught it sooner: the same question as the bullet above,
+  asked of every *computed* figure and not only every typed one. "What is
+  the largest value this multiplication can produce from inputs the forms
+  accept?" has a one-line answer for quantity × price: about a billion
+  units times 1e14 minor units is 1e23, and an int64 stops at 9.2e18.
 - **The date class itself, fixed at the root after seven instances, and
   the root fix had two siblings inside it (QA ISSUE-002 to 006,
   2026-10-01).** Every earlier date bullet above patched where it surfaced:
@@ -4215,6 +4272,29 @@ moment both read "two owners", both pass the rule, both commit.
     lives only at the channel's edge. The request was authorised when it
     arrived.
 
+**Third instance, 2026-10-01: a rule across two tables.** A holding's worth
+is quantity × price, so the purchase and the price are written to different
+tables by different repositories. `HoldingValuationRepo` took no lock.
+`TestARacingLargePurchaseAndLargePriceCannotBothCommit` races a purchase of
+100,000 units against a price of S$10 billion a unit: each is legal alone,
+together the holding is worth a thousand times the limit. The 300ms sleep is
+inside the rule, as this pattern requires. It passed on its first run,
+because the lock had been built one commit earlier, so it proved nothing
+until it was mutated. With `UpsertWithFold` reading without the lock:
+`0 of the 2 racing writes were refused, want exactly 1`, while the older
+racing-disposals test stayed green. That last part matters: the existing
+test could not have noticed the new path was unlocked.
+
+- **What this instance adds to the rule:** when an invariant reads two
+  tables, *every writer of either table* is a party to the race. The
+  oversell fix locked the event writes and was complete for a rule that
+  reads only events. The moment the rule also read prices, the price writer
+  needed the same lock, and nothing would have said so: no test failed.
+- **Both racing tests share one more property worth copying.** They assert
+  what is in the database after the race (one row in total, and the rule
+  still passes on it), not only how many calls were refused. A count of
+  refusals alone would pass if both writes were refused.
+
 ### 20. Every test can pass while the page has no styling at all
 
 Found 2026-09-12, in the browser walk of the portfolio screen.
@@ -4584,6 +4664,27 @@ context the check was silently assuming, and require it explicitly.
     failing on purpose: showing a clamped or partial balance would misstate
     the household's money, which is the same reason `ErrNoRate` is the only
     conversion failure a total may skip.
+- A holding's worth (quantity × unit price) could overflow with both figures
+  inside the amount ceiling, and the price that caused it was stored before
+  anything multiplied it (2026-10-01; the full entry is under pattern 1).
+  The rule is `domain.CheckHoldingValueWithinLimit`, run by
+  `HoldingService`'s `holdingRule` under the holding's lock before any event
+  or price is written. Two things about it that are easy to get wrong:
+  - **It multiplies the most ever held, not what is held now, by every
+    price, not the latest.** Either "obvious" figure reopens the period
+    report to an overflow. Swapping the peak for what is held now was tried
+    as a mutation: of the service tests only
+    `TestAPriceIsJudgedAgainstTheMostEverHeldWhateverItsDate` failed, so
+    that one test is what holds the choice in place.
+    `TestEveryRecordedPriceIsCheckedNotOnlyTheNewest` does the same for the
+    prices.
+  - **The held quantity itself could wrap.** Two purchases that each fit in
+    an int64 could add up past it. The fold refused that only because a
+    wrapped sum is negative and `NewQuantity` refuses a negative, with an
+    error naming the wrong cause. It checks before adding now. The sentence
+    a person sees for it is still the generic "Enter a quantity as a number,
+    up to nine decimal places", which does not describe ten purchases of a
+    billion units each; nobody has reported reaching it.
 - The browser has its own, lower limit, and it failed with the wrong words. A
   JavaScript number is exact only up to 2^53 − 1, so seventeen digits typed
   into an amount field were sent rounded, or as a number past int64, and the
@@ -6879,6 +6980,41 @@ route with a missing guard has no second line of defence.
   a running stack, and Telegram `/spend`. The first two share the browser's
   route and the token middleware, pinned by a Go test; the third is dated
   today by the server and cannot be refused.
+
+### The holding value limit's browser walk (2026-10-01)
+
+- **Walk both orders, because each order is refused by a different write.**
+  Quantity first: 100,000 shares, then a price of S$1,000,000,000,000 a
+  share. The price dialog showed the refusal sentence under the price field,
+  "No prices recorded yet." stayed, and Portfolio and "How each did"
+  (quarter, half-year, year) reloaded. Price first on a second holding: the
+  same price saved with nothing held, and the purchase of 100,000 units was
+  then refused under the purchase form with "No entries yet." still showing.
+  A walk of only the first order would never have run the event path.
+- **The limit itself is worth one click each side.** With 100,000 shares,
+  S$10,000,000.00 a share saved and "Worth now" read S$1,000,000,000,000.00
+  exactly. S$10,000,000.01 was refused and the S$10,000,000.00 row stayed.
+  Re-entering the day at S$10.00 replaced it: one row, worth S$1,000,000.00.
+- **The third write was only reachable by building a history.** Deleting a
+  sale is refused when it would make the holding larger than its price
+  allows. On the second holding (one unit at the limit): buy 1, sell 1, buy
+  1, then Remove on the sale. The sentence appeared in the entries section
+  and all three entries were still listed. The sentence says "Check the
+  quantity and the price for extra digits", which is advice for a typed
+  figure; for a removal it still names the two things that are in conflict,
+  and it is one row shared by three writes on purpose.
+- **Then look at the database, not only the page.** `psql` on the walk's own
+  stack showed one price per holding and no row from any refused write, and
+  the API log held no "unhandled error" line. "The list looks empty" and
+  "nothing was stored" are different claims, and the defect was a row that
+  was stored while the page showed an error.
+- **A report of a holding worth exactly the limit still adds up.** The
+  quarter's unrealised figure was S$999,999,999,000.00 (the limit minus the
+  S$1,000.00 cost), which is the headroom argument for holding the product
+  to the amount ceiling rather than to "fits in an int64".
+- **What was not walked.** A foreign-currency holding (two prices per day)
+  and the racing case. Both are pinned by Go tests, the second against real
+  Postgres. Production was not touched and the audit SQL was not run there.
 
 ### Provisioning the read-only role on the box (2026-09-05)
 

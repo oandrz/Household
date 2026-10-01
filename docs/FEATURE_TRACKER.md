@@ -15,6 +15,18 @@ needed them to exist (see "Where things stand" below).
 
 **Where things stand:** 142 of 161 features built or partly built — and **five of the 161 are 🚫**, so the honest denominator for this release is 156.
 
+> **Recounted 2026-10-01 (a holding's worth inside the amount ceiling)**. No
+> row is added and no row changes state, so every count is unchanged. §5's
+> "A ceiling on every amount a person enters" stays 🟡: the first of its
+> three named gaps (quantity × unit price overflowing) is closed, and the
+> other two remain and are restated in the row. The "Known gap" paragraph
+> under Portfolio is corrected: it said a route deleting a price existed, and
+> none does. Recounted by script before and after the edit (the first symbol
+> in each row's State cell, cells split on unescaped pipes only, header-less
+> rows after a blank line included); both runs reproduced the table below
+> exactly. Totals **121/21/14/5 = 161**, Built + Partial **142**, denominator
+> **156**.
+
 > **Recounted 2026-10-01 (the three owner-decided calendar rules)**. The
 > three ⬜ rows added by the recount below are built and move ⬜ → ✅: "Next
 > retro card shows last month's still-open draft on the 1st" (§4), "Refuse a
@@ -1356,7 +1368,7 @@ code *and* a walk confirming it. All five Money features are now walked.
 | Manual account entry | ✅ |
 | Archive and restore | ✅ |
 | Custom account types | ⬜ |
-| A ceiling on every amount a person enters (no mockup) | 🟡 — `domain.MaxAmountMinor` (1e14 minor units: S$1 trillion, Rp 1 trillion) and `domain.CheckAmountWithinLimit`. Every write path refuses more with 422 `AMOUNT_TOO_LARGE`: transactions (amount and amount received), account opening balance, bills (create, edit, mark paid), budget caps and expected income, goals (target, planned monthly, starting balance, contribution), holding events, prices and income; the web forms, `POST /transactions`, `hearthctl` CSV import and Telegram `/spend` all reach it. Walked in a real browser 2026-10-01. Built because one expense of int64 max was accepted and every money page of that household then answered 500 (QA ISSUE-001). **Three gaps, all named in the comment at the constant or in LEARNING.** (1) A holding's quantity × unit price can still overflow with both figures inside the ceiling (100,000 units priced at S$1 trillion each): the price is stored, `POST …/valuations` answers 500 and `GET /holdings` answers 500 from then on. The fix is an invariant across events and valuations and needs a design. (2) A row stored before the ceiling existed still breaks reads; nothing here repairs old rows, and production has not been checked for one. (3) The ceiling is per amount: tens of thousands of rows at the ceiling in one account still overflow its balance, and the read then fails rather than showing a clamped total. |
+| A ceiling on every amount a person enters (no mockup) | 🟡 — `domain.MaxAmountMinor` (1e14 minor units: S$1 trillion, Rp 1 trillion) and `domain.CheckAmountWithinLimit`. Every write path refuses more with 422 `AMOUNT_TOO_LARGE`: transactions (amount and amount received), account opening balance, bills (create, edit, mark paid), budget caps and expected income, goals (target, planned monthly, starting balance, contribution), holding events, prices and income; the web forms, `POST /transactions`, `hearthctl` CSV import and Telegram `/spend` all reach it. Walked in a real browser 2026-10-01. Built because one expense of int64 max was accepted and every money page of that household then answered 500 (QA ISSUE-001). **One gap closed 2026-10-01, two remain.** *Closed:* a holding's quantity × unit price could overflow with both figures inside the ceiling (100,000 units priced at S$1 trillion each); the price was stored, `POST …/valuations` answered 500 and `GET /holdings` answered 500 from then on. Now every write to a holding's events or prices is checked **before it is stored**, under the holding's row lock: the most the holding ever held × every recorded price (native and household-currency) must stay within `MaxAmountMinor`, or the write is refused with 422 `HOLDING_VALUE_TOO_LARGE` and nothing is written (`domain.CheckHoldingValueWithinLimit`, `HoldingService`'s `holdingRule`, `HoldingValuationRepository.UpsertWithFold`; design `docs/superpowers/specs/2026-10-01-hearth-holding-value-limit-design.md`). It is deliberately strict: it refuses some pairs no read multiplies (a large quantity sold long before a high price was recorded). Both orders walked in a real browser 2026-10-01 (quantity then price, price then quantity, and deleting a sale). *Still open, both named in the comment at the constant or in LEARNING:* (1) A row stored before either rule existed still breaks reads, and a holding already past the limit refuses every write except the repair (delete the purchase, or re-enter that day's price lower). Nothing here repairs old rows and **production has not been checked for one**: the read-only audit SQL in that design must return zero rows before this is deployed. The database CHECK constraints for the per-amount ceiling wait on that audit and are not built. (2) The ceiling is per amount: tens of thousands of rows at the ceiling in one account still overflow its balance, and the read then fails rather than showing a clamped total. |
 | Refuse a future-dated transaction, bill payment or goal contribution (no mockup) | ✅ — built 2026-10-01 (product-owner decision 2 of `docs/superpowers/specs/2026-10-01-hearth-household-calendar-design.md`, point 6 of [ADR 12](adr/0012-one-calendar-per-household.md); closes the date half of QA ISSUE-013). A recorded fact may not be dated after the household's today; a plan may. `TransactionService.Create`/`CreateOrReplay`/`Update`, `BillService.MarkPaid` and `GoalService.AddContribution` each take the household's today and answer `422 INVALID_DATE`, "That date is in the future.", the answer holdings already gave (one error, `domain.ErrDateInFuture`, one helper, `usecase/fact_date.go`). Every channel goes through those services: the browser, `hearthctl add` and its CSV import, and Telegram, whose row is dated today by the server. Existing rows stay; an edit is checked only when it changes the stored day, so a row dated after today can still have its description corrected. Plans are untouched: a bill's next due date, a goal's target month, a budget month. The forms have no rule of their own and show the server's sentence. Walked in a real browser: each of the three refused dated tomorrow with nothing written, saved dated today, and followed the household's zone rather than the browser's when the zone was moved a day behind. **Not walked:** the real `hearthctl` binary against a running stack; the token path it uses is pinned by a Go test |
 | Warning in Settings before a primary-currency change strands every account | ⬜ |
 
@@ -1386,10 +1398,13 @@ arrive as rows when they are built.
 | Every figure in the household's own currency, with the native beside it | ✅ — the fold carries two cost pools rather than converting afterwards. Two lots of the same USD stock bought at different exchange rates blend to an SGD cost per unit that is neither rate, so no single rate applied to the USD figure reproduces it. A US stock flat in USD while SGD strengthened reports a loss, which is the figure that answers "did this make us richer" |
 | The primary currency is locked while the household holds investments | ✅ — every holding event records its cost in the currency the household kept books in at the time, and nothing in the data can restate it. Changing it would strand every holding, making the portfolio page throw on load — the only screen that could fix it. Refused at the edit instead, archived holdings counted; a household holding nothing still chooses freely |
 
-**Known gap, recorded rather than built:** `DELETE /holdings/{id}/valuations/{id}`
-exists and no screen exposes it. Correcting a price for the *same* day works —
-that is the upsert — so the common case is covered; a price recorded against the
-*wrong* day cannot be removed from the page.
+**Known gap, recorded rather than built:** a recorded price cannot be deleted.
+There is no `DELETE /holdings/{id}/valuations/{id}` route (this paragraph used
+to say there was; `router.go` registers none) and no screen for one; only the
+repository method `HoldingValuationRepository.Delete` exists, with no caller.
+Correcting a price for the *same* day works — that is the upsert — so the
+common case is covered; a price recorded against the *wrong* day cannot be
+removed at all.
 
 **Known gap, found in the browser walk on 2026-09-12:** the chart puts every
 holding on one linear axis, so a single holding of a wildly different size

@@ -26,6 +26,30 @@ in three months or someone new.
 > has no retro. Each was a ⬜ row in `docs/FEATURE_TRACKER.md` and is ✅ now.
 > Walked in a real browser on a separate stack.
 >
+> **A holding's worth is held to the amount ceiling, on the same branch, also
+> 2026-10-01, also not pushed.** This closes the first gap of the amount
+> ceiling (QA ISSUE-001): 100,000 units and a price of S$1 trillion each
+> passed the per-amount ceiling, the price was stored, and `GET /holdings`
+> answered 500 for the household from then on. Every write to a holding's
+> events or prices is now checked before it is stored, under one row lock:
+> the most the holding ever held × every recorded price must stay within
+> `domain.MaxAmountMinor`, or the write answers 422 `HOLDING_VALUE_TOO_LARGE`.
+> Design and build order:
+> `docs/superpowers/specs/2026-10-01-hearth-holding-value-limit-design.md`
+> (steps 1 to 4 built; no migration). Walked in a real browser on a separate
+> stack, in both orders.
+>
+> **Before that is deployed: run the audit SQL at the end of that design,
+> read-only, against production, and expect zero rows.** A holding already
+> past the limit would refuse every write except the repair (delete the
+> purchase, or re-enter that day's price lower), and the audit is how to
+> know none exists. It has only been run against a local dev database.
+> **Not built, on purpose:** step 5 of the design, the database CHECK
+> constraints for the per-amount ceiling. It ships in a later release, after
+> that audit. The Portfolio does not get a per-holding "value unavailable"
+> state either; the owner declined it unless the audit finds a row the
+> operator cannot correct.
+>
 > **Left from QA ISSUE-013:** a transaction description takes 600 characters
 > without complaint, and unknown JSON fields in a request body are ignored
 > rather than refused. Neither is started.
@@ -615,9 +639,11 @@ two. **No PR is open.** What is deliberately NOT in it:
   does its API need a locally-running gateway process. That one can kill the
   milestone and costs nothing to find out.
 - Two known gaps are recorded in `docs/FEATURE_TRACKER.md` rather than fixed:
-  `DELETE /holdings/{id}/valuations/{id}` has no screen, and the report's chart
-  puts every holding on one linear axis, so a holding of a wildly different
-  size flattens the rest.
+  a recorded price cannot be deleted (there is no
+  `DELETE /holdings/{id}/valuations/{id}` route and no screen; a wrong price is
+  corrected by posting the same date again), and the report's chart puts every
+  holding on one linear axis, so a holding of a wildly different size flattens
+  the rest.
 
 **The build order changed once already: self-serve sign-up shipped ahead of
 slice 2.** The original four-slice order below (Money, then Marriage, then
