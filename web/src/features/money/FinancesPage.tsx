@@ -11,6 +11,7 @@ import { useState } from "react";
 import { useMe } from "../auth/useAuth";
 import { PageContainer } from "../../components/PageContainer";
 import { ToggleSwitch } from "../../components/ToggleSwitch";
+import { TOGGLE_LABEL_CLASS } from "../../components/fieldClasses";
 import { AccountModal } from "./AccountModal";
 import { AccountsPanel } from "./AccountsPanel";
 import { BreakdownCard } from "./BreakdownCard";
@@ -55,14 +56,14 @@ function FirstRunPanel({
   const [addOpen, setAddOpen] = useState(false);
   return (
     <div className="flex flex-col items-center gap-3 rounded-xl border border-hairline bg-card px-10 py-16 text-center">
-      <div className="flex w-full items-center justify-end gap-1.5 text-[11px] text-muted">
+      <label className={`flex w-full items-center justify-end gap-1.5 text-[11px] text-muted ${TOGGLE_LABEL_CLASS}`}>
         <ToggleSwitch
           checked={includeArchived}
           onChange={() => onIncludeArchivedChange(!includeArchived)}
           label={FINANCES_COPY.archivedToggle}
         />
         {FINANCES_COPY.archivedToggle}
-      </div>
+      </label>
       <p className="text-sm font-semibold text-ink">{FINANCES_COPY.emptyTitle}</p>
       <p className="max-w-sm text-[13px] text-muted">{FINANCES_COPY.emptyBody}</p>
       {canAdd && (

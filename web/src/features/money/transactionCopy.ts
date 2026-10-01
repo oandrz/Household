@@ -18,6 +18,9 @@ export const TRANSACTIONS_COPY = {
   // from the ones underneath it. The list's own length is no better: it is
   // one page of a keyset walk, not a total.
   everyMonth: "Every month",
+  // The phone-only button that opens the filters. The count is what tells
+  // someone the list is narrowed while the filters themselves are folded away.
+  filtersToggle: (activeCount: number) => (activeCount === 0 ? "Filters" : `Filters (${activeCount})`),
   // The spend figure keeps naming its month when the list no longer matches
   // it, so "Spent this month" never sits unlabelled above an all-time ledger.
   spentInMonth: (month: string) => `Spent in ${month}`,

@@ -42,6 +42,7 @@ import { monthNameIn } from "../../lib/householdDate";
 import { useAccounts } from "./useAccounts";
 import { PageContainer } from "../../components/PageContainer";
 import { ToggleSwitch } from "../../components/ToggleSwitch";
+import { TOGGLE_LABEL_CLASS } from "../../components/fieldClasses";
 import { BillModal } from "./BillModal";
 import { MarkPaidModal } from "./MarkPaidModal";
 import { BillRow } from "./BillRow";
@@ -202,14 +203,14 @@ export function BillsPage() {
           )}
         </div>
         <div className="flex items-center gap-3.5">
-          <div className="flex items-center gap-1.5 text-[11px] text-muted">
+          <label className={`flex items-center gap-1.5 text-[11px] text-muted ${TOGGLE_LABEL_CLASS}`}>
             <ToggleSwitch
               checked={includeArchived}
               onChange={() => setIncludeArchived((prev) => !prev)}
               label={BILL_COPY.archivedToggle}
             />
             {BILL_COPY.archivedToggle}
-          </div>
+          </label>
           {/* Disabled with the reason beside it, never a modal whose Pay from
               select is empty -- TransactionsPage.tsx's own header button
               carries the identical pair for the identical reason. */}

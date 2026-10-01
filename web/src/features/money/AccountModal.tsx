@@ -17,6 +17,7 @@ import { FieldPair } from "../../components/FieldPair";
 import { Modal } from "../../components/Modal";
 import { ModalActions } from "../../components/ModalActions";
 import { ToggleSwitch } from "../../components/ToggleSwitch";
+import { TOGGLE_LABEL_CLASS } from "../../components/fieldClasses";
 import { apiErrorMessage } from "../../api/errorMessage";
 import { useCurrencies, useMe } from "../auth/useAuth";
 import type { MemberView } from "../settings/schemas";
@@ -367,33 +368,33 @@ export function AccountModal({
           </p>
         </Field>
 
-        <div className="flex items-center justify-between rounded-[10px] border border-hairline px-3.5 py-2.5">
-          <div>
-            <div className="text-[13px] text-ink">Count toward net worth</div>
-            <div className="mt-0.5 text-[11.5px] text-muted">
+        <label className={`flex items-center justify-between rounded-[10px] border border-hairline px-3.5 py-2.5 ${TOGGLE_LABEL_CLASS}`}>
+          <span className="block">
+            <span className="block text-[13px] text-ink">Count toward net worth</span>
+            <span className="block mt-0.5 text-[11.5px] text-muted">
               Include this balance in the family total
-            </div>
-          </div>
+            </span>
+          </span>
           <ToggleSwitch
             checked={countTowardNetWorth}
             onChange={() => setCountTowardNetWorth((v) => !v)}
             label="Count toward net worth"
           />
-        </div>
+        </label>
 
-        <div className="flex items-center justify-between rounded-[10px] border border-hairline px-3.5 py-2.5">
-          <div>
-            <div className="text-[13px] text-ink">Visible to kids</div>
-            <div className="mt-0.5 text-[11.5px] text-muted">
+        <label className={`flex items-center justify-between rounded-[10px] border border-hairline px-3.5 py-2.5 ${TOGGLE_LABEL_CLASS}`}>
+          <span className="block">
+            <span className="block text-[13px] text-ink">Visible to kids</span>
+            <span className="block mt-0.5 text-[11.5px] text-muted">
               {limitedMembersLine(members.data, members.isPending)}
-            </div>
-          </div>
+            </span>
+          </span>
           <ToggleSwitch
             checked={visibleToLimitedMembers}
             onChange={() => setVisibleToLimitedMembers((v) => !v)}
             label="Visible to kids"
           />
-        </div>
+        </label>
 
         {mutation.isError && (
           <p role="alert" className="text-xs leading-snug text-danger">

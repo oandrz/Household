@@ -12,6 +12,7 @@
 import { useState } from "react";
 import { useMe, useCurrencies } from "../auth/useAuth";
 import { ToggleSwitch } from "../../components/ToggleSwitch";
+import { TOGGLE_LABEL_CLASS } from "../../components/fieldClasses";
 import { AccountModal } from "./AccountModal";
 import { ACCOUNT_TYPE_LABELS } from "./accountTypes";
 import { FINANCES_COPY } from "./copy";
@@ -175,14 +176,14 @@ export function AccountsPanel({
           {FINANCES_COPY.accounts}
         </h2>
         <div className="flex items-center gap-4">
-          <div className="flex items-center gap-1.5 text-[11px] text-muted">
+          <label className={`flex items-center gap-1.5 text-[11px] text-muted ${TOGGLE_LABEL_CLASS}`}>
             <ToggleSwitch
               checked={includeArchived}
               onChange={() => onIncludeArchivedChange(!includeArchived)}
               label={FINANCES_COPY.archivedToggle}
             />
             {FINANCES_COPY.archivedToggle}
-          </div>
+          </label>
           {isOwner && (
             <button
               type="button"

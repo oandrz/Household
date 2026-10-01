@@ -21,6 +21,7 @@ import {
 } from "./copy";
 import { MagicLinkSentPanel } from "./MagicLinkSentPanel";
 import { useRequestMagicLink, useSignIn, useStartTelegramSignIn } from "./useAuth";
+import { BrandMark } from "../../components/BrandMark";
 
 type Mode = "password" | "magic-sent";
 
@@ -235,7 +236,7 @@ export function SignInScreen() {
           track shrink to the viewport instead. */}
       <div className="w-full min-w-0 flex flex-col items-center gap-[22px]">
         <div className="flex items-center gap-2.5">
-          <div className="h-[30px] w-[30px] rounded-[9px] bg-accent" />
+          <BrandMark size="auth" />
           <div className="text-[17px] font-semibold tracking-[-0.01em]">Hearth</div>
         </div>
 

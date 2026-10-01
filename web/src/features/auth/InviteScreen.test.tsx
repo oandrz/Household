@@ -184,7 +184,7 @@ describe("InviteScreen", () => {
 
     expect(
       await screen.findByText(
-        "We couldn't find that invite. Check the link, or ask whoever invited you to send a new one.",
+        "We couldn’t find that invite. Check the link, or ask whoever invited you to send a new one.",
       ),
     ).toBeInTheDocument();
   });
@@ -199,7 +199,7 @@ describe("InviteScreen", () => {
     });
     renderInvite();
 
-    await screen.findByText(/We couldn't find that invite/);
+    await screen.findByText(/We couldn’t find that invite/);
     expect(
       screen.queryByText(/Accepting this invite will sign them out/),
     ).not.toBeInTheDocument();
@@ -260,6 +260,38 @@ describe("InviteScreen", () => {
       "href",
       "/",
     );
+  });
+
+  it("gives an already-accepted invite a heading too, with Sign in as the way forward", async () => {
+    stubFetchRoutes({
+      [`GET ${PREVIEW_URL}`]: {
+        status: 409,
+        body: { error: { code: "INVITE_ALREADY_ACCEPTED", message: "This invite has already been accepted." } },
+      },
+      [`GET ${ME_URL}`]: NO_SESSION,
+    });
+    renderInvite();
+
+    expect(
+      await screen.findByRole("heading", { name: "That invite was already used." }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Sign in" })).toHaveAttribute("href", "/");
+  });
+
+  it("does not call the invite dead when it only failed to load", async () => {
+    stubFetchRoutes({
+      [`GET ${PREVIEW_URL}`]: {
+        status: 500,
+        body: { error: { code: "INTERNAL", message: "Something went wrong." } },
+      },
+      [`GET ${ME_URL}`]: NO_SESSION,
+    });
+    renderInvite();
+
+    expect(
+      await screen.findByRole("heading", { name: "We couldn’t load that invite." }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("That invite won’t work.")).not.toBeInTheDocument();
   });
 
   it("surfaces the server's message on a 422 PASSWORD_TOO_SHORT", async () => {

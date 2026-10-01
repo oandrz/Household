@@ -332,6 +332,29 @@ describe("TransactionsPage", () => {
   // row (so this genuinely starts non-empty) and the filtered response is
   // registered under its own, differently-keyed route -- a stub that ignored
   // the querystring would make this pass for the wrong reason.
+  // On a phone the five stacked filters filled the first screen and pushed
+  // every transaction below it. jsdom has no screen width, so this pins the
+  // state the button drives; the 375px walk is what proved the layout.
+  it("keeps the filters behind a Filters button that says how many are on", async () => {
+    renderPage({
+      transactions: [expenseFixture()],
+      summary: { count: 1, spentMinor: 5230 },
+      filtered: { transactions: [], summary: { count: 0, spentMinor: 0 } },
+    });
+
+    const toggle = await screen.findByRole("button", { name: "Filters" });
+    const panel = document.getElementById(toggle.getAttribute("aria-controls") ?? "");
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(panel).toHaveClass("hidden");
+
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    expect(panel).not.toHaveClass("hidden");
+
+    fireEvent.click(screen.getByRole("radio", { name: "Income" }));
+    expect(await screen.findByRole("button", { name: "Filters (1)" })).toBeInTheDocument();
+  });
+
   it("distinguishes an empty ledger from filters that match nothing", async () => {
     renderPage({
       transactions: [expenseFixture()],

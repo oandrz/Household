@@ -21,6 +21,7 @@ import { Link } from "@tanstack/react-router";
 import { useCurrencies } from "../auth/useAuth";
 import { PageContainer } from "../../components/PageContainer";
 import { ToggleSwitch } from "../../components/ToggleSwitch";
+import { TOGGLE_LABEL_CLASS } from "../../components/fieldClasses";
 import { formatMoney } from "./formatMoney";
 import { HoldingModal } from "./HoldingModal";
 import { HoldingLotsPanel } from "./HoldingLotsPanel";
@@ -102,14 +103,14 @@ export function PortfolioPage() {
         </p>
       ) : null}
 
-      <div className="flex items-center gap-1.5 text-[11px] text-muted">
+      <label className={`flex items-center gap-1.5 text-[11px] text-muted ${TOGGLE_LABEL_CLASS}`}>
         <ToggleSwitch
           label={SHOW_ARCHIVED}
           checked={includeArchived}
           onChange={() => setIncludeArchived((on) => !on)}
         />
         {SHOW_ARCHIVED}
-      </div>
+      </label>
 
       {holdings.isPending ? <p className="text-xs text-muted">Loading your holdings…</p> : null}
       {holdings.isError ? (

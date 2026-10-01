@@ -34,6 +34,7 @@ import { FieldPair } from "../../components/FieldPair";
 import { Modal } from "../../components/Modal";
 import { ModalActions } from "../../components/ModalActions";
 import { ToggleSwitch } from "../../components/ToggleSwitch";
+import { TOGGLE_LABEL_CLASS } from "../../components/fieldClasses";
 import { ApiError } from "../../api/client";
 import { apiErrorMessage } from "../../api/errorMessage";
 import type { Currency } from "../auth/schemas";
@@ -380,10 +381,10 @@ export function GoalModal(props: GoalModalProps) {
           htmlFor="goal-modal-target-month"
           error={targetMonthError}
           labelAside={
-            <div className="flex items-center gap-1.5 text-[11px] text-muted">
+            <label className={`flex items-center gap-1.5 text-[11px] text-muted ${TOGGLE_LABEL_CLASS}`}>
               <ToggleSwitch checked={noTargetDate} onChange={handleNoTargetDateToggle} label="No target date" />
               No target date
-            </div>
+            </label>
           }
         >
           <input

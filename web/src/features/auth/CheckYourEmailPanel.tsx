@@ -1,3 +1,5 @@
+import { BrandMark } from "../../components/BrandMark";
+
 // The shared "we've sent you something" card. MagicLinkSentPanel and
 // SignUpScreen's sent state are both callers; the markup lives here once so the
 // two cannot drift apart visually.
@@ -45,7 +47,7 @@ export function CheckYourEmailPanel({
           track shrink to the viewport instead. */}
       <div className="w-full min-w-0 flex flex-col items-center gap-[22px]">
         <div className="flex items-center gap-2.5">
-          <div className="h-[30px] w-[30px] rounded-[9px] bg-accent" />
+          <BrandMark size="auth" />
           <div className="text-[17px] font-semibold tracking-[-0.01em]">Hearth</div>
         </div>
 

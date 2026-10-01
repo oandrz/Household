@@ -14,6 +14,7 @@ import { ApiError } from "../../api/client";
 import { useCurrencies } from "../auth/useAuth";
 import { PageContainer } from "../../components/PageContainer";
 import { ToggleSwitch } from "../../components/ToggleSwitch";
+import { TOGGLE_LABEL_CLASS } from "../../components/fieldClasses";
 import { GoalCard } from "./GoalCard";
 import { GoalContributionsPanel } from "./GoalContributionsPanel";
 import { GoalModal } from "./GoalModal";
@@ -146,14 +147,14 @@ export function GoalsPage() {
             "Create your first goal" action instead, so this would be a
             second, redundant way into the same modal on that screen. */}
         <div className="flex items-center gap-3.5">
-          <div className="flex items-center gap-1.5 text-[11px] text-muted">
+          <label className={`flex items-center gap-1.5 text-[11px] text-muted ${TOGGLE_LABEL_CLASS}`}>
             <ToggleSwitch
               checked={includeArchived}
               onChange={() => setIncludeArchived((prev) => !prev)}
               label={GOAL_COPY.archivedToggle}
             />
             {GOAL_COPY.archivedToggle}
-          </div>
+          </label>
           {data.goals.length > 0 && (
             <button
               type="button"

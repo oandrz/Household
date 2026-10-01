@@ -17,6 +17,7 @@ import { useState } from "react";
 import { apiErrorMessage } from "../../api/errorMessage";
 import { useMe } from "../auth/useAuth";
 import { ToggleSwitch } from "../../components/ToggleSwitch";
+import { TOGGLE_LABEL_CLASS } from "../../components/fieldClasses";
 import { ALL_CAPABILITIES } from "./capabilities";
 import { InviteMemberModal } from "./InviteMemberModal";
 import { PendingInvitesList } from "./PendingInvitesList";
@@ -138,7 +139,7 @@ function MemberRow({
       {isOwner && isLimited && (
         <div className="ml-[46px] flex flex-wrap gap-x-5 gap-y-1.5">
           {LIMITED_TOGGLE_CAPS.map(({ key, label }) => (
-            <div key={key} className="flex items-center gap-1.5 text-[11px] text-label">
+            <label key={key} className={`flex items-center gap-1.5 text-[11px] text-label ${TOGGLE_LABEL_CLASS}`}>
               <ToggleSwitch
                 checked={member.capabilities.includes(key)}
                 onChange={() => toggleCapability(key)}
@@ -146,7 +147,7 @@ function MemberRow({
                 label={`${member.user.displayName} ${label} access`}
               />
               {label}
-            </div>
+            </label>
           ))}
         </div>
       )}

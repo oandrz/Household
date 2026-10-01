@@ -14,3 +14,9 @@
 // lives here now, once, beside the classes it explains.
 export const FIELD_CONTROL_CLASS =
   "min-h-11 rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px] sm:min-h-0";
+
+// On the <label> that wraps a ToggleSwitch and its words. The wrapper is a
+// label so that clicking the words flips the switch, the way every native
+// checkbox behaves; these two classes make the pointer say so, and say "not
+// now" while the switch inside is disabled.
+export const TOGGLE_LABEL_CLASS = "cursor-pointer has-[:disabled]:cursor-not-allowed";

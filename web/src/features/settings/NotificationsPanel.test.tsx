@@ -107,6 +107,29 @@ describe("NotificationsPanel", () => {
     });
   });
 
+  it("flips a toggle when its words are clicked, not only the switch", async () => {
+    const fetchMock = stubFetchRoutes({
+      [`GET ${ME_URL}`]: { status: 200, body: meFixture("owner") },
+      [`GET ${PREFS_URL}`]: { status: 200, body: preferences },
+      [`PATCH ${PREFS_URL}`]: {
+        status: 200,
+        body: { ...preferences, weeklyDigest: true },
+      },
+    });
+    renderPanel();
+
+    fireEvent.click(await screen.findByText("Weekly family digest (Sun 8am)"));
+
+    await waitFor(() => {
+      const call = fetchMock.mock.calls.find(
+        ([input, init]) =>
+          String(input) === PREFS_URL && (init?.method ?? "").toUpperCase() === "PATCH",
+      );
+      expect(call).toBeDefined();
+      expect(JSON.parse(call![1]!.body as string)).toEqual({ weeklyDigest: true });
+    });
+  });
+
   it("disables every toggle for a non-owner viewer", async () => {
     stubFetchRoutes({
       [`GET ${ME_URL}`]: { status: 200, body: meFixture("limited") },

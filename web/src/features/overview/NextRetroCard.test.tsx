@@ -210,7 +210,7 @@ describe("NextRetroCard", () => {
       });
 
       const strip = await screen.findByTestId("vision-checkin-strip");
-      expect(strip).toHaveTextContent(`Vision check-in: ${YEAR} theme — "Slow down together"`);
+      expect(strip).toHaveTextContent(`Vision check-in: ${YEAR} theme — “Slow down together”`);
     });
 
     // version 0's own theme is always "" on the wire (visionSchema's own

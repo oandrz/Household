@@ -18,6 +18,7 @@ import { Field } from "../../components/Field";
 import { isPlausibleEmail } from "./copy";
 import { CheckYourEmailPanel } from "./CheckYourEmailPanel";
 import { useRequestSignUp } from "./useAuth";
+import { BrandMark } from "../../components/BrandMark";
 
 export function SignUpScreen() {
   const [email, setEmail] = useState("");
@@ -145,7 +146,7 @@ export function SignUpScreen() {
           track shrink to the viewport instead. */}
       <div className="w-full min-w-0 flex flex-col items-center gap-[22px]">
         <div className="flex items-center gap-2.5">
-          <div className="h-[30px] w-[30px] rounded-[9px] bg-accent" />
+          <BrandMark size="auth" />
           <div className="text-[17px] font-semibold tracking-[-0.01em]">Hearth</div>
         </div>
 
