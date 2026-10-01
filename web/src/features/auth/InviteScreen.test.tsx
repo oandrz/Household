@@ -262,6 +262,38 @@ describe("InviteScreen", () => {
     );
   });
 
+  it("gives an already-accepted invite a heading too, with Sign in as the way forward", async () => {
+    stubFetchRoutes({
+      [`GET ${PREVIEW_URL}`]: {
+        status: 409,
+        body: { error: { code: "INVITE_ALREADY_ACCEPTED", message: "This invite has already been accepted." } },
+      },
+      [`GET ${ME_URL}`]: NO_SESSION,
+    });
+    renderInvite();
+
+    expect(
+      await screen.findByRole("heading", { name: "That invite was already used." }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Sign in" })).toHaveAttribute("href", "/");
+  });
+
+  it("does not call the invite dead when it only failed to load", async () => {
+    stubFetchRoutes({
+      [`GET ${PREVIEW_URL}`]: {
+        status: 500,
+        body: { error: { code: "INTERNAL", message: "Something went wrong." } },
+      },
+      [`GET ${ME_URL}`]: NO_SESSION,
+    });
+    renderInvite();
+
+    expect(
+      await screen.findByRole("heading", { name: "We couldn’t load that invite." }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("That invite won’t work.")).not.toBeInTheDocument();
+  });
+
   it("surfaces the server's message on a 422 PASSWORD_TOO_SHORT", async () => {
     const fetchMock = stubFetchRoutes({
       [`GET ${PREVIEW_URL}`]: { status: 200, body: previewBody },
