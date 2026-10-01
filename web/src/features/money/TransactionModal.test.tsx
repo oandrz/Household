@@ -1,6 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { ApiError } from "../../api/client";
 import { stubFetchRoutes } from "../../test/fetchStub";
 import { meRoute } from "../../test/meFixture";
 import { TransactionModal, type TransactionFormValues } from "./TransactionModal";
@@ -251,6 +252,28 @@ describe("TransactionModal", () => {
 
     expect(await screen.findByText(/Add a short description/)).toBeInTheDocument();
     expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  // The server refuses a transaction dated after the household's today. The
+  // form has no rule of its own for that: it shows the server's sentence,
+  // stays open, and keeps what was typed so only the date needs fixing.
+  it("shows the server's own sentence when the date is refused, and keeps the form open", async () => {
+    const onSubmit = vi
+      .fn<(values: TransactionFormValues) => Promise<unknown>>()
+      .mockRejectedValue(new ApiError(422, "INVALID_DATE", "That date is in the future."));
+    const { onClose } = renderModal({ onSubmit });
+
+    fireEvent.change(screen.getByLabelText(/description/i), { target: { value: "Cold Storage" } });
+    fireEvent.change(screen.getByLabelText(/^amount/i), { target: { value: "52.30" } });
+    fireEvent.change(screen.getByLabelText(/account/i), { target: { value: "dbs" } });
+    fireEvent.change(screen.getByLabelText(/date/i), { target: { value: "2099-01-01" } });
+    fireEvent.click(screen.getByRole("button", { name: /save transaction/i }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("That date is in the future.");
+    expect(onSubmit.mock.calls[0][0].occurredOn).toBe("2099-01-01");
+    expect(onClose).not.toHaveBeenCalled();
+    expect(screen.getByLabelText(/description/i)).toHaveValue("Cold Storage");
+    expect(screen.getByLabelText(/^amount/i)).toHaveValue("52.30");
   });
 
   it("shows no delete control when adding", () => {

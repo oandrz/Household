@@ -182,6 +182,29 @@ describe("GoalContributionsPanel", () => {
     expect(mutatingCalls(fetchMock)).toEqual([]);
   });
 
+  // The server refuses a contribution dated after the household's today.
+  // The panel has no rule of its own for that: it shows the server's
+  // sentence and keeps what was typed, so only the date needs fixing. A
+  // refused add must not clear the form the way a saved one does.
+  it("shows the server's own sentence when the date is refused, and keeps what was typed", async () => {
+    renderPanel(undefined, {
+      "GET /api/v1/goals/goal-1/contributions": { status: 200, body: { contributions: [] } },
+      "POST /api/v1/goals/goal-1/contributions": {
+        status: 422,
+        body: { error: { code: "INVALID_DATE", message: "That date is in the future." } },
+      },
+    });
+
+    await screen.findByTestId("goal-contributions-empty");
+    fireEvent.change(screen.getByLabelText("Amount"), { target: { value: "400.00" } });
+    fireEvent.change(screen.getByLabelText("Date"), { target: { value: "2099-01-01" } });
+    fireEvent.click(screen.getByRole("button", { name: "Add" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("That date is in the future.");
+    expect(screen.getByLabelText("Amount")).toHaveValue("400.00");
+    expect(screen.getByLabelText("Date")).toHaveValue("2099-01-01");
+  });
+
   // The other half of the same spec decision: a negative amount is a
   // legitimate correction row, not a second thing this form refuses --
   // guarding against `amountMinor <= 0` here (the wrong copy-paste from
