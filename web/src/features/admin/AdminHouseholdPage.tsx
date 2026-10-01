@@ -15,6 +15,7 @@ import {
   dateLabel,
   exactTimeLabel,
   lockoutLabel,
+  memberCountLabel,
   relativeTimeLabel,
 } from "./directoryCopy";
 import {
@@ -90,7 +91,7 @@ function HouseholdDetail({ data }: { data: PageData }) {
         <p className="mt-0.5 text-[12.5px] text-muted">
           Family {household.familyName} · created{" "}
           {dateLabel(household.createdAt)} · {household.primaryCurrency} ·{" "}
-          {members.length} {members.length === 1 ? "member" : "members"}
+          {memberCountLabel(members.length)}
         </p>
       </header>
 

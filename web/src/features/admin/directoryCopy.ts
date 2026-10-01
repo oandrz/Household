@@ -51,6 +51,12 @@ export function exactTimeLabel(iso: string): string {
   });
 }
 
+// "1 member", "4 members". Both households pages print this count; the list's
+// phone layout once spelled it without the singular and read "1 members".
+export function memberCountLabel(count: number): string {
+  return count === 1 ? "1 member" : `${count} members`;
+}
+
 export function noMatchLabel(q: string): string {
   return `Nothing matches '${q}'.`;
 }
