@@ -5,6 +5,7 @@
 // household_handlers.go's doc comment on handleUpdateNotificationPreferences).
 import { useMe } from "../auth/useAuth";
 import { ToggleSwitch } from "../../components/ToggleSwitch";
+import { TOGGLE_LABEL_CLASS } from "../../components/fieldClasses";
 import { type NotificationPreferences } from "./schemas";
 import { usePreferences, useUpdatePreferences } from "./useNotificationPreferences";
 
@@ -35,7 +36,7 @@ export function NotificationsPanel() {
       {preferences.isSuccess && (
         <div className="grid grid-cols-1 gap-3.5 text-[13px] sm:grid-cols-2 sm:gap-x-10">
           {TOGGLES.map(({ key, label }) => (
-            <div key={key} className="flex items-center justify-between">
+            <label key={key} className={`flex items-center justify-between ${TOGGLE_LABEL_CLASS}`}>
               <span className="text-ink">{label}</span>
               <ToggleSwitch
                 checked={preferences.data[key]}
@@ -43,7 +44,7 @@ export function NotificationsPanel() {
                 onChange={() => updatePreferences.mutate({ [key]: !preferences.data[key] })}
                 label={label}
               />
-            </div>
+            </label>
           ))}
         </div>
       )}

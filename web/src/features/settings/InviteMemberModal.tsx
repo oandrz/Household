@@ -10,6 +10,7 @@ import { FieldPair } from "../../components/FieldPair";
 import { Modal } from "../../components/Modal";
 import { ModalActions } from "../../components/ModalActions";
 import { ToggleSwitch } from "../../components/ToggleSwitch";
+import { TOGGLE_LABEL_CLASS } from "../../components/fieldClasses";
 import { apiErrorMessage } from "../../api/errorMessage";
 import { useFeature } from "../admin/useFeature";
 import { ALL_CAPABILITIES } from "./capabilities";
@@ -260,7 +261,7 @@ export function InviteMemberModal({
         <div className="flex flex-col gap-2">
           <span className="text-xs font-semibold text-label">Can access</span>
 
-          <div className="flex items-center justify-between rounded-[10px] border border-hairline px-3.5 py-2.5">
+          <label className={`flex items-center justify-between rounded-[10px] border border-hairline px-3.5 py-2.5 ${TOGGLE_LABEL_CLASS}`}>
             <span className="text-[13px] text-ink">Calendar</span>
             <ToggleSwitch
               checked={capabilities.includes("calendar")}
@@ -268,9 +269,9 @@ export function InviteMemberModal({
               disabled={role === "owner"}
               label="Calendar access"
             />
-          </div>
+          </label>
 
-          <div className="flex items-center justify-between rounded-[10px] border border-hairline px-3.5 py-2.5">
+          <label className={`flex items-center justify-between rounded-[10px] border border-hairline px-3.5 py-2.5 ${TOGGLE_LABEL_CLASS}`}>
             <span className="text-[13px] text-ink">Chores &amp; allowance</span>
             <ToggleSwitch
               checked={capabilities.includes("chores")}
@@ -278,20 +279,20 @@ export function InviteMemberModal({
               disabled={role === "owner"}
               label="Chores & allowance access"
             />
-          </div>
+          </label>
 
-          <div className="flex items-center justify-between rounded-[10px] border border-hairline px-3.5 py-2.5">
-            <div>
-              <div className="text-[13px] text-ink">Money &amp; balances</div>
-              <div className="mt-px text-[11px] text-muted">Off for kids by default</div>
-            </div>
+          <label className={`flex items-center justify-between rounded-[10px] border border-hairline px-3.5 py-2.5 ${TOGGLE_LABEL_CLASS}`}>
+            <span className="block">
+              <span className="block text-[13px] text-ink">Money &amp; balances</span>
+              <span className="block mt-px text-[11px] text-muted">Off for kids by default</span>
+            </span>
             <ToggleSwitch
               checked={capabilities.includes("money")}
               onChange={() => toggleLimitedCapability("money")}
               disabled={role === "owner"}
               label="Money & balances access"
             />
-          </div>
+          </label>
 
           {/* domain.ErrLimitedCannotHoldMarriage: a limited member can never
               hold this capability, so the row is not offered at all (not
@@ -299,13 +300,13 @@ export function InviteMemberModal({
               row, by contrast, must always hold it, so it renders forced-on
               and disabled rather than omitted. */}
           {role === "owner" && (
-            <div className="flex items-center justify-between rounded-[10px] border border-hairline px-3.5 py-2.5">
-              <div>
-                <div className="text-[13px] text-ink">Marriage space</div>
-                <div className="mt-px text-[11px] text-muted">Parents only</div>
-              </div>
+            <label className={`flex items-center justify-between rounded-[10px] border border-hairline px-3.5 py-2.5 ${TOGGLE_LABEL_CLASS}`}>
+              <span className="block">
+                <span className="block text-[13px] text-ink">Marriage space</span>
+                <span className="block mt-px text-[11px] text-muted">Parents only</span>
+              </span>
               <ToggleSwitch checked disabled onChange={() => {}} label="Marriage space access" />
-            </div>
+            </label>
           )}
         </div>
 

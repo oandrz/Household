@@ -12,6 +12,7 @@ import { type FormEvent, useState } from "react";
 import { apiErrorMessage } from "../../api/errorMessage";
 import { useCurrencies, useMe } from "../auth/useAuth";
 import { ToggleSwitch } from "../../components/ToggleSwitch";
+import { TOGGLE_LABEL_CLASS } from "../../components/fieldClasses";
 import { currencyLabel } from "./copy";
 import { useHousehold, useUpdateHousehold } from "./useHousehold";
 
@@ -135,15 +136,15 @@ export function CurrencyPanel() {
             )}
           </div>
 
-          <div className="flex items-center justify-between">
-            <div>
-              <div className="text-ink">
+          <label className={`flex items-center justify-between ${TOGGLE_LABEL_CLASS}`}>
+            <span className="block">
+              <span className="block text-ink">
                 Show {household.data.secondaryCurrency} equivalents
-              </div>
-              <div className="mt-0.5 text-[11.5px] text-muted">
+              </span>
+              <span className="block mt-0.5 text-[11.5px] text-muted">
                 Shown alongside the primary currency
-              </div>
-            </div>
+              </span>
+            </span>
             <ToggleSwitch
               checked={household.data.showSecondaryCurrency}
               disabled={!isOwner || updateHousehold.isPending}
@@ -156,7 +157,7 @@ export function CurrencyPanel() {
               // says what they see, and a different spoken name never matches.
               label={`Show ${household.data.secondaryCurrency} equivalents`}
             />
-          </div>
+          </label>
 
           <div className="flex items-center justify-between">
             <span className="text-ink">FX rate</span>

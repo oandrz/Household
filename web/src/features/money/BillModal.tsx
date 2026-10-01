@@ -35,6 +35,7 @@ import { FieldPair } from "../../components/FieldPair";
 import { Modal } from "../../components/Modal";
 import { ModalActions } from "../../components/ModalActions";
 import { ToggleSwitch } from "../../components/ToggleSwitch";
+import { TOGGLE_LABEL_CLASS } from "../../components/fieldClasses";
 import { ApiError } from "../../api/client";
 import { apiErrorMessage } from "../../api/errorMessage";
 import type { MemberView } from "../settings/schemas";
@@ -460,25 +461,25 @@ function BillModalForm(
           </select>
         </Field>
 
-        <div className="flex items-center justify-between rounded-[10px] border border-hairline px-3.5 py-2.5">
-          <div>
-            <div className="text-[13px] font-semibold text-ink">{BILL_COPY.onAutopayLabel}</div>
-            <div className="mt-0.5 text-[11.5px] text-muted">{BILL_COPY.onAutopayHelp}</div>
-          </div>
+        <label className={`flex items-center justify-between rounded-[10px] border border-hairline px-3.5 py-2.5 ${TOGGLE_LABEL_CLASS}`}>
+          <span className="block">
+            <span className="block text-[13px] font-semibold text-ink">{BILL_COPY.onAutopayLabel}</span>
+            <span className="block mt-0.5 text-[11.5px] text-muted">{BILL_COPY.onAutopayHelp}</span>
+          </span>
           <ToggleSwitch checked={autopay} onChange={() => setAutopay((v) => !v)} label={BILL_COPY.onAutopayLabel} />
-        </div>
+        </label>
 
-        <div className="flex items-center justify-between rounded-[10px] border border-hairline px-3.5 py-2.5">
-          <div>
-            <div className="text-[13px] font-semibold text-ink">{BILL_COPY.isSubscriptionLabel}</div>
-            <div className="mt-0.5 text-[11.5px] text-muted">{BILL_COPY.isSubscriptionHelp}</div>
-          </div>
+        <label className={`flex items-center justify-between rounded-[10px] border border-hairline px-3.5 py-2.5 ${TOGGLE_LABEL_CLASS}`}>
+          <span className="block">
+            <span className="block text-[13px] font-semibold text-ink">{BILL_COPY.isSubscriptionLabel}</span>
+            <span className="block mt-0.5 text-[11.5px] text-muted">{BILL_COPY.isSubscriptionHelp}</span>
+          </span>
           <ToggleSwitch
             checked={isSubscription}
             onChange={() => setIsSubscription((v) => !v)}
             label={BILL_COPY.isSubscriptionLabel}
           />
-        </div>
+        </label>
 
         {saveError !== null && (
           <div className="flex flex-col gap-2">
