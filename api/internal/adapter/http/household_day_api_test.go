@@ -28,6 +28,20 @@ func eveningClock() (clk *movableClock, utcDay time.Time) {
 	return &movableClock{now: anchor}, time.Date(anchor.Year(), anchor.Month(), anchor.Day(), 0, 0, 0, 0, time.UTC)
 }
 
+// monthEndClock is eveningClock on the last day of a month: 23:00 UTC, when
+// it is already the 1st of the NEXT month in Singapore. utcMonth is the
+// server's month; the household's is the one after.
+func monthEndClock() (clk *movableClock, utcMonth time.Time) {
+	now := time.Now().UTC()
+	firstOfMonth := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC)
+	anchor := firstOfMonth.AddDate(0, 1, -1).Add(23 * time.Hour)
+	if anchor.Before(now) {
+		firstOfMonth = firstOfMonth.AddDate(0, 1, 0)
+		anchor = firstOfMonth.AddDate(0, 1, -1).Add(23 * time.Hour)
+	}
+	return &movableClock{now: anchor}, firstOfMonth
+}
+
 // setTimezone moves the household to another zone through the API, the way
 // an owner does it in Settings.
 func (env *testEnv) setTimezone(t *testing.T, session, csrf *http.Cookie, zone string) {
@@ -131,6 +145,47 @@ func TestAHoldingFactDatedOnTheHouseholdsTodayIsAccepted(t *testing.T) {
 			map[string]any{"unitPriceMinor": 3_200, "asOf": singaporeToday}, token)
 		if rec.Code != http.StatusOK {
 			t.Fatalf("status = %d, want 200 (body = %s)", rec.Code, rec.Body.String())
+		}
+	})
+}
+
+// QA ISSUE-003. On the 1st of the month in Singapore the ledger opened on the
+// server's month, the one just ended, while the Add transaction form dated
+// the new row today. The row saved and was not on the screen. With no month
+// in the request, the ledger opens on the household's month.
+func TestTheLedgerOpensOnTheHouseholdsMonth(t *testing.T) {
+	clk, utcMonth := monthEndClock()
+	env := newTestEnvWithClock(t, clk)
+	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
+	env.setTimezone(t, session, csrf, "Asia/Singapore")
+
+	householdMonth := utcMonth.AddDate(0, 1, 0)
+	householdToday := householdMonth.Format("2006-01-02") // the 1st, in Singapore
+
+	category, _ := env.firstExpenseCategory(t, session)
+	account := env.mustCreateAccountID(t, session, csrf)
+	env.mustCreateExpense(t, session, csrf, householdToday, category, account, 1_250)
+
+	t.Run("on Singapore the default month is the new one, and today's row is in it", func(t *testing.T) {
+		got := env.listTransactions(t, session, "/api/v1/transactions")
+		if want := householdMonth.Format("2006-01"); got.Summary.Month != want {
+			t.Errorf("summary month = %s, want the household's month %s", got.Summary.Month, want)
+		}
+		if got.Summary.Count != 1 || len(got.Transactions) != 1 || got.Transactions[0].OccurredOn != householdToday {
+			t.Errorf("ledger = %+v, want the one expense dated %s", got, householdToday)
+		}
+	})
+
+	// The control: the same request with the household on UTC opens on the
+	// month the server is still in, where that row is not.
+	t.Run("on UTC the default month is still the old one", func(t *testing.T) {
+		env.setTimezone(t, session, csrf, "UTC")
+		got := env.listTransactions(t, session, "/api/v1/transactions")
+		if want := utcMonth.Format("2006-01"); got.Summary.Month != want {
+			t.Errorf("summary month = %s, want the server's month %s", got.Summary.Month, want)
+		}
+		if got.Summary.Count != 0 || len(got.Transactions) != 0 {
+			t.Errorf("ledger = %+v, want an empty month", got)
 		}
 	})
 }

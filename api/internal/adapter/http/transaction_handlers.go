@@ -127,7 +127,7 @@ func handleListTransactions(deps Deps) http.HandlerFunc {
 		// is no redaction branch: a limited member never reaches this handler.
 		scope, _ := RequestScope(r)
 
-		filter, month, ok := parseTransactionFilter(w, r)
+		filter, month, ok := parseTransactionFilter(w, r, scope.Today)
 		if !ok {
 			return
 		}
@@ -203,7 +203,12 @@ func decodeCursor(raw string) (time.Time, string, bool) {
 // answers the month separately because the summary is always about a month
 // even when the ledger is not filtered to one -- an unfiltered ledger still
 // shows "247 in July".
-func parseTransactionFilter(w http.ResponseWriter, r *http.Request) (usecase.TransactionFilter, time.Time, bool) {
+//
+// today is the household's calendar day (Scope.Today), and supplies the month
+// when the request names none. Don't read a clock here instead: on the 1st of
+// a month east of Greenwich the server's month is still the one just ended,
+// and the ledger would open on a month that today's new row is not in.
+func parseTransactionFilter(w http.ResponseWriter, r *http.Request, today time.Time) (usecase.TransactionFilter, time.Time, bool) {
 	q := r.URL.Query()
 	filter := usecase.TransactionFilter{
 		Kind:  q.Get("kind"),
@@ -240,7 +245,7 @@ func parseTransactionFilter(w http.ResponseWriter, r *http.Request) (usecase.Tra
 	// different question needing its own query and wording, so it is not
 	// invented here; the frontend names the month beside the figure, so a
 	// widened list never shows an unlabelled one.
-	month := time.Now().UTC()
+	month := today
 	switch raw := q.Get("month"); raw {
 	case "":
 		filter.Month = month
