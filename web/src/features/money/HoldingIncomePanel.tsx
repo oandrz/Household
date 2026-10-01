@@ -14,6 +14,7 @@
 import { useState, type FormEvent } from "react";
 import { ApiError } from "../../api/client";
 import { useCurrencies } from "../auth/useAuth";
+import { useHouseholdDateInput } from "../auth/useHouseholdDateInput";
 import { FIELD_CONTROL_CLASS } from "../../components/fieldClasses";
 import { Modal } from "../../components/Modal";
 import { useConfirmAction } from "../../components/useConfirmAction";
@@ -21,18 +22,6 @@ import { formatMoney, toMinorUnits } from "./formatMoney";
 import { useHoldingIncome, useHoldings } from "./useHoldings";
 import { parseEnum } from "../../lib/parseEnum";
 import { incomeKindSchema, type Holding, type IncomeKind } from "./holdingSchemas";
-
-// Local-time date, never toISOString(): that renders in UTC, so between
-// midnight and 8am in this household's own timezone every entry would default
-// to yesterday. HoldingLotsPanel.tsx and AccountModal.tsx each carry their own
-// copy, deliberately not coupled through one import.
-function today(): string {
-  const now = new Date();
-  const year = now.getFullYear();
-  const month = String(now.getMonth() + 1).padStart(2, "0");
-  const day = String(now.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-}
 
 export function HoldingIncomePanel({
   holding,
@@ -51,7 +40,7 @@ export function HoldingIncomePanel({
 
   const [kind, setKind] = useState<IncomeKind>("income");
   const [amount, setAmount] = useState("");
-  const [receivedOn, setReceivedOn] = useState(today());
+  const [receivedOn, setReceivedOn] = useHouseholdDateInput();
   const [note, setNote] = useState("");
   const [error, setError] = useState<string | null>(null);
   // An in-page confirmation, never window.confirm: a native dialog blocks the

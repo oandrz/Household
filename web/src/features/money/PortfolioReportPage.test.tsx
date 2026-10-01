@@ -11,6 +11,7 @@ import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { renderWithRouter } from "../../test/renderWithRouter";
 import { stubFetchRoutes } from "../../test/fetchStub";
+import { meRoute } from "../../test/meFixture";
 import { PortfolioReportPage } from "./PortfolioReportPage";
 import type { PeriodReturn, ReportHolding, ReportPeriod } from "./holdingSchemas";
 
@@ -90,8 +91,13 @@ const currencies = {
   },
 };
 
+const ORIGINAL_TZ = process.env.TZ;
+
 afterEach(() => {
+  vi.useRealTimers();
   vi.restoreAllMocks();
+  if (ORIGINAL_TZ === undefined) delete process.env.TZ;
+  else process.env.TZ = ORIGINAL_TZ;
 });
 
 describe("PortfolioReportPage", () => {
@@ -200,5 +206,25 @@ describe("PortfolioReportPage", () => {
     renderWithRouter(<PortfolioReportPage />);
 
     expect(await screen.findByText("Nothing to report yet")).toBeInTheDocument();
+  });
+
+  // "priced yesterday" is an age, and an age needs a today. It is the
+  // household's: at 23:00 UTC on 30 September a price dated the 30th is
+  // yesterday's for a household in Singapore, where it is already 1 October,
+  // though it is still today's for the browser in Los Angeles.
+  it("ages a price against the household's today, not the browser's", async () => {
+    process.env.TZ = "America/Los_Angeles";
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-09-30T23:00:00Z"));
+    const pricedOnThe30th = { ...earningQuarter, closingPriceAsOf: "2026-09-30" };
+    stubFetchRoutes({
+      ...meRoute("Asia/Singapore"),
+      "GET /api/v1/holdings/report?kind=quarter": reportBody([gold({ returns: [blankedQuarter, pricedOnThe30th] })]),
+      "GET /api/v1/currencies": currencies,
+    });
+    renderWithRouter(<PortfolioReportPage />);
+
+    const rows = await screen.findAllByTestId("report-row");
+    await waitFor(() => expect(rows[0]).toHaveTextContent("priced yesterday"));
   });
 });

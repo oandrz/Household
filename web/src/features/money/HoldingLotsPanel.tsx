@@ -10,6 +10,7 @@
 import { useState, type FormEvent } from "react";
 import { ApiError } from "../../api/client";
 import { useCurrencies } from "../auth/useAuth";
+import { useHouseholdDateInput } from "../auth/useHouseholdDateInput";
 import { FIELD_CONTROL_CLASS } from "../../components/fieldClasses";
 import { Modal } from "../../components/Modal";
 import { useConfirmAction } from "../../components/useConfirmAction";
@@ -43,11 +44,14 @@ export function HoldingLotsPanel({
   const [kind, setKind] = useState<HoldingEventKind>("acquisition");
   const [quantity, setQuantity] = useState("");
   const [amount, setAmount] = useState("");
-  const [occurredOn, setOccurredOn] = useState(today());
+  // Both dates default to the household's today. A price stamped a day early
+  // can be silently outranked by an older one, because the latest price is
+  // picked by its date; one stamped a day late is refused by the server.
+  const [occurredOn, setOccurredOn] = useHouseholdDateInput();
   const [eventError, setEventError] = useState<string | null>(null);
 
   const [price, setPrice] = useState("");
-  const [asOf, setAsOf] = useState(today());
+  const [asOf, setAsOf] = useHouseholdDateInput();
   const [priceError, setPriceError] = useState<string | null>(null);
 
   // An in-page confirmation, never window.confirm: a native dialog blocks the
@@ -277,23 +281,4 @@ export function HoldingLotsPanel({
       </section>
     </Modal>
   );
-}
-
-// The LOCAL calendar day, never toISOString().slice(0, 10) -- that renders in
-// UTC, so east of Greenwich it returns yesterday for the first hours of every
-// day. In Singapore (UTC+8) that is midnight to 08:00, and a price stamped a
-// day early can be silently outranked by an older one, because
-// ListLatestValuations orders by as_of.
-//
-// This repo has shipped this exact mistake three times before (f61407d,
-// f17be2d, and the plan correction behind them); AccountModal.tsx and
-// GoalContributionsPanel.tsx each carry this same helper for the same reason.
-// Each keeps its own copy deliberately rather than coupling three features'
-// date handling through one import.
-function today(): string {
-  const now = new Date();
-  const year = now.getFullYear();
-  const month = String(now.getMonth() + 1).padStart(2, "0");
-  const day = String(now.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
 }
