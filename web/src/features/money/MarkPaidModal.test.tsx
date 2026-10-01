@@ -14,6 +14,7 @@ import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { renderWithRouter } from "../../test/renderWithRouter";
 import { stubFetchRoutes, type RouteResponse } from "../../test/fetchStub";
+import { meRoute } from "../../test/meFixture";
 import { BillsPage } from "./BillsPage";
 import type { Bill, BillPayment, BillsResponse } from "./billSchemas";
 
@@ -127,6 +128,8 @@ function mutatingCalls(fetchMock: ReturnType<typeof stubFetchRoutes>): string[] 
     .map(([input, init]) => `${(init?.method ?? "GET").toUpperCase()} ${String(input)}`);
 }
 
+const ORIGINAL_TZ = process.env.TZ;
+
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(new Date("2026-08-09T12:00:00Z"));
@@ -138,6 +141,8 @@ afterEach(() => {
   // Restores window.confirm after the one test below that spies on it --
   // unstubAllGlobals only undoes vi.stubGlobal, not vi.spyOn.
   vi.restoreAllMocks();
+  if (ORIGINAL_TZ === undefined) delete process.env.TZ;
+  else process.env.TZ = ORIGINAL_TZ;
 });
 
 describe("MarkPaidModal", () => {
@@ -493,5 +498,19 @@ describe("MarkPaidModal", () => {
     // would be on screen immediately if the keydown had bubbled to the
     // row's own onKeyDown, regardless of its own async data still loading.
     expect(screen.queryByRole("heading", { name: "Edit bill" })).not.toBeInTheDocument();
+  });
+
+  // QA ISSUE-004, the browser's half: a bill paid "today" is listed under the
+  // household's month, so "Paid on" starts on the household's today.
+  it("paid on defaults to the household's today, whatever zone the browser is in", async () => {
+    // 23:00 UTC on 30 September: 16:00 that day in Los Angeles, where the
+    // browser is, and 07:00 on 1 October in Singapore, where the household is.
+    process.env.TZ = "America/Los_Angeles";
+    vi.setSystemTime(new Date("2026-09-30T23:00:00Z"));
+    renderBillsPage([billFixture()], [], meRoute("Asia/Singapore"));
+
+    fireEvent.click(await screen.findByRole("button", { name: "Mark StarHub paid" }));
+
+    await waitFor(() => expect(screen.getByLabelText("Paid on")).toHaveValue("2026-10-01"));
   });
 });

@@ -36,19 +36,7 @@ import { describeAmountError, formatMoney, toMinorUnits } from "./formatMoney";
 import { GOAL_COPY, contributionSourceLabel } from "./goalCopy";
 import { useGoalContributions, useGoals } from "./useGoals";
 import type { Goal, GoalContribution } from "./goalSchemas";
-
-// today() reads the *local* calendar date via getFullYear/getMonth/getDate,
-// never toISOString() (which converts to UTC first) -- the same function,
-// duplicated for the same reason, as TransactionModal.tsx's/AccountModal.tsx's
-// own today(): a small duplicated four-line function is a smaller risk than
-// coupling three features' date handling through one shared import.
-function today(): string {
-  const now = new Date();
-  const year = now.getFullYear();
-  const month = String(now.getMonth() + 1).padStart(2, "0");
-  const day = String(now.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-}
+import { useHouseholdDateInput } from "../auth/useHouseholdDateInput";
 
 function ContributionRow({
   contribution,
@@ -158,7 +146,7 @@ export function GoalContributionsPanel({
   const contributions = useGoalContributions(goal.id, true);
 
   const [amountInput, setAmountInput] = useState("");
-  const [occurredOn, setOccurredOn] = useState(today());
+  const [occurredOn, setOccurredOn] = useHouseholdDateInput();
   const [note, setNote] = useState("");
   const [amountError, setAmountError] = useState<string | null>(null);
   const [addError, setAddError] = useState<string | null>(null);
@@ -197,7 +185,7 @@ export function GoalContributionsPanel({
       // entry immediately after.
       setAmountInput("");
       setNote("");
-      setOccurredOn(today());
+      setOccurredOn(null);
     } catch (err) {
       setAddError(apiErrorMessage(err, "Something went wrong. Please try again."));
     } finally {

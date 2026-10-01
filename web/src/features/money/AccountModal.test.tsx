@@ -403,19 +403,19 @@ describe("AccountModal", () => {
     expect(patched).toMatchObject({ openingBalanceMinor: 100000, openingBalanceCurrency: "USD" });
   });
 
-  // today() (AccountModal.tsx) reads the *local* calendar date rather than
-  // converting through UTC -- this branch has already produced three bugs of
-  // exactly that class (f61407d "stop refusing today's date east of UTC",
-  // f17be2d "fix dateOnly, the third instance of one mistake", and the plan
-  // correction behind both), so this is the fourth site with the same hazard
-  // and the only one that had no test. `toFake: ["Date"]` freezes only what
-  // `new Date()` returns, leaving setTimeout alone -- the router's own
-  // pending-state transition and findByLabelText's polling both still need
-  // real timers to ever resolve.
-  it("defaults Balance as of to the local calendar day, not the UTC one", async () => {
+  // "Starting balance as of" defaults to the household's today, read in the
+  // household's zone (meFixture's is Asia/Singapore), never the browser's.
+  // The server refuses an opening balance dated after the household's today,
+  // so a default taken from any other clock is sometimes a date it refuses.
+  //
+  // `toFake: ["Date"]` freezes only what `new Date()` returns, leaving
+  // setTimeout alone -- the router's own pending-state transition and
+  // waitFor's polling both still need real timers to ever resolve.
+  it("defaults Balance as of to the household's today, whatever zone the browser is in", async () => {
     process.env.TZ = "Pacific/Midway"; // UTC-11
     vi.useFakeTimers({ toFake: ["Date"] });
-    // 05:00 UTC on 1 Jan is still 18:00 on 31 Dec in Pacific/Midway.
+    // 05:00 UTC on 1 Jan: still 18:00 on 31 Dec for the browser in
+    // Pacific/Midway, already 13:00 on 1 Jan for the household in Singapore.
     vi.setSystemTime(new Date("2026-01-01T05:00:00Z"));
 
     stubFetchRoutes({
@@ -426,7 +426,9 @@ describe("AccountModal", () => {
 
     renderWithRouter(<AccountModal open onClose={() => {}} />);
 
-    expect(await screen.findByLabelText("Starting balance as of")).toHaveValue("2025-12-31");
+    await waitFor(() =>
+      expect(screen.getByLabelText("Starting balance as of")).toHaveValue("2026-01-01"),
+    );
   });
 
   it("says the starting balance is the start-of-day figure", async () => {

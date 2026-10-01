@@ -40,6 +40,7 @@ import { apiErrorMessage } from "../../api/errorMessage";
 import type { MemberView } from "../settings/schemas";
 import { useHouseholdMembers } from "../settings/useHouseholdMembers";
 import { BILL_COPY, CADENCE_OPTIONS } from "./billCopy";
+import { useHouseholdDateInput } from "../auth/useHouseholdDateInput";
 import { describeAmountError, minorUnitsToInputValue, toMinorUnits } from "./formatMoney";
 import type { Account } from "./schemas";
 import type { Category } from "./transactionSchemas";
@@ -48,21 +49,6 @@ import { useAccounts } from "./useAccounts";
 import { useCreateBill, useRestoreBill, useUpdateBill, type CreateBillBody, type UpdateBillBody } from "./useBills";
 import { parseEnum } from "../../lib/parseEnum";
 import { BILL_CADENCES, type Bill } from "./billSchemas";
-
-// today() reads the *local* calendar date via getFullYear/getMonth/getDate,
-// never toISOString() (which converts to UTC first) -- the same function and
-// the same reason AccountModal.tsx's and TransactionModal.tsx's own today()
-// give. Duplicated rather than imported: a small, already-tested four-line
-// function is a smaller risk to share than the coupling importing it across
-// features would add (TransactionModal.tsx's own comment on the identical
-// choice).
-function today(): string {
-  const now = new Date();
-  const year = now.getFullYear();
-  const month = String(now.getMonth() + 1).padStart(2, "0");
-  const day = String(now.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-}
 
 // Create mode has no bill yet; edit mode always has the one being edited. A
 // union rather than a `mode` flag beside an optional `bill` prop, so "edit
@@ -145,15 +131,13 @@ function BillModalForm(
     bill ? minorUnitsToInputValue(bill.amountMinor, bill.currency) : "",
   );
   const [cadence, setCadence] = useState<CreateBillBody["cadence"]>(bill?.cadence ?? "monthly");
-  // bill?.nextDue ?? today() would be wrong here: for a settled one-off,
-  // nextDue is null on purpose (billDTO's own comment), and `null ?? today()`
-  // would silently prefill today's date -- turning an edit that never
-  // touched the date into a save that un-settles the bill with a due date
-  // the household never chose. Editing must start from what the bill
-  // actually has (blank, for a settled one), not from a fabricated default;
-  // only a brand-new bill (bill === null) gets today() as a sensible
-  // starting point.
-  const [nextDueInput, setNextDueInput] = useState(bill ? (bill.nextDue ?? "") : today());
+  // Only a brand-new bill (bill === null) starts on the household's today.
+  // An edit starts from what the bill actually has, which for a settled
+  // one-off is blank on purpose (billDTO's own comment): prefilling today
+  // there would turn an edit that never touched the date into a save that
+  // un-settles the bill with a due date the household never chose. Hence ""
+  // rather than null for that case -- null is what asks for today.
+  const [nextDueInput, setNextDueInput] = useHouseholdDateInput(bill ? (bill.nextDue ?? "") : null);
   const [categoryId, setCategoryId] = useState(bill?.categoryId ?? "");
   const [payFromAccountId, setPayFromAccountId] = useState(() => bill?.payFromAccountId ?? accounts[0]?.id ?? "");
   const [paidByMembershipId, setPaidByMembershipId] = useState(bill?.paidByMembershipId ?? "");

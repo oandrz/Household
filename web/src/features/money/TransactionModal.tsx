@@ -26,6 +26,7 @@ import { TRANSACTIONS_COPY } from "./transactionCopy";
 import { useCategories } from "./useTransactions";
 import type { Account } from "./schemas";
 import type { Transaction, TransactionKind } from "./transactionSchemas";
+import { useHouseholdDateInput } from "../auth/useHouseholdDateInput";
 
 // TransactionFormValues mirrors createTransactionRequest
 // (api/internal/adapter/http/transaction_handlers.go) field for field --
@@ -43,20 +44,6 @@ export type TransactionFormValues = {
   amountMinor: number;
   receivedAmountMinor: number | null;
 };
-
-// today() reads the *local* calendar date via getFullYear/getMonth/getDate,
-// never toISOString() (which converts to UTC first) -- the same function and
-// the same reason as AccountModal.tsx's own today(). Not extracted to a
-// shared module: it is small, single-purpose, and duplicating an exact,
-// already-tested four-line function is a smaller risk than coupling two
-// features' date handling through one import for a single line of logic.
-function today(): string {
-  const now = new Date();
-  const year = now.getFullYear();
-  const month = String(now.getMonth() + 1).padStart(2, "0");
-  const day = String(now.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-}
 
 const KINDS: TransactionKind[] = ["expense", "income", "transfer"];
 const KIND_LABELS: Record<TransactionKind, string> = {
@@ -89,7 +76,10 @@ export function TransactionModal({
   const categories = useCategories();
 
   const [kind, setKind] = useState<TransactionKind>(initial?.kind ?? "expense");
-  const [date, setDate] = useState(initial?.occurredOn ?? today());
+  // A new transaction is dated the household's today. The ledger opens on
+  // the household's month, so a row dated by any other clock can be saved
+  // into a month that is not the one on screen.
+  const [date, setDate] = useHouseholdDateInput(initial?.occurredOn ?? null);
   const [description, setDescription] = useState(initial?.description ?? "");
   const [amountInput, setAmountInput] = useState(() =>
     initial ? minorUnitsToInputValue(initial.amount.amountMinor, initial.amount.currency) : "",

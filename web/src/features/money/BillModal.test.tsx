@@ -20,6 +20,7 @@ import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { renderWithRouter } from "../../test/renderWithRouter";
 import { stubFetchRoutes, type RouteResponse } from "../../test/fetchStub";
+import { meRoute } from "../../test/meFixture";
 import { BillModal, type BillModalMode } from "./BillModal";
 import { BillsPage } from "./BillsPage";
 import type { Bill, BillsResponse } from "./billSchemas";
@@ -29,9 +30,13 @@ beforeEach(() => {
   vi.setSystemTime(new Date("2026-08-09T12:00:00Z"));
 });
 
+const ORIGINAL_TZ = process.env.TZ;
+
 afterEach(() => {
   vi.useRealTimers();
   vi.unstubAllGlobals();
+  if (ORIGINAL_TZ === undefined) delete process.env.TZ;
+  else process.env.TZ = ORIGINAL_TZ;
 });
 
 const CURRENCIES = {
@@ -531,5 +536,17 @@ describe("BillModal is mounted at all three of BillsPage's entry points", () => 
 
     expect(await screen.findByLabelText("Bill name")).toHaveValue("StarHub");
     expect(screen.getByRole("button", { name: "Save" })).toBeInTheDocument();
+  });
+
+  // A new bill's "Next due" starts on the household's today, read in the
+  // household's zone and never the browser's.
+  it("a new bill's next due defaults to the household's today, whatever zone the browser is in", async () => {
+    // 23:00 UTC on 30 September: 16:00 that day in Los Angeles, where the
+    // browser is, and 07:00 on 1 October in Singapore, where the household is.
+    process.env.TZ = "America/Los_Angeles";
+    vi.setSystemTime(new Date("2026-09-30T23:00:00Z"));
+    renderModal(undefined, meRoute("Asia/Singapore"));
+
+    await waitFor(() => expect(screen.getByLabelText("Next due")).toHaveValue("2026-10-01"));
   });
 });

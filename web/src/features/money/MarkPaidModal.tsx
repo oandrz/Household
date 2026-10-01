@@ -30,21 +30,7 @@ import { BILL_COPY } from "./billCopy";
 import { describeAmountError, minorUnitsToInputValue, toMinorUnits } from "./formatMoney";
 import { useMarkPaid, type PayBillBody } from "./useBills";
 import type { Bill } from "./billSchemas";
-
-// today() reads the *local* calendar date via getFullYear/getMonth/getDate,
-// never toISOString() (which converts to UTC first) -- the same function and
-// the same reason BillModal.tsx's/AccountModal.tsx's/TransactionModal.tsx's
-// own today() give, duplicated rather than imported for the identical reason
-// each of those states: a small, already-tested four-line function is a
-// smaller risk to share than the coupling importing it across components
-// would add.
-function today(): string {
-  const now = new Date();
-  const year = now.getFullYear();
-  const month = String(now.getMonth() + 1).padStart(2, "0");
-  const day = String(now.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-}
+import { useHouseholdDateInput } from "../auth/useHouseholdDateInput";
 
 export function MarkPaidModal({
   bill,
@@ -61,7 +47,7 @@ export function MarkPaidModal({
   // month to month, which is the whole reason this is a modal rather than a
   // one-click "Mark paid" button (the task brief's own words).
   const [amountInput, setAmountInput] = useState(() => minorUnitsToInputValue(bill.amountMinor, bill.currency));
-  const [paidOn, setPaidOn] = useState(today());
+  const [paidOn, setPaidOn] = useHouseholdDateInput();
   const [amountError, setAmountError] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);

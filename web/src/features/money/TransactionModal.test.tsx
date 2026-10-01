@@ -2,11 +2,19 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { stubFetchRoutes } from "../../test/fetchStub";
+import { meRoute } from "../../test/meFixture";
 import { TransactionModal, type TransactionFormValues } from "./TransactionModal";
 import type { Account } from "./schemas";
 import type { Category, Transaction } from "./transactionSchemas";
 
-afterEach(() => vi.unstubAllGlobals());
+const ORIGINAL_TZ = process.env.TZ;
+
+afterEach(() => {
+  vi.useRealTimers();
+  vi.unstubAllGlobals();
+  if (ORIGINAL_TZ === undefined) delete process.env.TZ;
+  else process.env.TZ = ORIGINAL_TZ;
+});
 
 // Full Account objects, not the brief's flattened { id, nickname, currency }
 // guess -- schemas.ts's accountSchema nests currency under `balance`, and a
@@ -86,8 +94,12 @@ function renderModal(
     initial: Transaction;
   }> = {},
   categories: Category[] = CATEGORIES,
+  householdZone = "Asia/Singapore",
 ) {
   stubFetchRoutes({
+    // The date field defaults to the household's today, read off the me
+    // bundle's time zone.
+    ...meRoute(householdZone),
     "GET /api/v1/categories": { status: 200, body: { categories } },
   });
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -437,5 +449,19 @@ describe("TransactionModal", () => {
 
     expect(onSubmit).not.toHaveBeenCalled();
     expect(screen.getByText(/enter what actually arrived/i)).toBeInTheDocument();
+  });
+
+  // QA ISSUE-003, the browser's half: the ledger opens on the household's
+  // month, so the row this form dates "today" has to be dated the household's
+  // today, or it is saved into a month that is not on screen.
+  it("a new transaction's date defaults to the household's today, whatever zone the browser is in", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    // 23:00 UTC on 30 September: 16:00 that day in Los Angeles, where the
+    // browser is, and 07:00 on 1 October in Singapore, where the household is.
+    process.env.TZ = "America/Los_Angeles";
+    vi.setSystemTime(new Date("2026-09-30T23:00:00Z"));
+    renderModal();
+
+    await waitFor(() => expect(screen.getByLabelText(/date/i)).toHaveValue("2026-10-01"));
   });
 });
