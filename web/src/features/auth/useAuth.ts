@@ -262,6 +262,7 @@ export function useCompleteSignUp() {
       householdName: string;
       displayName: string;
       primaryCurrency: string;
+      timezone: string;
       password: string;
     }): Promise<Me> => {
       const { token, ...request } = vars;

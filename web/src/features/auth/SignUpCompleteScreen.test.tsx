@@ -24,8 +24,12 @@ const preview = {
   },
 };
 
+const ORIGINAL_TZ = process.env.TZ;
+
 afterEach(() => {
   vi.unstubAllGlobals();
+  if (ORIGINAL_TZ === undefined) delete process.env.TZ;
+  else process.env.TZ = ORIGINAL_TZ;
 });
 
 describe("SignUpCompleteScreen", () => {
@@ -89,6 +93,11 @@ describe("SignUpCompleteScreen", () => {
   });
 
   it("submits every field and enters the app", async () => {
+    // The form has no time zone field. The zone is read from the device, so
+    // that the new household's "today" is this person's today from the first
+    // screen. Sao Paulo, not the machine's own zone, so the assertion below
+    // cannot pass on a value the test never set.
+    process.env.TZ = "America/Sao_Paulo";
     let posted: unknown = null;
     stubFetchRoutes({
       ...preview,
@@ -132,6 +141,7 @@ describe("SignUpCompleteScreen", () => {
         householdName: "Ade & Kris",
         displayName: "Ade",
         primaryCurrency: "BRL",
+        timezone: "America/Sao_Paulo",
         password: "a-long-enough-password",
       });
     });

@@ -14,6 +14,7 @@ import { Link, useNavigate } from "@tanstack/react-router";
 import { ApiError } from "../../api/client";
 import { apiErrorMessage } from "../../api/errorMessage";
 import { Field } from "../../components/Field";
+import { browserTimeZone } from "../../lib/browserTimeZone";
 import { type Currency, type SignUpPreview } from "./schemas";
 import { useCompleteSignUp, useCurrencies, useSignUpPreview } from "./useAuth";
 
@@ -149,6 +150,9 @@ function CompleteSignUpForm({
         householdName: trimmedHouseholdName,
         displayName: trimmedDisplayName,
         primaryCurrency: currency,
+        // Read at submit, not at render: the form has no field for it, so
+        // there is no state for it to go stale in.
+        timezone: browserTimeZone(),
         password,
       },
       {

@@ -23,6 +23,12 @@ export const householdSchema = z.object({
   showSecondaryCurrency: z.boolean(),
   secondaryCurrency: z.string(),
   fxRateMode: z.string(),
+  // The IANA zone the household keeps its calendar in. Every date the app
+  // works out ("today", "this month") is read in this zone, never the
+  // browser's (lib/householdDate.ts). Defaulted so that a server too old to
+  // send it does not fail the whole me bundle and sign everyone out; UTC is
+  // what such a server computes its own dates in.
+  timezone: z.string().default("UTC"),
 });
 export type Household = z.infer<typeof householdSchema>;
 

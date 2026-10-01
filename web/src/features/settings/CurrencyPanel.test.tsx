@@ -35,6 +35,7 @@ function householdFixture(overrides: Partial<Household> = {}): Household {
     showSecondaryCurrency: true,
     secondaryCurrency: "IDR",
     fxRateMode: "auto",
+    timezone: "Asia/Singapore",
     ...overrides,
   };
 }

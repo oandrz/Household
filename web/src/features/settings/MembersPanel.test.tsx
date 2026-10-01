@@ -45,6 +45,7 @@ function meFixture(role: "owner" | "limited" = "owner"): Me {
       showSecondaryCurrency: true,
       secondaryCurrency: "IDR",
       fxRateMode: "auto",
+      timezone: "Asia/Singapore",
     },
     membership: {
       id: "mem-andreas",
