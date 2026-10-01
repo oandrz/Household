@@ -2,6 +2,7 @@ package httpadapter_test
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"testing"
 	"time"
@@ -32,13 +33,21 @@ func eveningClock() (clk *movableClock, utcDay time.Time) {
 // it is already the 1st of the NEXT month in Singapore. utcMonth is the
 // server's month; the household's is the one after.
 func monthEndClock() (clk *movableClock, utcMonth time.Time) {
+	return monthEndClockAfter(0)
+}
+
+// monthEndClockAfter is monthEndClock moved a whole number of months further
+// on. The retro test needs one: its control looks at the month BEFORE the
+// server's, and that must not be a month before the test household existed.
+func monthEndClockAfter(months int) (clk *movableClock, utcMonth time.Time) {
 	now := time.Now().UTC()
 	firstOfMonth := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC)
 	anchor := firstOfMonth.AddDate(0, 1, -1).Add(23 * time.Hour)
 	if anchor.Before(now) {
 		firstOfMonth = firstOfMonth.AddDate(0, 1, 0)
-		anchor = firstOfMonth.AddDate(0, 1, -1).Add(23 * time.Hour)
 	}
+	firstOfMonth = firstOfMonth.AddDate(0, months, 0)
+	anchor = firstOfMonth.AddDate(0, 1, -1).Add(23 * time.Hour)
 	return &movableClock{now: anchor}, firstOfMonth
 }
 
@@ -284,4 +293,66 @@ func TestArchivingABillStampsTheInstantAndJudgesOverdueByTheHouseholdsDay(t *tes
 	if !stamped.Equal(clk.Now()) {
 		t.Errorf("archivedAt = %s, want the instant %s", *got.ArchivedAt, clk.Now().Format(time.RFC3339))
 	}
+}
+
+// QA ISSUE-005. On 1 October in Singapore the server, still on 30 September,
+// offered "Start August retro". The month a retro starts on is the earlier of
+// {last month, this month} with none yet, and both of those are the
+// household's.
+func TestStartRetroBeginsTheMonthJustEndedInTheHouseholdsZone(t *testing.T) {
+	clk, utcMonth := monthEndClockAfter(1)
+	env := newTestEnvWithClock(t, clk)
+	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
+
+	// The server is on the last day of utcMonth. The household in Singapore
+	// is on the 1st of the month after, so utcMonth is the month it just
+	// finished and the one to look back on.
+	monthJustEnded := utcMonth.Format("2006-01")
+	monthBefore := utcMonth.AddDate(0, -1, 0).Format("2006-01")
+
+	startMonth := func(t *testing.T) string {
+		t.Helper()
+		rec := env.authedGet(t, "/api/v1/retros", session)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("GET /retros: status = %d, body = %s", rec.Code, rec.Body.String())
+		}
+		var body retrosListWithDataBody
+		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		if body.StartMonth == nil {
+			t.Fatal("startMonth is null for a household with no retros")
+		}
+		return *body.StartMonth
+	}
+
+	// The control: on UTC the month still running is "this month", so the
+	// one offered is the month before it.
+	t.Run("on UTC the month offered is the one before the server's", func(t *testing.T) {
+		if got := startMonth(t); got != monthBefore {
+			t.Errorf("startMonth = %s, want %s", got, monthBefore)
+		}
+	})
+
+	env.setTimezone(t, session, csrf, "Asia/Singapore")
+
+	t.Run("on Singapore the month offered is the one that just ended there", func(t *testing.T) {
+		if got := startMonth(t); got != monthJustEnded {
+			t.Errorf("startMonth = %s, want %s", got, monthJustEnded)
+		}
+	})
+
+	t.Run("and Start creates that month", func(t *testing.T) {
+		rec := env.authed(t, http.MethodPost, "/api/v1/retros", nil, session, csrf)
+		if rec.Code != http.StatusCreated {
+			t.Fatalf("POST /retros: status = %d, body = %s", rec.Code, rec.Body.String())
+		}
+		var created retroDetailBody
+		if err := json.Unmarshal(rec.Body.Bytes(), &created); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		if created.Retro.Month != monthJustEnded {
+			t.Errorf("started %s, want %s", created.Retro.Month, monthJustEnded)
+		}
+	})
 }
