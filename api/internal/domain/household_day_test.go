@@ -164,7 +164,8 @@ func TestTodayInMeansTheSameDayToBothFamiliesOfDateRule(t *testing.T) {
 	if period.Label() != "Q4 2026" {
 		t.Errorf("current quarter = %s, want Q4 2026", period.Label())
 	}
-	month, ok := domain.StartableMonth(today, false, false)
+	// Created long ago, so the creation-month floor plays no part here.
+	month, ok := domain.StartableMonth(today, utcDay(2020, 1, 1), false, false)
 	if !ok || !month.Equal(utcDay(2026, 9, 1)) {
 		t.Errorf("startable month = %s (%v), want September 2026", month, ok)
 	}

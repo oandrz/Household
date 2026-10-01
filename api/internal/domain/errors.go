@@ -319,11 +319,12 @@ var (
 	// other person's paragraph is the failure this guard exists to prevent.
 	ErrRetroChanged = errors.New("this retro changed while you were editing it")
 
-	// ErrRetroNothingToStart is returned when both candidate months -- the
-	// current one and the previous one -- already have a retro, so there is
-	// nothing left for "Start retro" to create (domain.StartableMonth's own
-	// `ok == false` case). The HTTP layer maps this to 409.
-	ErrRetroNothingToStart = errors.New("both candidate months already have a retro")
+	// ErrRetroNothingToStart is returned when neither candidate month can be
+	// started: each of the previous month and the current one either already
+	// has a retro or is before the month the household was created in. There
+	// is nothing left for "Start retro" to create (domain.StartableMonth's
+	// own `ok == false` case). The HTTP layer maps this to 409.
+	ErrRetroNothingToStart = errors.New("there is no month left to start a retro for")
 
 	// ErrRetroActionBodyRequired is returned when an action's body is empty
 	// or whitespace-only. A blank row on the retro detail is indistinguishable

@@ -24,6 +24,10 @@ func TestParseMoodRefusesAnythingOutsideOneToFive(t *testing.T) {
 	}
 }
 
+// longBefore is a creation day far enough back that the creation-month floor
+// plays no part in a test about something else.
+var longBefore = time.Date(2020, 1, 15, 0, 0, 0, 0, time.UTC)
+
 // The button starts the EARLIER of {previous month, current month} that has no
 // retro row, so a couple doing July's retro on 2 August files it as July and
 // August is still available afterwards.
@@ -45,7 +49,7 @@ func TestStartableMonth(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			got, ok := domain.StartableMonth(today, c.currentExists, c.previousExists)
+			got, ok := domain.StartableMonth(today, longBefore, c.currentExists, c.previousExists)
 			if ok != c.wantOK || !got.Equal(c.want) {
 				t.Fatalf("= %v, %v; want %v, %v", got, ok, c.want, c.wantOK)
 			}
@@ -58,9 +62,67 @@ func TestStartableMonthCrossesTheYear(t *testing.T) {
 	today := time.Date(2027, 1, 4, 9, 0, 0, 0, time.UTC)
 	want := time.Date(2026, 12, 1, 0, 0, 0, 0, time.UTC)
 
-	got, ok := domain.StartableMonth(today, false, false)
+	got, ok := domain.StartableMonth(today, longBefore, false, false)
 	if !ok || !got.Equal(want) {
 		t.Fatalf("= %v, %v; want %v, true", got, ok, want)
+	}
+}
+
+// A household did not exist in the month before it was created, so that month
+// is never offered: the household starts with the month it was created in.
+func TestStartableMonthNeverReachesBeforeTheCreationMonth(t *testing.T) {
+	september := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
+	october := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
+
+	cases := []struct {
+		name                          string
+		today, createdOn              time.Time
+		currentExists, previousExists bool
+		want                          time.Time
+		wantOK                        bool
+	}{
+		{
+			name:  "created today, on the 1st: offers this month, not the one before",
+			today: october, createdOn: october,
+			want: october, wantOK: true,
+		},
+		{
+			name:  "created earlier this month: still offers this month",
+			today: time.Date(2026, 10, 20, 0, 0, 0, 0, time.UTC), createdOn: time.Date(2026, 10, 3, 0, 0, 0, 0, time.UTC),
+			want: october, wantOK: true,
+		},
+		{
+			name:  "created this month, this month already started: offers nothing",
+			today: october, createdOn: october,
+			currentExists: true,
+			wantOK:        false,
+		},
+		{
+			name:  "created on the last day of last month: last month is its own and is offered",
+			today: october, createdOn: time.Date(2026, 9, 30, 0, 0, 0, 0, time.UTC),
+			want: september, wantOK: true,
+		},
+		{
+			name:  "created last month, last month done: offers this month",
+			today: october, createdOn: time.Date(2026, 9, 30, 0, 0, 0, 0, time.UTC),
+			previousExists: true,
+			want:           october, wantOK: true,
+		},
+		{
+			// Only a clock that went backwards gets here. Nothing is offered
+			// rather than a month the household was not there for.
+			name:  "created after today: offers nothing",
+			today: time.Date(2026, 9, 30, 0, 0, 0, 0, time.UTC), createdOn: october,
+			wantOK: false,
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got, ok := domain.StartableMonth(c.today, c.createdOn, c.currentExists, c.previousExists)
+			if ok != c.wantOK || !got.Equal(c.want) {
+				t.Fatalf("= %v, %v; want %v, %v", got, ok, c.want, c.wantOK)
+			}
+		})
 	}
 }
 

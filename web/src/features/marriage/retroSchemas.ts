@@ -93,7 +93,10 @@ export const retrosResponseSchema = z.object({
   mood: z.array(moodPointSchema),
   doneCount: z.number().int(),
   since: z.string().nullable(), // "2025-08", or null
-  startMonth: z.string().nullable(), // null when both candidate months exist
+  // The month "Start retro" would begin, or null when there is none: each of
+  // last month and this month either has a retro already or is before the
+  // month the household was created in.
+  startMonth: z.string().nullable(),
 });
 export type RetrosResponse = z.infer<typeof retrosResponseSchema>;
 

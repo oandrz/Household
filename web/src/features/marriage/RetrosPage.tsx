@@ -100,10 +100,9 @@ export function RetrosPage() {
 
   const data = retros.data;
   const subtitleClause = doneSinceClause(data);
-  // Fails closed on the backend's own stated invariant
-  // (retrosResponseSchema's comment: null means both candidate months
-  // already have a retro) rather than trusting it blindly -- a button built
-  // from a null month would throw inside monthNameOnly's own string split.
+  // No startMonth, no button: null means there is no month left to start
+  // (retrosResponseSchema's comment), and a button built from a null month
+  // would throw inside monthNameOnly's own string split.
   const startLabel = data.startMonth ? RETRO_COPY.startRetro(monthNameOnly(data.startMonth)) : null;
   const noRetrosYet = data.retros.length === 0;
 

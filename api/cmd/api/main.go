@@ -297,7 +297,7 @@ func run() error {
 		// rule as a hand-entered one (see BillDeps).
 		Categories: categoryRepo,
 	})
-	retroSvc := usecase.NewRetroService(retroRepo, retroActionRepo)
+	retroSvc := usecase.NewRetroService(retroRepo, retroActionRepo, households)
 	// goalRepo doubles as the GoalProgressReader: Vision needs one
 	// percentage from Goals and the narrow port is what keeps it from
 	// depending on GoalRepository's whole surface.

@@ -886,14 +886,16 @@ var domainErrorResponses = []domainErrorResponse{
 		// have different causes and want different copy. RETRO_EXISTS
 		// (handleStartRetro's own case, ahead of MapDomainError) is two
 		// concurrent Create calls racing for the SAME free month. This is
-		// the calm case of both candidate months already being taken -- the
+		// the calm case of no month being left to start -- the
 		// Start-retro button shouldn't even reach it, since
 		// RetrosView.StartMonth would already be nil -- so "someone already
-		// started it" would be actively wrong here.
+		// started it" would be actively wrong here. The message does not
+		// say "last month already has a retro": for a household created
+		// this month, last month has none and is not offered either.
 		sentinels: []error{domain.ErrRetroNothingToStart},
 		status:    http.StatusConflict,
 		code:      "RETRO_NOTHING_TO_START",
-		message:   "Both this month and last month already have a retro.",
+		message:   "There is no retro left to start right now.",
 	},
 	{
 		sentinels: []error{domain.ErrInvalidMood},

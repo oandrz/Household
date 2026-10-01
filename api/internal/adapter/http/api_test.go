@@ -361,7 +361,7 @@ func newTestEnvWith(t *testing.T, clk usecase.Clock, outbox usecase.MailOutbox) 
 		Accounts:   accountRepo,
 		Categories: categoryRepo,
 	})
-	retroSvc := usecase.NewRetroService(postgres.NewRetroRepo(db), postgres.NewRetroActionRepo(db))
+	retroSvc := usecase.NewRetroService(postgres.NewRetroRepo(db), postgres.NewRetroActionRepo(db), households)
 	// goalRepo doubles as the GoalProgressReader, the same reasoning
 	// cmd/api/main.go's own wiring comment gives: Vision needs one
 	// percentage from Goals and the narrow port is what keeps it from

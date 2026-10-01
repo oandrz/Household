@@ -14,6 +14,22 @@ func aug2026() time.Time { return time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC) }
 func jul2026() time.Time { return time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC) }
 func jun2026() time.Time { return time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC) }
 
+// retroHouseholds is the household "hh" every test here asks about, created
+// at the given instant and keeping its calendar in the given zone.
+func retroHouseholds(createdAt time.Time, zone string) *householdDouble {
+	households := newHouseholdDouble()
+	households.put(domain.Household{ID: "hh", Timezone: zone, CreatedAt: createdAt})
+	return households
+}
+
+// newRetroService builds the service for a household created years before
+// any month these tests use, so the creation-month floor plays no part in a
+// test about something else.
+func newRetroService(retros usecase.RetroRepository, actions usecase.RetroActionRepository) *usecase.RetroService {
+	longAgo := time.Date(2020, 1, 15, 9, 0, 0, 0, time.UTC)
+	return usecase.NewRetroService(retros, actions, retroHouseholds(longAgo, "UTC"))
+}
+
 // A draft is not a data point: it shows on the page as its own in-progress
 // entry but is excluded from the finished count and the mood chart -- a
 // half-typed month must not become a point on a mood trend.
@@ -22,7 +38,7 @@ func TestRetroListExcludesDraftsFromTheCountAndTheChart(t *testing.T) {
 	finished := retros.seed(jul2026(), 4, "Best month this year. And more.", true)
 	retros.seed(aug2026(), 5, "", false) // the draft
 
-	svc := usecase.NewRetroService(retros, newRetroActionRepoDouble())
+	svc := newRetroService(retros, newRetroActionRepoDouble())
 	view, err := svc.List(context.Background(), "hh", time.Date(2026, 8, 20, 0, 0, 0, 0, time.UTC))
 	if err != nil {
 		t.Fatalf("List: %v", err)
@@ -51,7 +67,7 @@ func TestRetroMoodSeriesIsTwelveMonthsWithGaps(t *testing.T) {
 	retros := newRetroRepoDouble()
 	retros.seed(jul2026(), 3, "", true)
 
-	svc := usecase.NewRetroService(retros, newRetroActionRepoDouble())
+	svc := newRetroService(retros, newRetroActionRepoDouble())
 	view, err := svc.List(context.Background(), "hh", time.Date(2026, 8, 20, 0, 0, 0, 0, time.UTC))
 	if err != nil {
 		t.Fatalf("List: %v", err)
@@ -102,7 +118,7 @@ func TestRetroSummaryQuoteIsDerivedFromNotes(t *testing.T) {
 		t.Fatalf("SetDone: %v", err)
 	}
 
-	svc := usecase.NewRetroService(retros, actions)
+	svc := newRetroService(retros, actions)
 	view, err := svc.List(context.Background(), "hh", time.Date(2026, 8, 20, 0, 0, 0, 0, time.UTC))
 	if err != nil {
 		t.Fatalf("List: %v", err)
@@ -144,7 +160,7 @@ func TestRetroMonthOffersOnlyLastMonthsOpenActions(t *testing.T) {
 	actions.seedOpen(jul.ID, jul2026(), "phone-free dinners")          // last month's open action
 	actions.seedOpen("some-other-retro", time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC), "should not appear")
 
-	svc := usecase.NewRetroService(retros, actions)
+	svc := newRetroService(retros, actions)
 	view, err := svc.Month(context.Background(), "hh", aug.Month)
 	if err != nil {
 		t.Fatalf("Month: %v", err)
@@ -169,7 +185,7 @@ func TestRetroListNormalisesANonMidnightStoredMonth(t *testing.T) {
 	retros.seed(jul2026(), 0, "", false)                                  // previous month, seeded clean
 	retros.seed(aug2026().Add(14*time.Hour+30*time.Minute), 0, "", false) // current month, dirty: not midnight
 
-	svc := usecase.NewRetroService(retros, newRetroActionRepoDouble())
+	svc := newRetroService(retros, newRetroActionRepoDouble())
 	view, err := svc.List(context.Background(), "hh", time.Date(2026, 8, 20, 0, 0, 0, 0, time.UTC))
 	if err != nil {
 		t.Fatalf("List: %v", err)
@@ -195,7 +211,7 @@ func TestRetroMonthNormalisesANonMidnightArgument(t *testing.T) {
 	retros := newRetroRepoDouble()
 	retros.seed(aug2026(), 0, "", false) // stored clean, per the port's own convention
 
-	svc := usecase.NewRetroService(retros, newRetroActionRepoDouble())
+	svc := newRetroService(retros, newRetroActionRepoDouble())
 	dirty := aug2026().Add(9 * time.Hour) // 9am, not midnight -- an unnormalised caller
 	view, err := svc.Month(context.Background(), "hh", dirty)
 	if err != nil {
@@ -234,7 +250,7 @@ func TestRetroListStartMonthAcrossAllFourStates(t *testing.T) {
 				retros.seed(jul2026(), 0, "", false)
 			}
 
-			svc := usecase.NewRetroService(retros, newRetroActionRepoDouble())
+			svc := newRetroService(retros, newRetroActionRepoDouble())
 			view, err := svc.List(context.Background(), "hh", today)
 			if err != nil {
 				t.Fatalf("List: %v", err)
@@ -257,7 +273,7 @@ func TestRetroListStartMonthAcrossAllFourStates(t *testing.T) {
 // today: a couple doing July's retro on 2 August means July.
 func TestRetroStartUsesTheStartableMonth(t *testing.T) {
 	retros := newRetroRepoDouble()
-	svc := usecase.NewRetroService(retros, newRetroActionRepoDouble())
+	svc := newRetroService(retros, newRetroActionRepoDouble())
 
 	got, err := svc.Start(context.Background(), "hh", time.Date(2026, 8, 2, 21, 0, 0, 0, time.UTC))
 	if err != nil {
@@ -280,11 +296,100 @@ func TestRetroStartRefusesWhenBothMonthsExist(t *testing.T) {
 	retros := newRetroRepoDouble()
 	retros.seed(jul2026(), 4, "", true)
 	retros.seed(aug2026(), 0, "", false)
-	svc := usecase.NewRetroService(retros, newRetroActionRepoDouble())
+	svc := newRetroService(retros, newRetroActionRepoDouble())
 
 	_, err := svc.Start(context.Background(), "hh", time.Date(2026, 8, 20, 0, 0, 0, 0, time.UTC))
 	if !errors.Is(err, domain.ErrRetroNothingToStart) {
 		t.Fatalf("err = %v, want ErrRetroNothingToStart", err)
+	}
+}
+
+// A household is never offered a retro for a month before the one it was
+// created in. The creation month is read in the household's zone: this one
+// signed up at 00:30 on 1 October in Singapore, which is still 30 September
+// in UTC, so a floor read off the UTC instant would be September and the
+// household would be asked to look back on a month it did not exist in.
+func TestRetroListOffersANewHouseholdItsCreationMonthNotTheOneBefore(t *testing.T) {
+	createdAt := time.Date(2026, 9, 30, 16, 30, 0, 0, time.UTC)
+	today := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
+	october := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
+
+	svc := usecase.NewRetroService(newRetroRepoDouble(), newRetroActionRepoDouble(),
+		retroHouseholds(createdAt, "Asia/Singapore"))
+	view, err := svc.List(context.Background(), "hh", today)
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if view.StartMonth == nil || !view.StartMonth.Equal(october) {
+		t.Fatalf("StartMonth = %v, want October 2026 (the month the household was created in)", view.StartMonth)
+	}
+}
+
+// The API refuses what the page does not offer: Start cannot be made to file
+// a retro against a month before the household existed, whatever the client
+// does. The first Start is the creation month, and the second has nothing
+// left to begin.
+func TestRetroStartNeverFilesAMonthBeforeTheHouseholdWasCreated(t *testing.T) {
+	createdAt := time.Date(2026, 9, 30, 16, 30, 0, 0, time.UTC)
+	today := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
+	september := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
+	october := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
+
+	retros := newRetroRepoDouble()
+	svc := usecase.NewRetroService(retros, newRetroActionRepoDouble(),
+		retroHouseholds(createdAt, "Asia/Singapore"))
+
+	first, err := svc.Start(context.Background(), "hh", today)
+	if err != nil {
+		t.Fatalf("first Start: %v", err)
+	}
+	if !first.Month.Equal(october) {
+		t.Fatalf("first Start filed %v, want October 2026", first.Month)
+	}
+
+	if _, err := svc.Start(context.Background(), "hh", today); !errors.Is(err, domain.ErrRetroNothingToStart) {
+		t.Fatalf("second Start err = %v, want ErrRetroNothingToStart", err)
+	}
+	if _, err := retros.ByMonth(context.Background(), "hh", september); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("September has a retro (err = %v); the household did not exist in September", err)
+	}
+}
+
+// A household created last month did exist then, so last month is still
+// offered first: the floor is the creation month itself, not the month after.
+func TestRetroStartStillOffersLastMonthToAHouseholdCreatedInIt(t *testing.T) {
+	createdAt := time.Date(2026, 9, 12, 3, 0, 0, 0, time.UTC)
+	today := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
+	september := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
+
+	svc := usecase.NewRetroService(newRetroRepoDouble(), newRetroActionRepoDouble(),
+		retroHouseholds(createdAt, "Asia/Singapore"))
+	got, err := svc.Start(context.Background(), "hh", today)
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	if !got.Month.Equal(september) {
+		t.Fatalf("Start filed %v, want September 2026", got.Month)
+	}
+}
+
+// A household whose zone cannot be loaded has no creation month. Nothing is
+// offered and nothing is written: guessing UTC would bring the floor back a
+// month for a household east of it.
+func TestRetroStartRefusesAHouseholdWithAnUnloadableZone(t *testing.T) {
+	retros := newRetroRepoDouble()
+	svc := usecase.NewRetroService(retros, newRetroActionRepoDouble(),
+		retroHouseholds(time.Date(2026, 9, 12, 3, 0, 0, 0, time.UTC), "Not/AZone"))
+
+	today := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
+	if _, err := svc.Start(context.Background(), "hh", today); !errors.Is(err, domain.ErrInvalidTimezone) {
+		t.Fatalf("Start err = %v, want ErrInvalidTimezone", err)
+	}
+	if _, err := svc.List(context.Background(), "hh", today); !errors.Is(err, domain.ErrInvalidTimezone) {
+		t.Fatalf("List err = %v, want ErrInvalidTimezone", err)
+	}
+	if len(retros.rows) != 0 {
+		t.Fatalf("%d retro(s) written for a household with no usable zone", len(retros.rows))
 	}
 }
 
@@ -300,7 +405,7 @@ func TestRetroStartRefusesWhenBothMonthsExist(t *testing.T) {
 func TestRetroSaveRefusesAnImpossibleMood(t *testing.T) {
 	retros := newRetroRepoDouble()
 	r := retros.seed(aug2026(), 0, "", false)
-	svc := usecase.NewRetroService(retros, newRetroActionRepoDouble())
+	svc := newRetroService(retros, newRetroActionRepoDouble())
 
 	seven := 7
 	_, err := svc.Save(context.Background(), usecase.RetroUpdate{
@@ -324,7 +429,7 @@ func TestRetroSaveRefusesAnImpossibleMood(t *testing.T) {
 func TestRetroSaveRefusesAStaleVersion(t *testing.T) {
 	retros := newRetroRepoDouble()
 	r := retros.seed(aug2026(), 0, "", false)
-	svc := usecase.NewRetroService(retros, newRetroActionRepoDouble())
+	svc := newRetroService(retros, newRetroActionRepoDouble())
 
 	if _, err := svc.Save(context.Background(), usecase.RetroUpdate{
 		HouseholdID: "hh", RetroID: r.ID, Month: aug2026(), Notes: "mine", Version: r.Version,
@@ -350,7 +455,7 @@ func TestRetroSaveRefusesAStaleVersion(t *testing.T) {
 func TestRetroSaveNormalisesANonMidnightMonth(t *testing.T) {
 	retros := newRetroRepoDouble()
 	r := retros.seed(aug2026(), 0, "", false) // stored clean, per the port's own convention
-	svc := usecase.NewRetroService(retros, newRetroActionRepoDouble())
+	svc := newRetroService(retros, newRetroActionRepoDouble())
 
 	dirty := aug2026().Add(9 * time.Hour) // 9am, not midnight -- an unnormalised caller
 	got, err := svc.Save(context.Background(), usecase.RetroUpdate{
@@ -370,7 +475,7 @@ func TestTickingAnActionLeavesTheRetroVersionAlone(t *testing.T) {
 	retros := newRetroRepoDouble()
 	r := retros.seed(aug2026(), 0, "", false)
 	actions := newRetroActionRepoDouble()
-	svc := usecase.NewRetroService(retros, actions)
+	svc := newRetroService(retros, actions)
 
 	action, err := svc.AddAction(context.Background(), usecase.RetroActionInput{
 		HouseholdID: "hh", RetroID: r.ID, Body: "book the getaway",
@@ -401,7 +506,7 @@ func TestTickingAnActionLeavesTheRetroVersionAlone(t *testing.T) {
 func TestAddActionRefusesAnEmptyBody(t *testing.T) {
 	retros := newRetroRepoDouble()
 	r := retros.seed(aug2026(), 0, "", false)
-	svc := usecase.NewRetroService(retros, newRetroActionRepoDouble())
+	svc := newRetroService(retros, newRetroActionRepoDouble())
 
 	_, err := svc.AddAction(context.Background(), usecase.RetroActionInput{
 		HouseholdID: "hh", RetroID: r.ID, Body: "   ",

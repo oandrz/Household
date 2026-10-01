@@ -9,6 +9,7 @@ import (
 	"time"
 
 	httpadapter "github.com/andreasoentoro/hearth/api/internal/adapter/http"
+	"github.com/andreasoentoro/hearth/api/internal/adapter/postgres"
 	"github.com/andreasoentoro/hearth/api/internal/domain"
 	"github.com/andreasoentoro/hearth/api/internal/usecase"
 )
@@ -653,16 +654,38 @@ func TestPatchRetroReturnsTheIncrementedVersion(t *testing.T) {
 	}
 }
 
+// householdCreatedMonthsAgo moves the test household's creation back by a
+// whole number of months. A household made by newTestEnv was created a
+// moment ago, so the only retro it can start is this month's
+// (domain.StartableMonth's creation-month floor). A test that needs last
+// month to be startable too needs a household that existed last month.
+//
+// Written straight to the row: no route sets created_at, on purpose.
+func (env *testEnv) householdCreatedMonthsAgo(t *testing.T, months int) {
+	t.Helper()
+	tag, err := env.db.Pool().Exec(context.Background(),
+		`UPDATE households SET created_at = created_at - make_interval(months => $2) WHERE id = $1`,
+		env.householdID, months)
+	if err != nil {
+		t.Fatalf("backdate the household: %v", err)
+	}
+	if tag.RowsAffected() != 1 {
+		t.Fatalf("backdate the household: %d rows changed, want 1", tag.RowsAffected())
+	}
+}
+
 // TestPostRetroThirdTimeIsNothingToStart pins domain.ErrRetroNothingToStart's
 // mapping. domain.StartableMonth never offers a month that already has a
-// retro, so a fresh household's first two POSTs each claim one of its two
-// free candidate months and both succeed. The double-click race
-// TestStartRetroRaceIs409RetroExists pins below is NOT reachable this way
-// -- only two Create calls racing the SAME free month can build it, which
-// no sequential HTTP test can construct. It takes a third POST, once both
-// candidates are taken, to reach domain.ErrRetroNothingToStart at all.
+// retro, so a household that existed last month has two free candidate
+// months, and its first two POSTs each claim one and both succeed. The
+// double-click race TestStartRetroRaceIs409RetroExists pins below is NOT
+// reachable this way -- only two Create calls racing the SAME free month can
+// build it, which no sequential HTTP test can construct. It takes a third
+// POST, once both candidates are taken, to reach
+// domain.ErrRetroNothingToStart at all.
 func TestPostRetroThirdTimeIsNothingToStart(t *testing.T) {
 	env := newTestEnv(t)
+	env.householdCreatedMonthsAgo(t, 3)
 	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
 
 	mustStartRetro(t, env, session, csrf)
@@ -670,6 +693,63 @@ func TestPostRetroThirdTimeIsNothingToStart(t *testing.T) {
 
 	rec := env.authed(t, http.MethodPost, "/api/v1/retros", nil, session, csrf)
 	assertErrorResponse(t, rec, http.StatusConflict, "RETRO_NOTHING_TO_START")
+}
+
+// A household is never offered, and can never start, a retro for a month
+// before the one it was created in. The household here was created a moment
+// ago, so the only month it has is this one: the list offers it, the first
+// POST files it, and a second POST is refused rather than reaching back to
+// last month. The refusal is the API's, not the page's: a client that posts
+// anyway gets the same answer.
+func TestANewHouseholdCanOnlyStartTheRetroForTheMonthItWasCreatedIn(t *testing.T) {
+	env := newTestEnv(t)
+	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
+
+	household, err := postgres.NewHouseholdRepo(env.db).Get(context.Background(), env.householdID)
+	if err != nil {
+		t.Fatalf("read the household: %v", err)
+	}
+	createdOn, err := domain.TodayIn(household.CreatedAt, household.Timezone)
+	if err != nil {
+		t.Fatalf("the household's creation day: %v", err)
+	}
+	creationMonth := createdOn.Format("2006-01")
+
+	list := func(t *testing.T) retrosListWithDataBody {
+		t.Helper()
+		rec := env.authedGet(t, "/api/v1/retros", session)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("GET /retros: status = %d, body = %s", rec.Code, rec.Body.String())
+		}
+		var body retrosListWithDataBody
+		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		return body
+	}
+
+	switch got := list(t).StartMonth; {
+	case got == nil:
+		t.Fatalf("startMonth is null, want %s (the month the household was created in)", creationMonth)
+	case *got != creationMonth:
+		t.Fatalf("startMonth = %s, want %s (the month the household was created in)", *got, creationMonth)
+	}
+
+	created := mustStartRetro(t, env, session, csrf)
+	if created.Retro.Month != creationMonth {
+		t.Fatalf("the first retro is for %s, want %s", created.Retro.Month, creationMonth)
+	}
+
+	rec := env.authed(t, http.MethodPost, "/api/v1/retros", nil, session, csrf)
+	assertErrorResponse(t, rec, http.StatusConflict, "RETRO_NOTHING_TO_START")
+
+	after := list(t)
+	if after.StartMonth != nil {
+		t.Fatalf("startMonth = %s after the creation month was started, want null", *after.StartMonth)
+	}
+	if len(after.Retros) != 1 {
+		t.Fatalf("%d retros exist, want 1: the refused POST must not have written last month's", len(after.Retros))
+	}
 }
 
 // alwaysExistsRetroRepo simulates the one race Start is actually exposed
@@ -725,7 +805,7 @@ func TestStartRetroRaceIs409RetroExists(t *testing.T) {
 	// same shape env.routerWithMemberships uses for Memberships, applied to
 	// the one other port a test in this file needs to substitute.
 	d := env.deps
-	d.Retros = usecase.NewRetroService(alwaysExistsRetroRepo{}, nil)
+	d.Retros = usecase.NewRetroService(alwaysExistsRetroRepo{}, nil, postgres.NewHouseholdRepo(env.db))
 	router := httpadapter.NewRouter(d)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/retros", nil)
@@ -815,6 +895,9 @@ func assertParseableJSONBody(t *testing.T, rec *httptest.ResponseRecorder, wantS
 // actually happened rather than that some 200 came back.
 func TestEveryRetroWriteAnswersJSONExceptDelete(t *testing.T) {
 	env := newTestEnv(t)
+	// Two retros are started below, so the household must have existed last
+	// month as well as this one.
+	env.householdCreatedMonthsAgo(t, 3)
 	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
 
 	created := mustStartRetro(t, env, session, csrf)
@@ -871,8 +954,9 @@ func TestEveryRetroWriteAnswersJSONExceptDelete(t *testing.T) {
 	assertParseableJSONBody(t, env.authed(t, http.MethodPost, path+"/complete", nil, session, csrf), http.StatusOK)
 
 	// POST /retros -- the first retro is now finished and cannot be
-	// restarted, but this household still has one free candidate month
-	// (domain.StartableMonth), so a second POST both proves POST /retros'
+	// restarted, but this household existed last month too, so it still has
+	// one free candidate month (domain.StartableMonth), and a second POST
+	// both proves POST /retros'
 	// own 201 carries a body and gives DELETE /retros/{month} below a draft
 	// that still exists to discard.
 	second := mustStartRetro(t, env, session, csrf) // mustStartRetro already asserts 201 + a decodable body
