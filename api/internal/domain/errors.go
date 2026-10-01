@@ -134,15 +134,27 @@ var (
 	// and categories rule.
 	ErrHoldingNameTaken    = errors.New("a holding with that name already exists in this account")
 	ErrHoldingNameRequired = errors.New("a holding name is required")
-	// ErrHoldingDateInFuture is the sibling of ErrOpeningBalanceInFuture, and
-	// matters more here: latest-price lookups order by as_of, so a price
-	// mistyped as 2030 outranks every real one forever and pins the holding's
-	// market value to a figure nobody can explain. Today is not the future,
-	// and "today" is the household's calendar day (TodayIn), not the
-	// server's: this project has shipped an off-by-one at exactly that
-	// boundary several times (LEARNING pattern 1). The comparison is on the
-	// calendar day, never the instant (IsAfterDay).
-	ErrHoldingDateInFuture = errors.New("that date is in the future")
+	// ErrDateInFuture is a recorded fact dated after the household's today.
+	// A fact is something that has happened: a holding's purchase, sale,
+	// price or income row, a transaction, a bill payment, a goal
+	// contribution. A plan may be dated ahead: a bill's next due date, a
+	// goal's target month, a budget month (ADR 12).
+	//
+	// Why it is refused: a balance, a goal's total and a holding's latest
+	// price are all read with no upper bound on the date, so a row mistyped
+	// as 2030 counts today. A 2099 expense lowers today's balance, and a
+	// 2030 price outranks every real one and pins the holding's value to a
+	// figure nobody can explain.
+	//
+	// Today is not the future, and "today" is the household's calendar day
+	// (TodayIn), not the server's: this project has shipped an off-by-one at
+	// exactly that boundary several times (LEARNING pattern 1). The
+	// comparison is on the calendar day, never the instant (IsAfterDay).
+	//
+	// ErrOpeningBalanceInFuture is the same rule for an account's opening
+	// balance. It stays its own sentinel because the account form shows it
+	// beside its own field.
+	ErrDateInFuture = errors.New("that date is in the future")
 	// ErrHoldingAccountNotInvestment fails closed on the account's type rather
 	// than trusting a screen to have offered only the right accounts. The
 	// sibling rule lives in AccountService: an account holding live holdings

@@ -516,6 +516,16 @@ var domainErrorResponses = []domainErrorResponse{
 		message:   "That date is in the future.",
 	},
 	{
+		// One row for every recorded fact dated after the household's
+		// today: a holding's purchase, sale, price or income row, a
+		// transaction, a bill payment and a goal contribution. The same code
+		// and sentence on every screen, so a form needs no case of its own.
+		sentinels: []error{domain.ErrDateInFuture},
+		status:    http.StatusUnprocessableEntity,
+		code:      "INVALID_DATE",
+		message:   "That date is in the future.",
+	},
+	{
 		sentinels: []error{domain.ErrAccountOwnerNotInHousehold},
 		status:    http.StatusUnprocessableEntity,
 		code:      "INVALID_OWNER",
@@ -653,12 +663,6 @@ var domainErrorResponses = []domainErrorResponse{
 		status:    http.StatusConflict,
 		code:      "HOLDING_NAME_TAKEN",
 		message:   "This account already has a holding with that name.",
-	},
-	{
-		sentinels: []error{domain.ErrHoldingDateInFuture},
-		status:    http.StatusUnprocessableEntity,
-		code:      "INVALID_DATE",
-		message:   "That date is in the future.",
 	},
 	{
 		sentinels: []error{domain.ErrHoldingNameRequired},

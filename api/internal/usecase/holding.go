@@ -318,17 +318,6 @@ func (s *HoldingService) primaryCurrency(ctx context.Context, householdID string
 	return household.PrimaryCurrency, nil
 }
 
-// refuseFutureDate refuses a purchase, sale, price or income row dated after
-// the household's today. today is the household's calendar day, which the
-// caller works out from its time zone (domain.TodayIn); the comparison is on
-// calendar days (domain.IsAfterDay), so today itself is always allowed.
-func refuseFutureDate(date, today time.Time) error {
-	if domain.IsAfterDay(date, today) {
-		return fmt.Errorf("%w: %s", domain.ErrHoldingDateInFuture, date.Format(time.DateOnly))
-	}
-	return nil
-}
-
 // maxReportPeriods is how far back the report will go in one response.
 //
 // It is a drawing limit, not a storage one: twelve quarters against four

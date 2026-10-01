@@ -637,7 +637,7 @@ func TestFutureDatedIncomeIsRefusedAtTheWire(t *testing.T) {
 	}, session, csrf)
 	// 422, not 400: the request is well formed and the date is simply not
 	// allowed -- the same answer a future-dated event and valuation already
-	// give (errors.go maps ErrHoldingDateInFuture once, for all three).
+	// give (errors.go maps ErrDateInFuture once, for all three).
 	if rec.Code != http.StatusUnprocessableEntity {
 		t.Fatalf("future-dated income = %d, want 422 (body = %s)", rec.Code, rec.Body.String())
 	}

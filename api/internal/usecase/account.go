@@ -220,8 +220,3 @@ func refuseFutureOpeningBalance(asOf, today time.Time) error {
 	}
 	return nil
 }
-
-// sameDay reports whether two values name the same calendar day.
-func sameDay(a, b time.Time) bool {
-	return !domain.IsAfterDay(a, b) && !domain.IsAfterDay(b, a)
-}
