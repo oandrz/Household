@@ -18,7 +18,12 @@ services:
   # renew certificates automatically for as long as this product runs; the
   # routing is still nginx's job below.
   caddy:
-    image: caddy:2-alpine
+    # Pinned by digest as well as tag. A bare tag is moved to a new build
+    # whenever upstream publishes one, and deploy.sh pulls on every deploy, so
+    # without the digest an ordinary app deploy could swap the edge proxy for a
+    # build nobody chose. The digest is the multi-platform one. Dependabot
+    # proposes the new digest as a pull request. Today this is Caddy 2.11.7.
+    image: caddy:2-alpine@sha256:d8542f48d34a9cf4e4c11a478865229840e87e4c96ea3f439101f31a5d35f75f
     restart: unless-stopped
     mem_limit: 256m
     ports: ["80:80", "443:443"]
@@ -117,14 +122,18 @@ services:
   # No SMTP port is published: `api` reaches it at mailpit:1025 over the compose
   # network, which never leaves the host.
   mailpit:
-    image: axllent/mailpit:v1.30.5
+    # Digest-pinned for the reason given on caddy above.
+    image: axllent/mailpit:v1.30.5@sha256:b868afa176bfd6cce2323ea316cd99ccad77915e51e595748f6d786700ecf109
     restart: unless-stopped
     mem_limit: 256m
     ports: ["127.0.0.1:8025:8025"]
     networks: [hearth]
 
   postgres:
-    image: postgres:17-alpine
+    # Digest-pinned for the reason given on caddy above, and it matters most
+    # here: an unpinned tag restarts the database on a new minor version in the
+    # middle of an unrelated deploy. Today this is Postgres 17.11.
+    image: postgres:17-alpine@sha256:b0f9560a2de083e2cc7382e75f808c7381a32852a7ec49117deedb300e552b24
     restart: unless-stopped
     # Stated so the sum of every mem_limit in this file stays under the box's
     # 4 GB with room for the OS and Docker itself (ADR 2): 512m api + 1536m

@@ -30,7 +30,7 @@ right as written and must be left alone.
 
 | Value | What to put there |
 |---|---|
-| `IMAGE_TAG` | The git SHA the `images` workflow built. **Never `latest`** — see step 4 of "Deploying a change" for why |
+| `IMAGE_TAG` | The git SHA the `ci` workflow built. **Never `latest`** — see step 4 of "Deploying a change" for why |
 | `ACME_EMAIL` | Where Let's Encrypt sends expiry warnings |
 | `POSTGRES_PASSWORD` | `openssl rand -hex 24`. **Hex, not base64** — this value is substituted into two `postgres://` DSNs, and base64's `/`, `+` and `=` are all significant inside a URL userinfo field. The failure is an authentication error at boot that looks nothing like a quoting problem |
 | `DATABASE_URL` and `GOOSE_DBSTRING` | The **same** password inside both DSNs — replace the two `CHANGEME`s |
@@ -63,7 +63,9 @@ through the real form and confirm the message actually lands in Mailpit.
 
 ## Deploying a change
 
-1. Merge to `main` and wait for the `images` workflow to go green.
+1. Merge to `main` and wait for the `ci` workflow to go green. It builds the
+   images only after lint and tests pass on the merged commit, so a red run
+   leaves no image to deploy.
 2. `ssh box && cd Household/deploy`
 3. `git pull` — only needed if the Compose file, Caddyfile or scripts changed.
 4. ```bash

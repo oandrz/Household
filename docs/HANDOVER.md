@@ -133,7 +133,8 @@ in three months or someone new.
 > that no longer matches would silently key every caller to nginx's address.
 >
 > Deploying is `deploy/deploy.sh <git-sha>` on the box, with `--current` and
-> `--rollback`. CI builds SHA-tagged images on every push to `main`; the box
+> `--rollback`. CI builds SHA-tagged images on every push to `main`, after
+> lint and tests pass on that commit; the box
 > never updates itself, deliberately. `deploy/README.md` is the runbook.
 >
 > Two things measured on the box rather than assumed: a reboot recovers
