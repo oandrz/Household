@@ -6424,6 +6424,20 @@ route with a missing guard has no second line of defence.
 
 ### Tooling and infrastructure
 
+- **The first CI run failed lint on a tree that lints clean on every laptop
+  (2026-10-13).** `make lint-dead` treats any output from `deadcode` or
+  `staticcheck` as a finding, because `deadcode` exits 0 either way. On a
+  machine that has never run them, `go run tool@version` first prints one
+  `go: downloading …` line per module, and those lines were the "findings":
+  `deadcode: unreachable code found`, with no symbol named. A developer's
+  module cache hides this for good after the first run, so the check had only
+  ever been run warm. Reproduced locally with `GOMODCACHE` pointed at an empty
+  directory, then fixed by filtering those lines out. Stderr is still read: a
+  tool that fails to build reports there, and dropping it would turn a broken
+  tool into a pass. **A check that fails on "any output" must be run once on a
+  machine with nothing cached**, and CI is the cheapest such machine: this is
+  pattern 3 for tooling. The same run was the first time `make test` ran
+  anywhere but the original laptop, and it passed.
 - **`hearthctl` (2026-09-08).** Three things worth keeping from building the
   CLI. *(a)* A fake `httptest` server that records `*http.Request` and lets
   the test read `r.Body` afterwards reads a **closed** body — the server

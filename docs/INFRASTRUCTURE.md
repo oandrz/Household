@@ -21,9 +21,26 @@ needed, this says where it lives.
 | **Telegram** (Bot API) | The second delivery channel for sign-in and sign-up links, when a bot is configured — and, since 2026-09-08, chat commands (`/spend`, `/balance`…) on the same poller and the daily digest going the other way (one `sendMessage` per owner-with-Money chat per household per day, when `NUDGES_AT` is set). **One token, one poller:** Telegram gives each update to exactly one `getUpdates` caller, so a dev stack sharing the production token loses every message to the other consumer (`terminated by other getUpdates request`, seen 2026-09-08). Since then there are two bots: the production one, whose token lives only in `deploy/.env`, and `@HearthOinkDevBot`, whose token lives only in the developer's local `.env`. Changing `.env` needs `docker compose up -d api`; `restart` keeps the old environment. Outbound only — the API long-polls `api.telegram.org`; there is no webhook and nothing new faces the internet | $0 — free, with no per-message charge and no domain, DNS record, business verification or legal entity required. That is the whole reason it was chosen over WhatsApp and SMS ([ADR 4](adr/0004-telegram-as-a-second-delivery-channel.md)) | **Telegram sign-in stops. Email sign-in is unaffected, and sessions already issued are unaffected** — no session depends on Telegram once it exists, because Telegram only ever carried the link. `POST /api/v1/auth/telegram/start` answers `404` and the sign-in screen hides the control, so the degradation is a missing button rather than a broken one. **Was not on the box on 2026-09-01**; by 2026-09-08 the local `deploy/.env` copy sets both values and something else polls the token, so this may no longer be true — verify on the box before relying on either reading |
 | **OpenRouter** (OpenAI-dialect chat API) | Reads a plain sentence sent to the Telegram bot into an expense or income the person then confirms with `/yes` (`api/internal/adapter/openrouter`, ADR 8 stage 5b), through a gateway to open-weight models. **Optional and off by default**: built only when `OPENROUTER_API_KEY` and `OPENROUTER_MODEL` are both set. Plain `net/http`, no SDK; one forced tool call per sentence; up to three model ids tried in order; 30 s timeout. (Claude through the Anthropic API was the first implementation, for one day on 2026-09-08; the owner's first call was refused for lack of credits and they chose free models instead, so that adapter and its SDK are gone) | $0 on a model whose id ends `:free` (rate-limited, and the free list changes month to month — hence the model is configuration, not code); otherwise cents per thousand sentences on the cheap paid ones. Configured on the owner's machine on 2026-09-08 with a free model; not on the box | Same as the Anthropic row: free text stops, everything else is untouched. A free model that is withdrawn answers with an error the log names (`openrouter chat.completions: 404 …`), and the fix is a new `OPENROUTER_MODEL` in `.env` |
 | **Let's Encrypt** | TLS certificates, via Caddy's ACME HTTP-01 | $0 | Certificates stop renewing after ~90 days. Caddy can point at another ACME CA |
-| **GitHub + GHCR** | Source, CI, and the three container images | $0 — public repo | No new deploys. The running box is unaffected; images already pulled keep serving |
+| **GitHub + GHCR** | Source, CI, and the three container images. CI (`.github/workflows/ci.yml`) runs `make lint` and `make test` on every pull request, and builds the images on `main` only after both pass | $0 — public repo, so Actions minutes are unlimited. Private, the free allowance is 2,000 minutes a month; a pull request run uses about 16 and a run on `main`, which also builds the images, about 21 | No new deploys. The running box is unaffected; images already pulled keep serving |
 | **healthchecks.io** | "Did the backup run?" heartbeat | $0 | Backups could stop silently. They would still be *running* — you just would not be told when they stopped |
 | **UptimeRobot** | "Is the site up?" — keyword check on `/readyz` | $0 | Outages go unnoticed until someone opens the site |
+
+**Two GitHub settings guard the path to production, and neither is a file in
+this repository**, so a fresh fork or a recreated repository starts without
+them:
+
+- **`main` is protected** (since 2026-10-11): every change arrives by pull
+  request, including the owner's, and nobody can force-push or delete the
+  branch. Read it back with
+  `gh api repos/oandrz/Household/branches/main/protection`.
+- **Dependabot** reads `.github/dependabot.yml`, which *is* in the repository,
+  and opens a weekly pull request per ecosystem. Its security alerts are a
+  separate switch under Settings → Code security.
+
+Three things in the build are pinned to an exact version on purpose, and
+Dependabot is what moves them: every action in `ci.yml` (to a commit), and
+Caddy, Postgres and Mailpit in `deploy/docker-compose.prod.yml` (to a digest).
+A pin changes nothing on the box until the next `deploy.sh` run.
 
 **Total ≈ $7.70/month, unchanged by Telegram.** Everything except the server is
 free tier, and at this data volume will remain so for years. Telegram is the

@@ -106,7 +106,8 @@ for img in "${IMAGES[@]}"; do
     echo "  ok  $img"
   else
     fail "$REGISTRY/$img:$SHA is not in the registry.
-  Has the images workflow finished for this commit? It only builds on main."
+  Has the ci workflow finished for this commit? It builds images only on main,
+  and only after lint and tests pass, so a red run leaves nothing to deploy."
   fi
 done
 

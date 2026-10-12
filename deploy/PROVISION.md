@@ -201,7 +201,7 @@ else's. Change the network's subnet and this value, and `web/nginx.conf`'s
 ## 9 · First bring-up
 
 ```bash
-./deploy.sh <git sha of a build the images workflow finished>
+./deploy.sh <git sha of a build the ci workflow finished>
 ```
 
 `deploy.sh` refuses `latest`, refuses a tag absent from the registry before it
