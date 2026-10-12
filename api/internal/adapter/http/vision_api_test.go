@@ -320,8 +320,10 @@ func TestPutVisionRoundTripsALinkedMeasure(t *testing.T) {
 	goal := env.mustCreateGoal(t, session, csrf, map[string]any{
 		"name": "House deposit", "targetMinor": 1_000_000, "plannedMonthlyMinor": 50_000,
 	})
+	// UTC, not the machine's zone: the test household is on UTC, and a local
+	// date that is already tomorrow there is refused as a future date.
 	contribRec := env.authed(t, http.MethodPost, "/api/v1/goals/"+goal.Goal.ID+"/contributions",
-		map[string]any{"amountMinor": 500_000, "occurredOn": time.Now().Format("2006-01-02")}, session, csrf)
+		map[string]any{"amountMinor": 500_000, "occurredOn": time.Now().UTC().Format("2006-01-02")}, session, csrf)
 	if contribRec.Code != http.StatusCreated {
 		t.Fatalf("add contribution: status = %d, body = %s", contribRec.Code, contribRec.Body.String())
 	}
