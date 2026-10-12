@@ -29,8 +29,9 @@ import (
 // caller identity yet to check a session, CSRF or ownership against).
 //
 // TestEveryProtectedRouteRejectsAnUnauthenticatedCaller,
-// TestEveryMutatingRouteRequiresCSRF (auth_api_test.go) and
-// TestOwnerOnlyRoutesRejectALimitedMember (household_api_test.go) name these
+// TestEveryMutatingRouteRequiresCSRF (auth_api_test.go),
+// TestOwnerOnlyRoutesRejectALimitedMember (household_api_test.go) and
+// TestReadRoutesRejectALimitedMember (read_guard_walk_api_test.go) name these
 // two routes explicitly instead of skipping any "/api/v1/invites/" prefix:
 // a prefix skip would silently exempt a future route under it from whichever
 // guard the matrix checks, with no test ever noticing.

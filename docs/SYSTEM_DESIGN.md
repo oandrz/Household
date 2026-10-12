@@ -1054,6 +1054,28 @@ graph TD
 A capability change therefore takes effect on the caller's very next request;
 session revocation is belt-and-braces rather than the enforcement mechanism.
 
+**Five tests walk the live router, and they are the only thing that notices a
+route registered in the wrong group.** Authorisation exists only at this edge,
+so a misplaced route has no second line of defence; each walk calls every
+route as a caller who should be refused and allowlists the exceptions, with
+the reason beside each. Adding a route means it either passes all five or
+gains an allowlist entry someone has to justify:
+
+| Test | Caller | Every route must answer |
+|---|---|---|
+| `TestEveryProtectedRouteRejectsAnUnauthenticatedCaller` | nobody | `401` |
+| `TestEveryMutatingRouteRequiresCSRF` | a session with no CSRF token | `403 CSRF_INVALID` on every write |
+| `TestOwnerOnlyRoutesRejectALimitedMember` | a limited member holding Money | `403 FORBIDDEN` on every write |
+| `TestReadRoutesRejectALimitedMember` | two limited members, with and without Money | `403 FORBIDDEN` on every read |
+| `TestAccessRoutesRefuseAnAPIToken` | an owner's API token | `403 SESSION_REQUIRED` on every route under `/auth` and `/household` |
+
+In the two member walks the `/admin` subtree is asserted too, with its own
+answer: `404`, not `403`. The read walk runs twice because the money reads
+carry two stacked guards: a caller without Money is turned away by
+`requireCapability` and would never notice `requireOwner` missing behind it.
+The token walk covers only those two prefixes, so a route that changes who can
+get in must live under one of them.
+
 **`requireSession` also stamps `sessions.last_seen_at`, but at most once an
 hour per session** (`sessionTouchInterval`), and only when the column is null
 or already that stale. It is the last write in the chain and it is
