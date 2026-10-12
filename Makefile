@@ -97,11 +97,15 @@ lint-web: ## Lint the frontend
 # asks for and then fails on every package. sqlcgen is generated, so its
 # findings are the SQL file's problem, not this report's. deadcode exits 0
 # either way, hence the explicit check on each tool's filtered output.
+# `go: downloading` lines are filtered too: on a machine that has never run
+# these tools, go prints one per module it fetches, and any output at all
+# counts as a finding. Don't drop stderr instead -- a tool that fails to
+# build reports there, and silence would read as a pass.
 lint-dead: ## Report unreachable Go code, staticcheck findings, and unused frontend exports and packages
-	@cd api && out=$$(GOTOOLCHAIN=go1.25.13 go run golang.org/x/tools/cmd/deadcode@v0.36.0 -test ./... 2>&1 | grep -v '/sqlcgen/' || true); \
+	@cd api && out=$$(GOTOOLCHAIN=go1.25.13 go run golang.org/x/tools/cmd/deadcode@v0.36.0 -test ./... 2>&1 | grep -v -e '/sqlcgen/' -e '^go: downloading ' || true); \
 	 if [ -n "$$out" ]; then echo "$$out"; echo "deadcode: unreachable code found"; exit 1; fi; \
 	 echo "deadcode passed"
-	@cd api && out=$$(GOTOOLCHAIN=go1.25.13 go run honnef.co/go/tools/cmd/staticcheck@2025.1.1 ./... 2>&1 | grep -v '/sqlcgen/' || true); \
+	@cd api && out=$$(GOTOOLCHAIN=go1.25.13 go run honnef.co/go/tools/cmd/staticcheck@2025.1.1 ./... 2>&1 | grep -v -e '/sqlcgen/' -e '^go: downloading ' || true); \
 	 if [ -n "$$out" ]; then echo "$$out"; echo "staticcheck: findings"; exit 1; fi; \
 	 echo "staticcheck passed"
 	cd web && npx --yes knip@5.88.1 --no-progress
