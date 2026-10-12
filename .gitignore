@@ -1,7 +1,10 @@
 .claude/settings.local.json
 .DS_Store
 .superpowers/
-.env
+# Any environment file, at any depth: .env, .env.local, .env.bak and the like
+# hold real secrets. Only the *.example templates are tracked.
+.env*
+!.env.example
 api/tmp/
 web/node_modules/
 web/dist/
@@ -41,3 +44,7 @@ deploy/.previous-image-tag
 # Screenshots shared with an agent while working. They can show account names,
 # IP addresses and control panels, and this repository is public.
 .claude/communicate/
+
+# Review write-ups name unfixed weaknesses by file, and this repository is
+# public, so new ones stay local. A file already tracked here stays tracked.
+docs/reviews/
