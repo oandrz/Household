@@ -1964,6 +1964,46 @@ Three things about running those mutation checks that cost time:
   eight hours a day the two dates differ. The test household is on UTC and
   a test that needs another zone sets it through `PATCH /household`, which
   exercises that route too.
+- **One test worked out "today" in the laptop's zone, and failed for eight
+  hours a day.** `TestPutVisionRoundTripsALinkedMeasure` sent
+  `time.Now().Format("2006-01-02")` as a contribution date. On a machine in
+  Singapore that is already tomorrow for the UTC test household from midnight
+  to 08:00, and the server refused it with `INVALID_DATE`. At any other time
+  of day it passes, so a green run says nothing. It surfaced as the one
+  red test in a change that touched no vision code; running the same test on
+  untouched `main` showed it red there too, which is the fast way to tell
+  "my change broke it" from "the clock did". **A date sent to the API in a
+  test is `time.Now().UTC()`, never `time.Now()`.**
+- **Three route walks all skipped the same method, so one whole kind of
+  mistake had no test.** `TestEveryMutatingRouteRequiresCSRF` and
+  `TestOwnerOnlyRoutesRejectALimitedMember` return early on GET, which is
+  right for them: a read needs no CSRF token, and "owner only" was first
+  written for writes. But nothing walked the reads at all. A new read route
+  registered one group too high would have answered 200 to any signed-in
+  member with every test green, and authorisation lives only at the edge, so
+  nothing behind the router would have refused it either. The symptom is
+  that there is no symptom: no test fails, and the route works for the owner
+  who built it. A code review of the walks' `switch method` lines found it,
+  not a defect. `TestReadRoutesRejectALimitedMember` now walks every GET.
+  **When a matrix test skips a category, ask which other test covers that
+  category; if the answer is "none", the skip is a hole, not a scope.**
+- **The read walk needs two callers, and a mutation proved it.** With
+  `requireOwner` removed from the money group, the limited member without
+  Money still got 403 on every money read, from `requireCapability`, and
+  that half of the walk stayed green. Only the limited member who holds
+  Money saw 200. This is the fixture rule above again, from the other side:
+  **where two guards are stacked, run the walk once per guard, each time as
+  a caller that passes the other one.**
+- **A list of "routes that must refuse X" cannot catch the next route.**
+  Each cookie-only route had its own test, written beside the feature, and
+  each was correct. A new route under `/household` added without
+  `requireCookieSession` would have had no test, because nothing can name a
+  route that does not exist yet. `TestAccessRoutesRefuseAnAPIToken` inverts
+  the list: it walks every route under `/auth` and `/household` and refuses
+  by default, so the allowlist holds the routes a token *may* reach.
+  **Enumerate the surface and allowlist the exceptions; never enumerate the
+  protected routes.** Both new walks also fail on an allowlist entry that
+  matches no route, so a permission cannot outlive the route it was for.
 
 ### 3. The simulated environment lied
 
@@ -5347,9 +5387,10 @@ route with a missing guard has no second line of defence.
   invisible to every assertion in that test, the same way an unasserted key
   set was invisible to the accounts test before it was fixed. Latent, not
   live: nothing leaks today, because the email is blanked rather than
-  omitted, so the wire shape is already stable either way. Left as a trap
-  for the day someone adds a second personal field to `userDTO` and the test
-  still goes green. Tracked as
+  omitted, so the wire shape is already stable either way. **Closed
+  since:** the test now also asserts the exact key set of each member row
+  and of its `user` object, so a second personal field added to `userDTO`
+  fails it. Proved by adding a `phone` field and watching it go red. This was
   [issue #1](https://github.com/oandrz/Household/issues/1).
 - **The session touch's throttle, pinned by mutation — admin households,
   2026-09-02** (no defect; the proof-of-test record). `requireSession` stamps

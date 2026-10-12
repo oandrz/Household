@@ -55,6 +55,9 @@ func TestLimitedMemberCannotCreateSpace(t *testing.T) {
 // above still individually pin their own known behaviours; this walk is the
 // exhaustive superset.
 //
+// Reads are skipped here, not unguarded: TestReadRoutesRejectALimitedMember
+// walks every GET.
+//
 // Signed in as env.moneyLimitedEmail, not env.limitedEmail: the plain
 // limited fixture holds only calendar and chores, so every accounts write
 // route below would be refused at requireCapability before ever reaching
@@ -254,6 +257,14 @@ func TestMemberListRevealsEmailsToAnOwner(t *testing.T) {
 // every email emptied, not the list filtered down. The count assertion
 // catches a row-filter regression that would still pass the email checks
 // while quietly hiding other members.
+//
+// The key set of each row is asserted exactly as well. toMemberViewDTO
+// builds the full userDTO and then blanks Email by name, which is a
+// blacklist: it fails open. memberListEntry cannot see that, because
+// decoding into a fixed struct silently drops any key the struct does not
+// declare. Don't weaken the key check to named fields: a personal field
+// added to userDTO later must fail here, so that showing it to a limited
+// member is a decision and not an accident.
 func TestMemberListWithholdsEmailsFromALimitedMember(t *testing.T) {
 	env := newTestEnv(t)
 
@@ -262,6 +273,25 @@ func TestMemberListWithholdsEmailsFromALimitedMember(t *testing.T) {
 
 	limitedSession, _ := env.signIn(t, env.limitedEmail, env.limitedPassword)
 	asLimited := env.getMembers(t, limitedSession)
+
+	rec := env.authedGet(t, "/api/v1/household/members", limitedSession)
+	var rawRows []map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &rawRows); err != nil {
+		t.Fatalf("decode member list: %v (body = %s)", err, rec.Body.String())
+	}
+	if len(rawRows) != len(asOwner) {
+		t.Fatalf("raw member rows = %d, want %d", len(rawRows), len(asOwner))
+	}
+	for _, row := range rawRows {
+		assertExactKeys(t, "member row", row, "id", "user", "role", "capabilities")
+		user, ok := row["user"].(map[string]any)
+		if !ok {
+			t.Fatalf("member row has no user object: %v", row)
+		}
+		// "email" stays in the set: it is emptied, not omitted, so the
+		// response has one shape for every caller.
+		assertExactKeys(t, "member's user", user, "id", "email", "displayName", "avatarInitial")
+	}
 
 	if len(asLimited) != len(asOwner) {
 		t.Fatalf("members seen by limited caller = %d, want %d (same as an owner) -- "+
@@ -289,6 +319,21 @@ func TestMemberListWithholdsEmailsFromALimitedMember(t *testing.T) {
 			m.Role != owner.Role ||
 			!slicesEqual(m.Capabilities, owner.Capabilities) {
 			t.Fatalf("member %q differs beyond email: limited view = %+v, owner view = %+v", m.ID, m, owner)
+		}
+	}
+}
+
+// assertExactKeys fails unless got holds exactly the keys in want: none
+// missing, none extra. It is how a redaction test notices a field added
+// after the test was written.
+func assertExactKeys(t *testing.T, what string, got map[string]any, want ...string) {
+	t.Helper()
+	if len(got) != len(want) {
+		t.Fatalf("%s has keys %v, want exactly %v", what, mapKeys(got), want)
+	}
+	for _, k := range want {
+		if _, present := got[k]; !present {
+			t.Fatalf("%s is missing key %q (got %v)", what, k, mapKeys(got))
 		}
 	}
 }
