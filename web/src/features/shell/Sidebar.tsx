@@ -11,7 +11,7 @@
 // Budget, Goals and Bills too: Money renders as a label plus five links.
 // SPACE_PAGES grows a row per shipped page -- a page joins it once its route
 // exists, not before, because a permanent grey "soon" row reads as broken.
-import { Link, useMatchRoute, useNavigate } from "@tanstack/react-router";
+import { Link, useMatchRoute } from "@tanstack/react-router";
 import type { Me, Space } from "../auth/schemas";
 import { useSignOut } from "../auth/useAuth";
 import { BrandMark } from "../../components/BrandMark";
@@ -141,7 +141,6 @@ function SpaceLink({ space }: { space: Space }) {
 
 export function Sidebar({ me }: { me: Me }) {
   const signOut = useSignOut();
-  const navigate = useNavigate();
   const matchRoute = useMatchRoute();
   // Overview and Settings accent on their own route the same way each
   // SpaceLink does -- before this, Overview was unconditionally text-accent
@@ -153,10 +152,9 @@ export function Sidebar({ me }: { me: Me }) {
   const overviewActive = Boolean(matchRoute({ to: "/" }));
   const settingsActive = Boolean(matchRoute({ to: "/settings" }));
 
+  // useSignOut itself empties the cache and goes to /sign-in.
   function handleSignOut() {
-    signOut.mutate(undefined, {
-      onSuccess: () => navigate({ to: "/sign-in" }),
-    });
+    signOut.mutate();
   }
 
   return (

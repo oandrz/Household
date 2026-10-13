@@ -17,6 +17,7 @@ import {
 } from "@tanstack/react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { setUnauthorizedHandler } from "../api/client";
+import { createAppQueryClient } from "../api/queryClient";
 import { createUnauthorizedHandler } from "../api/unauthorizedRedirect";
 import type { InvitePreview, Me } from "../features/auth/schemas";
 import { stubFetchRoutes } from "../test/fetchStub";
@@ -96,13 +97,21 @@ function invitePreviewFixture(overrides: Partial<InvitePreview> = {}): InvitePre
 // "does not bounce the invite screen off an expected GET /auth/me 401"
 // below an actual regression test, not a hand check of the underlying
 // logic in isolation.
-function renderApp(initialPath: string) {
+//
+// queryClient defaults to one that refetches on every mount, which keeps the
+// older tests below simple. A test about what the cache keeps must pass
+// createAppQueryClient() instead: with the app's 30-second staleTime a
+// cached answer is shown without a refetch, and that is the only setting
+// under which stale data from a previous person can appear at all.
+function renderApp(
+  initialPath: string,
+  queryClient: QueryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  }),
+) {
   const testRouter = createRouter({
     routeTree,
     history: createMemoryHistory({ initialEntries: [initialPath] }),
-  });
-  const queryClient = new QueryClient({
-    defaultOptions: { queries: { retry: false } },
   });
   setUnauthorizedHandler(createUnauthorizedHandler(testRouter, queryClient));
   return {
@@ -112,6 +121,7 @@ function renderApp(initialPath: string) {
       </QueryClientProvider>,
     ),
     router: testRouter,
+    queryClient,
   };
 }
 
@@ -135,6 +145,93 @@ describe("the real route tree", () => {
 
     await waitFor(() => expect(router.state.location.pathname).toBe("/sign-in"));
     expect(await screen.findByText("Welcome back.")).toBeInTheDocument();
+  });
+
+  // Sign-out used to reach /sign-in by a detour: the cache kept the old
+  // ['me'], so /sign-in believed someone was still signed in and sent the
+  // tab back to a signed-in page, and only the 401 that followed cleared the
+  // cache and returned it. The cache was emptied by that accident, not by a
+  // rule. This pins the rule: one navigation, straight to /sign-in, and
+  // nothing the previous person loaded left behind.
+  it("signs out straight to /sign-in and forgets what the previous person loaded", async () => {
+    stubFetchRoutes({
+      "GET /api/v1/auth/me": { status: 200, body: meFixture() },
+      "GET /api/v1/currencies": {
+        status: 200,
+        body: { currencies: [{ code: "SGD", symbol: "S$", name: "Singapore dollar" }] },
+      },
+      "GET /api/v1/categories": { status: 200, body: { categories: [] } },
+      "GET /api/v1/household/members": { status: 200, body: [] },
+      "GET /api/v1/accounts": { status: 200, body: { accounts: [] } },
+      "GET /api/v1/transactions": {
+        status: 200,
+        body: {
+          transactions: [],
+          nextCursor: null,
+          summary: { currency: "SGD", month: "2026-07", count: 0, spentMinor: 0, excludedNoRate: [] },
+        },
+      },
+    });
+
+    const { router, queryClient } = renderApp("/money/transactions", createAppQueryClient());
+    expect(await screen.findByText("All transactions")).toBeInTheDocument();
+    const keysWithData = () =>
+      queryClient
+        .getQueryCache()
+        .getAll()
+        .filter((query) => query.state.data !== undefined)
+        .map((query) => String(query.queryKey[0]));
+    // The signed-in screen has loaded several things besides ['me'].
+    await waitFor(() => expect(keysWithData().length).toBeGreaterThan(1));
+
+    // From here the session is gone: the server refuses every ['me'] check.
+    // A second stub, not a queued response on the first: this client
+    // refetches ['me'] whenever a screen mounts, so "the Nth answer" is not
+    // a point in time.
+    stubFetchRoutes({
+      "POST /api/v1/auth/sign-out": { status: 204, body: undefined },
+      "GET /api/v1/auth/me": NO_SESSION,
+    });
+
+    const visited: string[] = [];
+    const stop = router.subscribe("onResolved", (event) => {
+      visited.push(event.toLocation.pathname);
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /sign out/i }));
+
+    expect(await screen.findByText("Welcome back.")).toBeInTheDocument();
+    stop();
+    expect(visited).toEqual(["/sign-in"]);
+    expect(keysWithData()).toEqual([]);
+  });
+
+  // The other half of the same rule. Storing the new person must be seen by
+  // the sign-in route, which is what sends a signed-in tab into the app: a
+  // cache emptied the wrong way leaves that route subscribed to a query that
+  // no longer exists, and the tab stays on the sign-in form after a
+  // successful sign-in.
+  it("enters the app after a sign-in on /sign-in", async () => {
+    stubFetchRoutes({
+      "GET /api/v1/auth/me": [NO_SESSION, { status: 200, body: meFixture() }],
+      "POST /api/v1/auth/sign-in": { status: 200, body: meFixture() },
+    });
+
+    const { router } = renderApp("/sign-in", createAppQueryClient());
+    expect(await screen.findByText("Welcome back.")).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("Email"), {
+      target: { value: "andreas@hearth.family" },
+    });
+    fireEvent.change(screen.getByLabelText("Password"), {
+      target: { value: "a long enough password" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+
+    await waitFor(() => expect(router.state.location.pathname).toBe("/"));
+    expect(
+      await screen.findByRole("heading", { level: 1, name: "Overview" }),
+    ).toBeInTheDocument();
   });
 
   it("redirects a signed-in visit to /sign-in to /", async () => {
