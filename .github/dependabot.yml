@@ -62,6 +62,22 @@ updates:
     groups:
       base-images:
         update-types: [minor, patch]
+    # Three versions here are decided by hand, so only their patch releases
+    # are proposed:
+    #   - golang: the Go version is the `go` line in api/go.mod, and this
+    #     image has to name the same one. A bump here alone builds the binary
+    #     with one Go and lints and tests it with another.
+    #   - nginx: an odd second number (1.31) is the development line. The
+    #     stable line (1.30, then 1.32) is moved on purpose.
+    #   - node: a new major is adopted when it is the long-term-support line,
+    #     together with ci.yml and @types/node.
+    ignore:
+      - dependency-name: golang
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+      - dependency-name: nginx
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+      - dependency-name: node
+        update-types: ["version-update:semver-major"]
 
   # The images named in the Compose files: Caddy, Postgres and Mailpit in
   # production, and their development counterparts at the repository root.
@@ -81,6 +97,9 @@ updates:
     # is not proposed at all. Minor versions (17.x) still arrive.
     ignore:
       - dependency-name: postgres
+        update-types: ["version-update:semver-major"]
+      # The development stack's Node follows web/Dockerfile's, by hand.
+      - dependency-name: node
         update-types: ["version-update:semver-major"]
 
   # The pinned commits in .github/workflows.
