@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 
 # --- dev: hot reload -------------------------------------------------------
-FROM golang:1.25.13-alpine AS dev
+FROM golang:1.27.0-alpine AS dev
 WORKDIR /src
 # air and goose are pinned, not @latest: air's newest release already requires a
 # newer Go than this image ships, and goose could do the same tomorrow. Pinning
@@ -17,7 +17,7 @@ EXPOSE 8080
 CMD ["air", "-c", ".air.toml"]
 
 # --- builder ---------------------------------------------------------------
-FROM golang:1.25.13-alpine AS builder
+FROM golang:1.27.0-alpine AS builder
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
