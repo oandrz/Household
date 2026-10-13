@@ -123,7 +123,7 @@ services:
   # network, which never leaves the host.
   mailpit:
     # Digest-pinned for the reason given on caddy above.
-    image: axllent/mailpit:v1.30.5@sha256:b868afa176bfd6cce2323ea316cd99ccad77915e51e595748f6d786700ecf109
+    image: axllent/mailpit:v1.31.4@sha256:b68349e3a014b90c5610bfb26b2ae36f3892d7b8cf25ee140c6c71c98d2fcf48
     restart: unless-stopped
     mem_limit: 256m
     ports: ["127.0.0.1:8025:8025"]
@@ -133,7 +133,7 @@ services:
     # Digest-pinned for the reason given on caddy above, and it matters most
     # here: an unpinned tag restarts the database on a new minor version in the
     # middle of an unrelated deploy. Today this is Postgres 17.11.
-    image: postgres:17-alpine@sha256:b0f9560a2de083e2cc7382e75f808c7381a32852a7ec49117deedb300e552b24
+    image: postgres:18-alpine@sha256:77f585114c32fbca283dc835b0596f4e52b51b4c6662d7810b2f4084f60a1873
     restart: unless-stopped
     # Stated so the sum of every mem_limit in this file stays under the box's
     # 4 GB with room for the OS and Docker itself (ADR 2): 512m api + 1536m
