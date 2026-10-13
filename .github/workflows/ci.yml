@@ -4,9 +4,9 @@ name: ci
 # after both checks pass on the merged commit: a branch build would push tags
 # nobody deploys and spend the free minutes that make this arrangement free.
 #
-# The job ids `lint` and `test` are the names branch protection requires on
-# main. Renaming either one makes every pull request wait for a check that
-# will never report.
+# The job ids `lint`, `test` and `images` are the names branch protection
+# requires on main. Renaming any of them makes every pull request wait for a
+# check that will never report.
 on:
   push:
     branches: [main]
@@ -18,10 +18,16 @@ on:
 permissions:
   contents: read
 
-# A newer push to a pull request makes its older run pointless. A run on main
-# is never cancelled: each one builds the images for its own commit.
+# A newer push to a pull request makes its older run pointless, so runs for
+# one pull request share a group and the older one is cancelled.
+#
+# On main every commit gets a group of its own, keyed by its SHA. Don't key
+# main by the branch: GitHub keeps only one waiting run per group and drops
+# the rest, whatever cancel-in-progress says, so several merges close
+# together would leave every commit but the last with no images to deploy
+# or roll back to.
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 # Every action is pinned to a commit, not a tag: a tag can be moved to
@@ -85,6 +91,54 @@ jobs:
       # the default socket, so none of the DOCKER_HOST settings a laptop
       # needs belong here.
       - run: make test
+
+  images:
+    # Builds all three images on a pull request and pushes none of them.
+    # Lint and tests never run a Dockerfile, so without this a change to a
+    # base image, to the Go build or to the frontend bundle is first tried on
+    # main, after it has merged.
+    #
+    # No registry login: nothing is pushed, and a pull request from Dependabot
+    # or a fork has no credentials to log in with.
+    #
+    # One job with three steps, not a matrix: a matrix reports three check
+    # names, and branch protection would have to list each one.
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+
+      - name: Build hearth-api
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
+        with:
+          context: ./api
+          target: prod
+          push: false
+          platforms: linux/amd64
+          cache-from: type=gha
+
+      - name: Build hearth-admin
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
+        with:
+          context: ./api
+          target: admin
+          push: false
+          platforms: linux/amd64
+          cache-from: type=gha
+
+      - name: Build hearth-web
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
+        with:
+          context: ./web
+          target: prod
+          push: false
+          platforms: linux/amd64
+          cache-from: type=gha
 
   build:
     # Both gates in one place. `needs` means a red lint or test run builds

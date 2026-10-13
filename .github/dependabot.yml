@@ -44,6 +44,12 @@ updates:
     groups:
       npm-minor-and-patch:
         update-types: [minor, patch]
+    # @types/node describes one Node major. It follows the Node that
+    # web/Dockerfile and ci.yml run, not the newest one published, so its
+    # major is raised by hand together with those two.
+    ignore:
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
 
   # The base images named on the FROM lines of both Dockerfiles.
   - package-ecosystem: docker
