@@ -65,7 +65,7 @@
 // Marriage's and nothing has rebuilt it yet, so /family/calendar still
 // genuinely falls through to rootRoute's notFoundComponent the way this file
 // used to say every Marriage URL did too.
-import { Suspense, lazy } from "react";
+import { Suspense } from "react";
 import {
   Navigate,
   createRootRoute,
@@ -110,6 +110,16 @@ import { SettingsPage } from "../features/settings/SettingsPage";
 import { AppShell } from "../features/shell/AppShell";
 import { NotFoundScreen } from "../features/shell/NotFoundScreen";
 import { RequireAuth } from "../features/shell/RequireAuth";
+import {
+  LazyAdminDatabasePage,
+  LazyAdminDatabaseTablePage,
+  LazyAdminFlagsPage,
+  LazyAdminHouseholdPage,
+  LazyAdminHouseholdsPage,
+  LazyAdminMailMessagePage,
+  LazyAdminMailPage,
+  LazyAdminShell,
+} from "./lazyAdminPages";
 import { RequireCapability } from "../features/shell/RequireCapability";
 
 const rootRoute = createRootRoute({
@@ -384,52 +394,6 @@ const settingsRoute = createRoute({
   },
 });
 
-// Lazily loaded so no household member ever downloads the admin bundle --
-// requirePlatformAdmin on the server is what actually enforces who may use
-// these routes, this only keeps the code itself out of a tab that will
-// never be allowed to run it. `.then((m) => ({ default: m.AdminShell }))`
-// rather than a default export: both components keep the named-export
-// convention every other file in this codebase uses.
-const LazyAdminShell = lazy(() =>
-  import("../features/admin/AdminShell").then((m) => ({
-    default: m.AdminShell,
-  })),
-);
-const LazyAdminFlagsPage = lazy(() =>
-  import("../features/admin/AdminFlagsPage").then((m) => ({
-    default: m.AdminFlagsPage,
-  })),
-);
-const LazyAdminMailPage = lazy(() =>
-  import("../features/admin/AdminMailPage").then((m) => ({
-    default: m.AdminMailPage,
-  })),
-);
-const LazyAdminMailMessagePage = lazy(() =>
-  import("../features/admin/AdminMailPage").then((m) => ({
-    default: m.AdminMailMessagePage,
-  })),
-);
-const LazyAdminHouseholdsPage = lazy(() =>
-  import("../features/admin/AdminHouseholdsPage").then((m) => ({
-    default: m.AdminHouseholdsPage,
-  })),
-);
-const LazyAdminHouseholdPage = lazy(() =>
-  import("../features/admin/AdminHouseholdPage").then((m) => ({
-    default: m.AdminHouseholdPage,
-  })),
-);
-const LazyAdminDatabasePage = lazy(() =>
-  import("../features/admin/AdminDatabasePage").then((m) => ({
-    default: m.AdminDatabasePage,
-  })),
-);
-const LazyAdminDatabaseTablePage = lazy(() =>
-  import("../features/admin/AdminDatabasePage").then((m) => ({
-    default: m.AdminDatabaseTablePage,
-  })),
-);
 
 // Every lazy admin route suspends on LoadingScreen, the same placeholder
 // AdminShell shows while its own query is in flight -- this one covers the
