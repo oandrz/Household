@@ -2,8 +2,13 @@
 SHELL := /bin/bash
 COMPOSE := docker compose
 
+# The Go version, read from the one place it is decided. A tool run with
+# `go run tool@version` is built outside the module, so it does not switch
+# to go.mod's version on its own and needs GOTOOLCHAIN set to it.
+GO_TOOLCHAIN := go$(shell awk '$$1 == "go" { print $$2 }' api/go.mod)
+
 .PHONY: help dev dev-local up down restart logs ps urls migrate migrate-down migrate-new \
-        test test-api test-web lint lint-arch lint-web lint-dead lint-comments typecheck fmt psql shell-api build sqlc \
+        test test-api test-web lint lint-arch lint-web lint-dead lint-vuln lint-comments typecheck fmt psql shell-api build sqlc \
         seed reset-password unlock-household
 
 help: ## Show this help
@@ -78,7 +83,7 @@ test-api: ## Run the Go tests (needs Docker for testcontainers)
 test-web: ## Run the frontend tests
 	cd web && npx vitest run
 
-lint: lint-arch typecheck lint-web lint-dead lint-comments ## Run every linter
+lint: lint-arch typecheck lint-web lint-dead lint-vuln lint-comments ## Run every linter
 	cd api && go vet ./...
 
 lint-arch: ## Check the clean-architecture dependency rule
@@ -102,13 +107,22 @@ lint-web: ## Lint the frontend
 # counts as a finding. Don't drop stderr instead -- a tool that fails to
 # build reports there, and silence would read as a pass.
 lint-dead: ## Report unreachable Go code, staticcheck findings, and unused frontend exports and packages
-	@cd api && out=$$(GOTOOLCHAIN=go1.25.13 go run golang.org/x/tools/cmd/deadcode@v0.36.0 -test ./... 2>&1 | grep -v -e '/sqlcgen/' -e '^go: downloading ' || true); \
+	@cd api && out=$$(GOTOOLCHAIN=$(GO_TOOLCHAIN) go run golang.org/x/tools/cmd/deadcode@v0.36.0 -test ./... 2>&1 | grep -v -e '/sqlcgen/' -e '^go: downloading ' || true); \
 	 if [ -n "$$out" ]; then echo "$$out"; echo "deadcode: unreachable code found"; exit 1; fi; \
 	 echo "deadcode passed"
-	@cd api && out=$$(GOTOOLCHAIN=go1.25.13 go run honnef.co/go/tools/cmd/staticcheck@2025.1.1 ./... 2>&1 | grep -v -e '/sqlcgen/' -e '^go: downloading ' || true); \
+	@cd api && out=$$(GOTOOLCHAIN=$(GO_TOOLCHAIN) go run honnef.co/go/tools/cmd/staticcheck@2025.1.1 ./... 2>&1 | grep -v -e '/sqlcgen/' -e '^go: downloading ' || true); \
 	 if [ -n "$$out" ]; then echo "$$out"; echo "staticcheck: findings"; exit 1; fi; \
 	 echo "staticcheck passed"
 	cd web && npx --yes knip@5.88.1 --no-progress
+
+# govulncheck reports only vulnerabilities this code can actually reach, in
+# its modules and in the Go standard library, so a finding here is one to act
+# on. It is part of `lint`, so a known reachable vulnerability cannot be
+# merged past. The cost is deliberate: an advisory published tomorrow turns
+# every pull request red until the module or the Go version is raised. The
+# version is pinned for the same reason as the tools above.
+lint-vuln: ## Fail on known vulnerabilities the Go code can reach
+	cd api && GOTOOLCHAIN=$(GO_TOOLCHAIN) go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...
 
 # A comment states the rule itself. A plan number ("decision 7", "Task 12",
 # "milestone 2") sends the reader to a document to understand one line, and a

@@ -40,10 +40,18 @@ them:
   and opens a weekly pull request per ecosystem. Its security alerts are a
   separate switch under Settings → Code security.
 
-Three things in the build are pinned to an exact version on purpose, and
-Dependabot is what moves them: every action in `ci.yml` (to a commit), and
-Caddy, Postgres and Mailpit in `deploy/docker-compose.prod.yml` (to a digest).
-A pin changes nothing on the box until the next `deploy.sh` run.
+Everything the build pulls in is pinned to an exact version on purpose, and
+Dependabot is what moves the pins: every action in `ci.yml` (to a commit);
+Caddy, Postgres and Mailpit in `deploy/docker-compose.prod.yml` (to a digest);
+and every base image on a `FROM` line in `api/Dockerfile` and `web/Dockerfile`
+(to an exact version and its digest). A pin changes nothing on the box until
+the next `deploy.sh` run.
+
+The Go version is decided in one place, the `go` line of `api/go.mod`. The
+`Makefile` reads it from there; `api/Dockerfile` has to name the same version
+by hand. `make lint` also runs `govulncheck`, so a known vulnerability that
+the Go code can reach fails the `lint` check and blocks the merge until the
+module or the Go version is raised.
 
 **Total ≈ $7.70/month, unchanged by Telegram.** Everything except the server is
 free tier, and at this data volume will remain so for years. Telegram is the

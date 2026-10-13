@@ -1,13 +1,21 @@
 # syntax=docker/dockerfile:1
 
+# Every FROM names an exact version and its digest. The tag is for people;
+# the digest is what Docker pulls, so a rebuilt upstream image cannot change
+# what ships without a change to this file. The digest is the multi-platform
+# one. Dependabot proposes the next version with its new digest.
+#
+# The Go version here must match the `go` line in go.mod. `make lint` reads
+# its Go version from go.mod, so the two files are the only places to change.
+
 # --- dev: hot reload -------------------------------------------------------
-FROM golang:1.25.13-alpine AS dev
+FROM golang:1.26.9-alpine@sha256:3082400e369fa24d5fc60bca20edab3f6d604e0c5a690ec66b295eff4dd87ade AS dev
 WORKDIR /src
 # air and goose are pinned, not @latest: air's newest release already requires a
 # newer Go than this image ships, and goose could do the same tomorrow. Pinning
 # keeps `docker compose build` from breaking out from under us with no warning.
 # Bump these deliberately after checking the target version's go.mod against the
-# golang:1.25.13-alpine base above.
+# Go version of the base above.
 RUN go install github.com/air-verse/air@v1.66.1 \
  && go install github.com/pressly/goose/v3/cmd/goose@v3.27.3
 COPY go.mod go.sum ./
@@ -17,7 +25,7 @@ EXPOSE 8080
 CMD ["air", "-c", ".air.toml"]
 
 # --- builder ---------------------------------------------------------------
-FROM golang:1.25.13-alpine AS builder
+FROM golang:1.26.9-alpine@sha256:3082400e369fa24d5fc60bca20edab3f6d604e0c5a690ec66b295eff4dd87ade AS builder
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
@@ -36,7 +44,7 @@ FROM builder AS admin-builder
 RUN CGO_ENABLED=0 go install github.com/pressly/goose/v3/cmd/goose@v3.27.3 \
  && CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/adminctl ./cmd/adminctl
 
-FROM gcr.io/distroless/static-debian12:nonroot AS admin
+FROM gcr.io/distroless/static-debian12:nonroot@sha256:afa5c872c891853ca7fcf1f12c3edb23f7eeef36189728842dd51042ff57f7ab AS admin
 COPY --from=admin-builder /out/adminctl /app/adminctl
 COPY --from=admin-builder /go/bin/goose /app/goose
 COPY --from=admin-builder /src/migrations /app/migrations
@@ -45,7 +53,7 @@ USER nonroot:nonroot
 # binary is named at run time -- `docker compose run --rm admin /app/adminctl …`
 
 # --- prod ------------------------------------------------------------------
-FROM gcr.io/distroless/static-debian12:nonroot AS prod
+FROM gcr.io/distroless/static-debian12:nonroot@sha256:afa5c872c891853ca7fcf1f12c3edb23f7eeef36189728842dd51042ff57f7ab AS prod
 COPY --from=builder /out/api /app/api
 EXPOSE 8080
 USER nonroot:nonroot
