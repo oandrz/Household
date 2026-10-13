@@ -2494,6 +2494,25 @@ color that class names actually shows up against its own background — and
 the grouped-sidebar bullet above is that exact claim happening again, on a
 different component, after it was already written down here once.
 
+- **A test client with the library's default cache settings could not see a
+  bug that only exists under the app's (2026-10-13).** `renderApp` in
+  `router.test.tsx` built its `QueryClient` with no `staleTime`, so every
+  query refetched whenever a screen mounted. The app uses 30 seconds. A
+  mutation that made sign-out keep the mounted queries, `['me']` included,
+  passed all seven new tests: in the test the stale `['me']` was refetched
+  and refused at once, while in the app it would have counted as fresh and
+  `/sign-in` would have sent the tab back into the signed-in screens. The
+  client's settings now live in `api/queryClient.ts`, and a test about what
+  the cache keeps builds its client from there. **A cache's freshness window
+  is part of the behaviour under test. Take it from the app, never from the
+  library default.** The mutation is what found it; reading the test would
+  not have.
+- **Do not name a zsh loop variable `path`.** In zsh `path` is tied to
+  `PATH`, so `for path in / /sign-in; do curl ...` empties the command search
+  path and every command after it reports `command not found`. A whole
+  header comparison printed "DIFFER" for eight routes that were identical.
+  Use `route`.
+
 ### 4. Guards scoped to the wrong interval
 
 Three times, a fix closed the reported sequence and left the class open. Each
@@ -4002,6 +4021,21 @@ account form did it "differently". The comment now gives the true reason
 (a separate wire code, named after the field), and a later commit says the
 earlier message was wrong. **A reason for keeping two things apart is a
 claim about both of them. Check the one you did not just edit.**
+- **A security review said the query cache survives sign-out. A browser walk
+  showed it does not (2026-10-13).** The review read three facts correctly:
+  the only `queryClient.clear()` is in the 401 handler, that handler does
+  nothing on `/sign-in`, and sign-out only invalidated `['me']`. Its
+  conclusion, that an owner's balances stay cached for the limited member who
+  signs in next, was wrong. Sign-out kept the old `['me']` while refetching,
+  so `/sign-in` saw a signed-in caller and sent the tab back to `/`; the 401
+  then arrived on a signed-in route and the handler cleared the cache. Three
+  lines in three files, each read alone. The review did mark the claim a
+  hypothesis because nobody had walked it, and that label is the only reason
+  an hour was spent on a walk instead of on a fix for a leak that was not
+  there. **A finding about what a user would see is a hypothesis until it is
+  seen. Reproduce before designing the fix, and say so in the plan.** The
+  protection was still an accident with no test, so the rule is now written
+  down: `signedInAs` and `signedOut` in `useAuth.ts`.
 
 ---
 

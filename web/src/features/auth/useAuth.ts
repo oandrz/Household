@@ -1,8 +1,21 @@
-// TanStack Query hooks over the identity endpoints. Every mutation that
-// changes who the caller is signed in as invalidates ['me'] so the rest of
-// the app (the sidebar, once Task 19 builds it) picks up the change.
+// TanStack Query hooks over the identity endpoints.
+//
+// The rule every mutation here follows: when the person signed in on this
+// tab changes, nothing the previous person loaded stays in the query cache.
+// Query keys are not per-user (["accounts"], ["transactions"]) and a cached
+// answer under 30 seconds old is shown without asking the server again, so a
+// cache that outlived a change of person would show an owner's balances to
+// the limited member who signs in next on a shared tablet, whatever the
+// server would have sent them. A new mutation that signs someone in or out
+// must end in signedInAs or signedOut below; identityChange.test.tsx fails
+// for one that only refreshes ['me'].
 import { useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  useMutation,
+  useQuery,
+  useQueryClient,
+  type QueryClient,
+} from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { ApiError, apiFetch, fetchAndParse } from "../../api/client";
 import {
@@ -27,6 +40,37 @@ export function useMe() {
   return useQuery({ queryKey: meQueryKey, queryFn: fetchMe });
 }
 
+// signedInAs is the one way a mutation records that `me` is now the person
+// on this tab.
+//
+// It removes every inactive query: one that no mounted screen is reading.
+// On the screens that sign someone in, the only mounted queries are the
+// screen's own (an invite or sign-up preview, the currency list) and ['me'],
+// so "inactive" is exactly "left behind by whoever was here before". Don't
+// widen this to queryClient.clear(): that also removes the ['me'] query the
+// sign-in route is subscribed to, and a subscriber is not told its query
+// was replaced, so the route would never see the new person and never leave
+// the sign-in screen.
+//
+// It then stores `me` directly instead of waiting for a refetch: the route
+// the caller lands on must not render the previous person's name while one
+// is in flight. The invalidate that follows asks the server once more, which
+// is what notices a session cookie the browser did not keep.
+function signedInAs(queryClient: QueryClient, me: Me) {
+  queryClient.removeQueries({ type: "inactive" });
+  queryClient.setQueryData(meQueryKey, me);
+  queryClient.invalidateQueries({ queryKey: meQueryKey });
+}
+
+// signedOut drops every query, ['me'] included. Sign-out happens on a
+// signed-in screen whose own queries are still mounted, so "inactive" would
+// keep exactly the data that has to go. Leaving ['me'] in place would also
+// make /sign-in believe someone is still signed in and send the tab back to
+// the home page until the server said otherwise.
+function signedOut(queryClient: QueryClient) {
+  queryClient.removeQueries();
+}
+
 export function useSignIn() {
   const queryClient = useQueryClient();
   return useMutation({
@@ -36,18 +80,23 @@ export function useSignIn() {
         body: JSON.stringify(vars),
       });
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: meQueryKey });
-    },
+    onSuccess: (me) => signedInAs(queryClient, me),
   });
 }
 
+// The navigation to /sign-in lives here, on the mutation's own onSuccess,
+// not in a per-call callback at the button: a per-call callback only runs
+// while its component is still subscribed (see useConsumeMagicLink below),
+// and a sign-out that emptied the cache but left the tab on a signed-in
+// screen would show that screen with nothing behind it.
 export function useSignOut() {
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
   return useMutation({
     mutationFn: () => apiFetch<void>("/api/v1/auth/sign-out", { method: "POST" }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: meQueryKey });
+      signedOut(queryClient);
+      navigate({ to: "/sign-in" });
     },
   });
 }
@@ -141,17 +190,8 @@ export function useConsumeMagicLink() {
         { method: "POST", body: JSON.stringify(vars) },
       );
     },
-    onSuccess: (data) => {
-      // setQueryData primes the cache directly and synchronously from this
-      // mutation's own response -- invalidateQueries alone isn't enough
-      // here: it only forces a refetch of *active* observers. (The
-      // /sign-in/magic screen does mount a useMe() now, for its "already
-      // signed in" warning, but that observer may be holding a 401 error
-      // and must not be what the landing route waits on.) Kept alongside
-      // setQueryData anyway, for any other tab/observer sharing this
-      // queryClient that might already be watching ['me'].
-      queryClient.setQueryData(meQueryKey, data);
-      queryClient.invalidateQueries({ queryKey: meQueryKey });
+    onSuccess: (me) => {
+      signedInAs(queryClient, me);
       navigate({ to: "/", replace: true });
     },
     onError: (err) => {
@@ -177,9 +217,7 @@ export function useAcceptInvite() {
         { method: "POST", body: JSON.stringify(request) },
       );
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: meQueryKey });
-    },
+    onSuccess: (me) => signedInAs(queryClient, me),
   });
 }
 
@@ -237,23 +275,11 @@ export function useCurrencies() {
 // acceptance use (see signup_handlers.go's handleCompleteSignUp), so all four
 // answer with the identical me bundle and the identical pair of cookies.
 //
-// Seeds ['me'] with setQueryData rather than only invalidating -- matching
-// useConsumeMagicLink above, not useSignIn/useAcceptInvite's invalidate-only,
-// because this route can be reached with a *stale* ['me'] already sitting in
-// the cache. signUpCompleteRoute deliberately does not bounce an
-// already-signed-in caller away (router.tsx, for the same shared-device
-// reason inviteRoute doesn't), so this screen is reachable via same-tab
-// navigation from an authenticated screen, within the default 5-minute
-// gcTime of that previous session's ['me'] query. invalidateQueries alone
-// only marks an *inactive* query stale -- it does not refetch it -- so a
-// fresh useMe observer that mounts right after (e.g. AppShell, once this
-// screen navigates to "/") would synchronously render that stale,
-// previous-owner data (isPending: false, wrong household) before the
-// background refetch its own staleness triggers has resolved. setQueryData
-// replaces the cache with this response's own bundle up front, so there is
-// nothing stale left to flash. invalidateQueries is kept alongside it
-// anyway, for any other tab/observer sharing this queryClient that might
-// already be watching ['me'].
+// This route can be reached with a previous session's data still in the
+// cache: signUpCompleteRoute deliberately does not bounce an already
+// signed-in caller away (router.tsx, for the same shared-device reason
+// inviteRoute doesn't). signedInAs is what keeps that data from being shown
+// to the household that was just created.
 export function useCompleteSignUp() {
   const queryClient = useQueryClient();
   return useMutation({
@@ -272,9 +298,6 @@ export function useCompleteSignUp() {
         { method: "POST", body: JSON.stringify(request) },
       );
     },
-    onSuccess: (data) => {
-      queryClient.setQueryData(meQueryKey, data);
-      queryClient.invalidateQueries({ queryKey: meQueryKey });
-    },
+    onSuccess: (me) => signedInAs(queryClient, me),
   });
 }

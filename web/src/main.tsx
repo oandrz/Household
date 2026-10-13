@@ -1,15 +1,14 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClientProvider } from "@tanstack/react-query";
 import "./index.css";
 import { App } from "./App";
 import { setUnauthorizedHandler } from "./api/client";
+import { createAppQueryClient } from "./api/queryClient";
 import { createUnauthorizedHandler } from "./api/unauthorizedRedirect";
 import { router } from "./routes/router";
 
-const queryClient = new QueryClient({
-  defaultOptions: { queries: { retry: false, staleTime: 30_000 } },
-});
+const queryClient = createAppQueryClient();
 
 // Wires apiFetch's 401 reaction (see client.ts's isPreAuthRequest / the spec:
 // "clear the cache and redirect on 401") to this app's actual QueryClient and

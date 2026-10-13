@@ -4723,6 +4723,12 @@ web/src/
   api/errorMessage.ts  apiErrorMessage -- any thrown error to the sentence a
                        screen shows. Beside ApiError, not in features/auth,
                        because every feature uses it
+  api/queryClient.ts   createAppQueryClient -- the app's cache settings in
+                       one place (no retry, answers fresh for 30 seconds).
+                       main.tsx builds its client from it, and so does any
+                       test about what the cache keeps: the library default
+                       refetches on every mount and hides exactly the bugs
+                       that need a still-fresh answer to appear
   components/          generic primitives only: Modal (native <dialog>),
                        PageContainer, FieldPair, ToggleSwitch, and icons.tsx --
                        every icon is an inline SVG, never a Unicode character,
@@ -4754,6 +4760,13 @@ web/src/
                        option instead
   features/
     auth/              sign-in, invite, magic-link, sign-up screens and hooks.
+                       Every mutation in useAuth.ts that changes who is signed
+                       in ends in signedInAs or signedOut, which drop what the
+                       previous person loaded. Query keys are not per-user, so
+                       a cache that outlived a change of person would show one
+                       member's data to the next on a shared device, whatever
+                       the server would have sent them. Sign-out also does its
+                       own navigation to /sign-in, in the hook.
                        SignInScreen also carries the "Continue with Telegram"
                        control: it opens the popup SYNCHRONOUSLY inside the
                        click handler -- a blank tab first, pointed at the URL
