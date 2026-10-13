@@ -6424,6 +6424,19 @@ route with a missing guard has no second line of defence.
 
 ### Tooling and infrastructure
 
+- **The first Dependabot run proposed Postgres 17 → 18 inside a routine
+  grouped update (2026-10-13).** `.github/dependabot.yml` grouped the Compose
+  images with `patterns: ["*"]`. A group with no `update-types` takes major
+  versions too, so one pull request carried a Mailpit patch and a Postgres
+  major. A major Postgres version cannot open the old data directory; merged
+  and deployed, the database would not have started. **No check would have
+  gone red**: the Go suite starts its own `postgres:17-alpine`, named in
+  `testsupport`, and nothing in CI boots the production Compose file. It was
+  caught by reading the diff of each new pull request, minutes after the file
+  merged. Groups now name `update-types: [minor, patch]`, and a Postgres major
+  is ignored outright. **A green check on a dependency bump only covers what
+  the tests actually start; read the diff of anything that touches the
+  production Compose file.**
 - **The first CI run failed lint on a tree that lints clean on every laptop
   (2026-10-13).** `make lint-dead` treats any output from `deadcode` or
   `staticcheck` as a finding, because `deadcode` exits 0 either way. On a

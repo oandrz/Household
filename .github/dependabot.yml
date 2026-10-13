@@ -10,6 +10,12 @@
 #   - a seven-day cooldown, so a release that is pulled or found malicious in
 #     its first week never reaches a pull request here.
 #
+# Every group below names `update-types: [minor, patch]`. Don't replace that
+# with `patterns: ["*"]`: a group with no update types also takes major
+# versions, and a major version hidden among routine bumps gets merged
+# without being read. The first run of this file did exactly that and
+# proposed Postgres 17 -> 18 in the same pull request as a Mailpit patch.
+#
 # Not covered, because Dependabot cannot see them: the Go version in
 # api/go.mod, the tools installed by `go install ...@version` in
 # api/Dockerfile and the Makefile, and `npx ...@version` in the Makefile.
@@ -49,7 +55,7 @@ updates:
     open-pull-requests-limit: 3
     groups:
       base-images:
-        patterns: ["*"]
+        update-types: [minor, patch]
 
   # The images named in the Compose files: Caddy, Postgres and Mailpit in
   # production, and their development counterparts at the repository root.
@@ -62,7 +68,14 @@ updates:
     open-pull-requests-limit: 3
     groups:
       compose-images:
-        patterns: ["*"]
+        update-types: [minor, patch]
+    # A major Postgres version cannot open the previous version's data
+    # directory: with only the tag changed, the database refuses to start.
+    # That upgrade is a planned dump and restore, never a merged bump, so it
+    # is not proposed at all. Minor versions (17.x) still arrive.
+    ignore:
+      - dependency-name: postgres
+        update-types: ["version-update:semver-major"]
 
   # The pinned commits in .github/workflows.
   - package-ecosystem: github-actions
@@ -74,4 +87,4 @@ updates:
     open-pull-requests-limit: 3
     groups:
       actions:
-        patterns: ["*"]
+        update-types: [minor, patch]
