@@ -1,4 +1,5 @@
-// Lazy loading (router.tsx's `lazy(() => import("../features/admin/..."))`)
+// Lazy loading (routes/lazyAdminPages.ts's
+// `lazy(() => import("../features/admin/..."))`, used by router.tsx)
 // is a requirement here, not an optimisation -- the point is that no
 // household member's browser ever downloads AdminShell or AdminFlagsPage's
 // code, even though requirePlatformAdmin on the server is what actually
@@ -9,7 +10,7 @@
 // `import()` call -- that is deliberate, not a limitation worked around:
 // React.lazy's whole mechanism *is* a dynamic import, and the regression
 // this test exists to catch is exactly someone replacing that with a plain
-// top-level import in router.tsx. It does not invoke Rollup and cannot see
+// top-level import anywhere router.tsx reaches. It does not invoke Rollup and cannot see
 // what actually ends up as a separate chunk on disk; it proves the
 // necessary precondition for that split -- nothing in main.tsx's static
 // import graph resolves to either admin component file -- deterministically
@@ -87,8 +88,9 @@ describe("the main entry point's static import graph", () => {
   it("never statically reaches any admin page from main.tsx", () => {
     const reachable = [...staticallyReachableFrom(ENTRY)];
 
-    // A regression here looks exactly like someone "simplifying" router.tsx
-    // by swapping `lazy(() => import("../features/admin/AdminShell"))` for
+    // A regression here looks exactly like someone "simplifying"
+    // lazyAdminPages.ts by swapping
+    // `lazy(() => import("../features/admin/AdminShell"))` for
     // a plain top-level `import { AdminShell } from
     // "../features/admin/AdminShell"` -- that one-line change is precisely
     // what would put either path below back into this list.
