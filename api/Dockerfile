@@ -9,7 +9,7 @@
 # its Go version from go.mod, so the two files are the only places to change.
 
 # --- dev: hot reload -------------------------------------------------------
-FROM golang:1.26.9-alpine@sha256:3082400e369fa24d5fc60bca20edab3f6d604e0c5a690ec66b295eff4dd87ade AS dev
+FROM golang:1.27.0-alpine@sha256:4c9fe60190a2a3350ddc51de80d0224b8a6698d12bdfc999fee45ea9d6c46dbc AS dev
 WORKDIR /src
 # air and goose are pinned, not @latest: air's newest release already requires a
 # newer Go than this image ships, and goose could do the same tomorrow. Pinning
@@ -25,7 +25,7 @@ EXPOSE 8080
 CMD ["air", "-c", ".air.toml"]
 
 # --- builder ---------------------------------------------------------------
-FROM golang:1.26.9-alpine@sha256:3082400e369fa24d5fc60bca20edab3f6d604e0c5a690ec66b295eff4dd87ade AS builder
+FROM golang:1.27.0-alpine@sha256:4c9fe60190a2a3350ddc51de80d0224b8a6698d12bdfc999fee45ea9d6c46dbc AS builder
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download

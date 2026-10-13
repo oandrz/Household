@@ -15,7 +15,7 @@ RUN npm run build
 # nginx is the only application server that faces the internet (behind
 # Caddy). 1.30 is the stable line; odd-numbered lines are development
 # releases.
-FROM nginx:1.30.5-alpine@sha256:0985e772fb9f729e6fa0980da05fca5d9c468e870eed43071545afa9d2e27d94 AS prod
+FROM nginx:1.31.0-alpine@sha256:2f07d83bf561b506400dc183b1b2003803e39efbd22451f848adaba14d28c7c7 AS prod
 COPY --from=builder /app/dist /usr/share/nginx/html
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 EXPOSE 80
