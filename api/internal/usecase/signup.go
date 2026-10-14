@@ -334,6 +334,10 @@ func checkSignupLive(details SignupDetails, now time.Time) error {
 // theirs.
 func (s *SignupService) Complete(ctx context.Context, token, householdName, displayName,
 	currency, timezone, password string) (SignInResult, error) {
+	// Before the token lookup: see PasswordHasher.Full.
+	if s.d.Hasher.Full() {
+		return SignInResult{}, ErrHasherBusy
+	}
 	now := s.d.Clock.Now()
 
 	if err := validatePassword(password); err != nil {

@@ -54,6 +54,8 @@ func (h *fakeHasher) Verify(_ context.Context, plain, encoded string) (bool, err
 	return encoded == "hashed:"+plain, nil
 }
 
+func (h *fakeHasher) Full() bool { return false }
+
 func (h *fakeHasher) verifyCallCount() int { return len(h.verifyLog) }
 
 // verifyCallsWithEncoded counts Verify calls made against a specific encoded

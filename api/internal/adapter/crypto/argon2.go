@@ -111,6 +111,12 @@ func (h *Argon2Hasher) acquireSlot(ctx context.Context) error {
 	}
 }
 
+// Full is true when every slot is taken and every place in line is too; see
+// usecase.PasswordHasher.
+func (h *Argon2Hasher) Full() bool {
+	return len(h.slots) == cap(h.slots) && len(h.queue) == cap(h.queue)
+}
+
 func (h *Argon2Hasher) Hash(ctx context.Context, plain string) (string, error) {
 	salt := make([]byte, h.saltLen)
 	if _, err := rand.Read(salt); err != nil {

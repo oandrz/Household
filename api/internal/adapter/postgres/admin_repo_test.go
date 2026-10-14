@@ -1,11 +1,11 @@
 package postgres_test
 
 import (
-	"sync"
-	"sort"
 	"context"
 	"encoding/json"
 	"errors"
+	"sort"
+	"sync"
 	"testing"
 	"time"
 

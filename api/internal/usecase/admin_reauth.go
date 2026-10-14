@@ -39,6 +39,9 @@ func NewAdminReauthService(d AdminReauthDeps) *AdminReauthService {
 // The attempt is written down as a failure before anything is decided; see
 // FailureReservation for why that order matters.
 func (s *AdminReauthService) Verify(ctx context.Context, userID, password string) error {
+	if s.d.Hasher.Full() {
+		return ErrHasherBusy
+	}
 	now := s.d.Clock.Now()
 
 	reserved, err := s.d.Attempts.ReserveFailure(ctx, userID, now, now.Add(-s.d.Policy.Window))

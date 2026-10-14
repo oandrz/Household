@@ -26,9 +26,18 @@ type Clock interface {
 //
 // Verify's bool is meaningful only when its error is nil. A malformed
 // encoded hash is (false, nil): a refusal, not a fault.
+//
+// Full reports whether a caller arriving now would be refused. It is a hint
+// taken a moment early, not a promise: the answer can change before Hash or
+// Verify is called, and those still decide. A service asks it before doing
+// anything else, so that a request it is about to refuse costs no database
+// work. Without that, a flood of refused requests would queue for database
+// connections instead of for the hasher, and real callers would wait behind
+// them all the same.
 type PasswordHasher interface {
 	Hash(ctx context.Context, plain string) (string, error)
 	Verify(ctx context.Context, plain, encoded string) (bool, error)
+	Full() bool
 }
 
 // ErrHasherBusy is PasswordHasher's "ask again shortly": the queue for a

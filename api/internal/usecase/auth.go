@@ -215,6 +215,11 @@ func signInFailed(state domain.LockState) *SignInFailedError {
 // every refusal a caller may see, and ErrHasherBusy when the service is too
 // loaded to check anything -- which is never counted as a failed attempt.
 func (s *AuthService) SignIn(ctx context.Context, email, password string) (SignInResult, error) {
+	// Before any lookup, so a refused request costs nothing and the refusal
+	// is the same whoever the address belongs to.
+	if s.d.Hasher.Full() {
+		return SignInResult{}, ErrHasherBusy
+	}
 	now := s.d.Clock.Now()
 
 	user, err := s.d.Users.ByEmail(ctx, email)

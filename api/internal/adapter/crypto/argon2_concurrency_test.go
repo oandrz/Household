@@ -171,6 +171,9 @@ func TestArgon2RefusesACallerWhenTheQueueIsFull(t *testing.T) {
 	}
 	waitFor(t, entered, cap(h.slots), "the slots to fill")
 	waitUntilQueued(t, h, cap(h.queue))
+	if !h.Full() {
+		t.Error("Full() = false with every slot and every place in line taken")
+	}
 
 	err := answerOrFail(t, "Hash past the ceiling", func() error {
 		_, err := h.Hash(context.Background(), "password")
@@ -195,6 +198,9 @@ func TestArgon2RefusesACallerWhenTheQueueIsFull(t *testing.T) {
 
 	close(release)
 	wg.Wait()
+	if h.Full() {
+		t.Error("Full() = true after every caller finished")
+	}
 }
 
 // TestArgon2WaiterLeavesWhenItsCallerDoes pins the other half of the queue:
@@ -214,6 +220,11 @@ func TestArgon2WaiterLeavesWhenItsCallerDoes(t *testing.T) {
 		}()
 	}
 	waitFor(t, entered, cap(h.slots), "the slots to fill")
+	// Busy slots alone are not "full": the next caller would wait, not be
+	// refused.
+	if h.Full() {
+		t.Fatal("Full() = true with every slot taken but nobody in line")
+	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)

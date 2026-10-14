@@ -46,6 +46,8 @@ func (h *gatedHasher) Verify(_ context.Context, plain, encoded string) (bool, er
 	return encoded == "hashed:"+plain, nil
 }
 
+func (h *gatedHasher) Full() bool { return false }
+
 func (h *gatedHasher) parkedCount() int {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -257,9 +259,11 @@ func TestABurstAtTheAdminPromptGetsOnlyTheAllowedNumberOfRealChecks(t *testing.T
 	}
 }
 
-// busyHasher answers "busy" to everything, as a hasher does when its queue
-// is full.
+// busyHasher has room when asked, then answers "busy" at the door: the
+// hasher that filled up between a service's early look and its real call.
 type busyHasher struct{}
+
+func (busyHasher) Full() bool { return false }
 
 func (busyHasher) Hash(context.Context, string) (string, error) {
 	return "", usecase.ErrHasherBusy
@@ -318,6 +322,87 @@ func TestABusyHasherIsNeverCountedAgainstTheAdminPrompt(t *testing.T) {
 	}
 	if got := attempts.failureCount(user.ID); got != 0 {
 		t.Fatalf("failures on record after %d busy answers = %d, want 0", burstSize, got)
+	}
+}
+
+// fullHasher says it is full, and fails the test if it is used anyway.
+type fullHasher struct{ t *testing.T }
+
+func (fullHasher) Full() bool { return true }
+func (h fullHasher) Hash(context.Context, string) (string, error) {
+	h.t.Error("Hash was called on a hasher that said it was full")
+	return "", usecase.ErrHasherBusy
+}
+func (h fullHasher) Verify(context.Context, string, string) (bool, error) {
+	h.t.Error("Verify was called on a hasher that said it was full")
+	return false, usecase.ErrHasherBusy
+}
+
+// TestAFullHasherIsRefusedBeforeAnyOtherWork: a request that is going to be
+// told "busy" must be told before it has cost anything. If it looked up the
+// user and wrote an attempt first, a flood of refused requests would queue
+// for database connections, and everyone else would wait behind them.
+func TestAFullHasherIsRefusedBeforeAnyOtherWork(t *testing.T) {
+	f := newFixture(t)
+	auth := burstAuth(f, fullHasher{t})
+	lookupsBefore := f.users.byEmailCalls
+
+	for _, email := range []string{"andreas@hearth.family", "nobody@example.com"} {
+		if _, err := auth.SignIn(context.Background(), email, "hunter2"); !errors.Is(err, usecase.ErrHasherBusy) {
+			t.Fatalf("%s: err = %v, want ErrHasherBusy", email, err)
+		}
+	}
+	if got := f.users.byEmailCalls - lookupsBefore; got != 0 {
+		t.Fatalf("user lookups made for refused sign-ins = %d, want 0", got)
+	}
+	if f.attempts.nextID != 0 {
+		t.Fatalf("attempts reserved for refused sign-ins = %d, want 0", f.attempts.nextID)
+	}
+
+	users := newUserDouble()
+	operator := users.mustCreate(t, "operator@example.test", "hashed:correct-horse", "Operator")
+	ledger := newFakeReauthAttemptRepo()
+	admin := usecase.NewAdminReauthService(usecase.AdminReauthDeps{
+		Users: users, Attempts: ledger, Hasher: fullHasher{t},
+		Clock: &fixedClock{now: time.Now()}, Policy: domain.DefaultLockoutPolicy(),
+	})
+	if err := admin.Verify(context.Background(), operator.ID, "correct-horse"); !errors.Is(err, usecase.ErrHasherBusy) {
+		t.Fatalf("admin prompt: err = %v, want ErrHasherBusy", err)
+	}
+	if ledger.nextID != 0 {
+		t.Fatalf("attempts reserved for a refused admin prompt = %d, want 0", ledger.nextID)
+	}
+}
+
+// TestSettingAPasswordIsRefusedBeforeAnyOtherWorkWhenTheHasherIsFull is the
+// same rule for the two routes that hash a new password. Every other
+// dependency is left nil on purpose: touching one is the failure.
+func TestSettingAPasswordIsRefusedBeforeAnyOtherWorkWhenTheHasherIsFull(t *testing.T) {
+	signup := usecase.NewSignupService(usecase.SignupDeps{Hasher: fullHasher{t}})
+	invite := usecase.NewInviteService(usecase.InviteDeps{Hasher: fullHasher{t}})
+
+	calls := map[string]func() error{
+		"completing a sign-up": func() error {
+			_, err := signup.Complete(context.Background(), "a-token", "The Tans", "Mei", "SGD",
+				"Asia/Singapore", "a long enough password")
+			return err
+		},
+		"accepting an invite": func() error {
+			_, err := invite.Accept(context.Background(), "a-token", "a long enough password", "Mei")
+			return err
+		},
+	}
+	for name, call := range calls {
+		t.Run(name, func(t *testing.T) {
+			defer func() {
+				if r := recover(); r != nil {
+					t.Fatalf("did other work before refusing: %v", r)
+				}
+			}()
+			if err := call(); !errors.Is(err, usecase.ErrHasherBusy) {
+				t.Fatalf("err = %v, want ErrHasherBusy", err)
+			}
+		})
 	}
 }
 
