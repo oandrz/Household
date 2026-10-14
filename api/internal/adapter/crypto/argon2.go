@@ -111,6 +111,14 @@ func (h *Argon2Hasher) acquireSlot(ctx context.Context) error {
 	}
 }
 
+// BusyThreads is the most goroutines this hasher can have computing at once:
+// every slot, times the threads one derivation uses at the configured cost.
+// The process's start-up reads it to leave the Go scheduler room for
+// everything else.
+func (h *Argon2Hasher) BusyThreads() int {
+	return cap(h.slots) * int(h.threads)
+}
+
 // Full is true when every slot is taken and every place in line is too; see
 // usecase.PasswordHasher.
 func (h *Argon2Hasher) Full() bool {

@@ -2525,10 +2525,31 @@ different component, after it was already written down here once.
   **A double that serialises what the real thing runs in parallel proves
   the caller, never the adapter. When the property is about ordering, test
   it where the ordering is decided.**
-- **A timing taken while the test suite was running on the same Docker VM
-  was five times too slow (2026-10-14).** A sign-in measured 5.3 s beside a
-  flood; the same measurement on a quiet VM was about one second. Measure
-  with nothing else running, and say what else was running if you cannot.
+- **The fix was slower than the code it replaced, in the one case nobody had
+  measured (2026-10-14).** Bounding the hasher's queue made a short burst
+  much better, and that was the case the design had in mind. A *steady*
+  stream from hundreds of addresses was worse: a real sign-in took 28 s
+  where the old code took 16 s. Two causes, both invisible to every test.
+  First, a refused request still looked the user up and wrote an attempt
+  before it met the full hasher, so refusals queued for the ten database
+  connections. Second, and larger: two derivations compute on four
+  goroutines, the container had two CPUs and so two scheduler threads, and
+  everything else in the process waited behind them. Postgres sat idle at 2%
+  CPU with every connection "idle in transaction", waiting for the API to
+  send its next statement. The fixes are `PasswordHasher.Full` (refuse
+  before any other work) and `addSchedulerThreads` (spare threads for the Go
+  scheduler). After both, the same sign-in is answered in 12 ms and a
+  signed-in page load takes 4–27 ms instead of up to a second. **A limit
+  that refuses work is only as good as the cost of refusing. Measure the
+  refused path under the load that causes refusals, and measure the old
+  build under that same load, before calling the new one better.**
+- **A slow number was nearly written off as noise (2026-10-14).** The first
+  5-second sign-in under a flood was measured while the test suite was
+  running on the same Docker VM, and the obvious reading was "the machine
+  was busy, measure again". Measured again on a quiet VM it was still 5
+  seconds. It was the scheduler starvation described above. **When a
+  measurement is worse than expected, repeat it clean before explaining it
+  away. "The machine was busy" is a guess until the quiet run agrees.**
 - **Do not name a zsh loop variable `path`.** In zsh `path` is tied to
   `PATH`, so `for path in / /sign-in; do curl ...` empties the command search
   path and every command after it reports `command not found`. A whole
