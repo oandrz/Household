@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"sort"
+	"sync"
 	"testing"
 	"time"
 
@@ -281,6 +283,7 @@ func TestAdminReauthAttemptsAreScopedToOneUser(t *testing.T) {
 	}
 
 	now := time.Now()
+	since := now.Add(-time.Hour)
 	for i := 0; i < 3; i++ {
 		if err := attempts.Record(ctx, a.ID, false, now); err != nil {
 			t.Fatalf("record: %v", err)
@@ -290,30 +293,90 @@ func TestAdminReauthAttemptsAreScopedToOneUser(t *testing.T) {
 		t.Fatalf("record success: %v", err)
 	}
 
-	failures, err := attempts.FailuresSince(ctx, a.ID, now.Add(-time.Hour))
+	reserved, err := attempts.ReserveFailure(ctx, a.ID, now, since)
 	if err != nil {
-		t.Fatalf("FailuresSince: %v", err)
+		t.Fatalf("ReserveFailure(a): %v", err)
 	}
-	if len(failures) != 3 {
-		t.Fatalf("FailuresSince(a) = %d, want 3 (successes are not failures)", len(failures))
+	if len(reserved.Earlier) != 3 {
+		t.Fatalf("earlier failures for a = %d, want 3 (successes are not failures, and a reservation "+
+			"does not count itself)", len(reserved.Earlier))
 	}
 
-	otherFailures, err := attempts.FailuresSince(ctx, b.ID, now.Add(-time.Hour))
+	other, err := attempts.ReserveFailure(ctx, b.ID, now, since)
 	if err != nil {
-		t.Fatalf("FailuresSince(b): %v", err)
+		t.Fatalf("ReserveFailure(b): %v", err)
 	}
-	if len(otherFailures) != 0 {
-		t.Fatalf("FailuresSince(b) = %d, want 0 -- one admin's failures must not lock another", len(otherFailures))
+	if len(other.Earlier) != 0 {
+		t.Fatalf("earlier failures for b = %d, want 0 -- one admin's failures must not lock another", len(other.Earlier))
+	}
+
+	// A withdrawn reservation is gone; one that was not withdrawn counts.
+	if err := attempts.Withdraw(ctx, reserved.ID); err != nil {
+		t.Fatalf("Withdraw: %v", err)
+	}
+	again, err := attempts.ReserveFailure(ctx, a.ID, now, since)
+	if err != nil {
+		t.Fatalf("ReserveFailure(a) after Withdraw: %v", err)
+	}
+	if len(again.Earlier) != 3 {
+		t.Fatalf("earlier failures for a after Withdraw = %d, want 3 again", len(again.Earlier))
 	}
 
 	if err := attempts.ClearFailures(ctx, a.ID); err != nil {
 		t.Fatalf("ClearFailures: %v", err)
 	}
-	failures, err = attempts.FailuresSince(ctx, a.ID, now.Add(-time.Hour))
+	cleared, err := attempts.ReserveFailure(ctx, a.ID, now, since)
 	if err != nil {
-		t.Fatalf("FailuresSince after clear: %v", err)
+		t.Fatalf("ReserveFailure(a) after ClearFailures: %v", err)
 	}
-	if len(failures) != 0 {
-		t.Fatalf("FailuresSince after ClearFailures = %d, want 0", len(failures))
+	if len(cleared.Earlier) != 0 {
+		t.Fatalf("earlier failures for a after ClearFailures = %d, want 0", len(cleared.Earlier))
+	}
+}
+
+// TestAdminReauthReservationsMadeTogetherEachGetAPlaceInLine is
+// TestReservationsMadeTogetherEachSeeTheOnesBeforeThem for the admin
+// prompt's ledger: simultaneous attempts by one operator see 0, 1, 2 ...
+// earlier failures, one each, so only the first three can be "the first
+// three".
+func TestAdminReauthReservationsMadeTogetherEachGetAPlaceInLine(t *testing.T) {
+	ctx := context.Background()
+	db := openTestDB(t)
+	attempts := postgres.NewAdminReauthAttemptRepo(db)
+	operator, err := postgres.NewUserRepo(db).Create(ctx, "operator@example.test", "", "Operator")
+	if err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+
+	const callers = 40
+	now := time.Now()
+	seen := make([]int, callers)
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	for i := 0; i < callers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			reserved, err := attempts.ReserveFailure(ctx, operator.ID, now, now.Add(-time.Hour))
+			if err != nil {
+				t.Errorf("ReserveFailure: %v", err)
+				return
+			}
+			seen[i] = len(reserved.Earlier)
+		}()
+	}
+	close(start)
+	wg.Wait()
+	if t.Failed() {
+		return
+	}
+
+	sort.Ints(seen)
+	for i, n := range seen {
+		if n != i {
+			t.Fatalf("simultaneous reservations did not each get their own place in line; "+
+				"what each one saw, sorted: %v", seen)
+		}
 	}
 }

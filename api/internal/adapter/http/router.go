@@ -172,10 +172,11 @@ func NewRouter(deps Deps) http.Handler {
 
 			// Public: no session exists yet, and no CSRF cookie either.
 			//
-			// The per-IP limiter wraps only the request endpoint. The preview
-			// and complete endpoints need a token that was mailed to a real
-			// address, so they are not a path to unbounded mail; the request
-			// endpoint is.
+			// The request endpoint and the complete endpoint each have a
+			// per-IP limiter, for different costs: the first sends mail, the
+			// second runs a password hash. The preview endpoint has none: it
+			// needs a token that was mailed to a real address, sends nothing
+			// and hashes nothing.
 			auth.Group(func(su chi.Router) {
 				// deps.Clock.Now, not a bound method value: forming the method
 				// value would read deps.Clock immediately, while NewRouter is
@@ -198,7 +199,15 @@ func NewRouter(deps Deps) http.Handler {
 			auth.Group(func(tok chi.Router) {
 				tok.Use(requireFeature(deps, domain.FlagSignupsOpen))
 				tok.Get("/sign-up/{token}", handleSignUpPreview(deps))
-				tok.Post("/sign-up/{token}/complete", handleCompleteSignUp(deps))
+			})
+			// Its own group so the limiter can sit outermost, as it does on
+			// the request route: over the limit is answered 429 before the
+			// flag is even read. Its own limiter instance, so a person who
+			// mistyped the form a few times has not spent their sign-ins.
+			auth.Group(func(done chi.Router) {
+				done.Use(rateLimitByIP(newIPRateLimiter(signUpCompletionsPerIPPerWindow, passwordSetupLimitWindow, authNow)))
+				done.Use(requireFeature(deps, domain.FlagSignupsOpen))
+				done.Post("/sign-up/{token}/complete", handleCompleteSignUp(deps))
 			})
 
 			// Its own limiter instance, not the sign-up group's: a person who
@@ -252,8 +261,14 @@ func NewRouter(deps Deps) http.Handler {
 		})
 
 		// Public: reached before the caller has any session at all.
+		//
+		// Accepting runs a password hash, so it has a per-IP limiter of its
+		// own; see signUpCompletionsPerIPPerWindow. A closure, not
+		// deps.Clock.Now: see the sign-up group above.
+		inviteNow := func() time.Time { return deps.Clock.Now() }
+		inviteAcceptLimit := rateLimitByIP(newIPRateLimiter(inviteAcceptsPerIPPerWindow, passwordSetupLimitWindow, inviteNow))
 		api.Get("/invites/{token}", handleInvitePreview(deps))
-		api.Post("/invites/{token}/accept", handleAcceptInvite(deps))
+		api.With(inviteAcceptLimit).Post("/invites/{token}/accept", handleAcceptInvite(deps))
 
 		// Public: the sign-up form reads this before any session exists, and
 		// Settings reads it after one. One list, served rather than duplicated

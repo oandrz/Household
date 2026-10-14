@@ -133,7 +133,7 @@ func TestSeedCreatesAndreasAsAFullyCapableOwner(t *testing.T) {
 		t.Fatal("andreas has no password hash")
 	}
 	hasher := f.deps.Hasher
-	if !hasher.Verify(usecase.DevPassword, andreas.PasswordHash) {
+	if ok, err := hasher.Verify(context.Background(), usecase.DevPassword, andreas.PasswordHash); err != nil || !ok {
 		t.Fatal("andreas's password hash does not verify against the development password")
 	}
 

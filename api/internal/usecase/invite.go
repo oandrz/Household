@@ -394,6 +394,10 @@ func checkInviteLive(details InviteDetails, now time.Time) error {
 // index, and the invite could never be accepted by anyone (see
 // InviteRepository.Accept's doc comment).
 func (s *InviteService) Accept(ctx context.Context, token, password, displayName string) (SignInResult, error) {
+	// Before the token lookup: see PasswordHasher.Full.
+	if s.d.Hasher.Full() {
+		return SignInResult{}, ErrHasherBusy
+	}
 	if err := validatePassword(password); err != nil {
 		return SignInResult{}, err
 	}
@@ -418,7 +422,7 @@ func (s *InviteService) Accept(ctx context.Context, token, password, displayName
 		return SignInResult{}, err
 	}
 
-	passwordHash, err := s.d.Hasher.Hash(password)
+	passwordHash, err := s.d.Hasher.Hash(ctx, password)
 	if err != nil {
 		return SignInResult{}, fmt.Errorf("hash invite password: %w", err)
 	}

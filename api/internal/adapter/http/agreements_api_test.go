@@ -276,7 +276,7 @@ func proposalPath(id string) string { return agreementProposalsPath + "/" + id }
 // in production.
 func addSecondOwner(t *testing.T, env *testEnv) (session, csrf *http.Cookie) {
 	t.Helper()
-	hash, err := crypto.NewArgon2Hasher(1, 8*1024, 1).Hash("hunter2hunter2")
+	hash, err := crypto.NewArgon2Hasher(1, 8*1024, 1).Hash(context.Background(), "hunter2hunter2")
 	if err != nil {
 		t.Fatalf("hash second owner password: %v", err)
 	}

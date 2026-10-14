@@ -920,10 +920,10 @@ in one file.
 | `IntentParser` | `adapter/openrouter` | The Telegram bot's free-text reader (stage 5b of the chat-commands spec): an open-weight model through OpenRouter's OpenAI-dialect API over plain `net/http`, up to three model ids tried in order. One implementation and one caller, which is normally the wrong shape for a port — it is one anyway because the implementation is a third-party API behind a key, and the product must behave identically without it: `nil` means "commands only". (A Claude adapter was its second implementation for one day, 2026-09-08, and was removed when the owner chose free models; git has it.) The prompt, the `log_transaction` schema, and the reader that turns the model's arguments into an `Intent` and fails closed on any kind it did not name live in `adapter/intent`, apart from the HTTP, because the reader is the last line between a model's output and the ledger and earns its own tests. The port returns text fields, never ids, so what the person confirms is what they can read. The Commander caps every call at 30 s, because the poller handles one update at a time and a stalled provider would hold every chat |
 | `FeatureFlagRepository` | `adapter/postgres` | Twenty-third. `OverridesFor` is the one query `requireSession` runs on every authenticated request — both the global and the household layer in a single `UNION ALL` statement, never two round trips. `key` carries no foreign key to a registry table, because the registry (`domain.AllFlags`) is compile-time; a row can outlive the `const` that named it, and `SetHousehold`/`ClearHousehold` are two different operations on purpose — setting a household's override to `false` and removing the override row entirely are different states downstream, not the same write with a different value |
 | `AdminAuditRepository` | `adapter/postgres` | Twenty-fourth, append-only by convention rather than by any database privilege, and **write-only**: `Record` is its one method, there is no `Delete`, and `adminctl prune` does not touch `admin_audit_log`. It had a `Recent` read and `AdminService.RecentAudit` over it for the audit screen; when that screen was descoped (2026-09-02, `docs/FEATURE_TRACKER.md`) the read stayed behind with no production caller, and it was deleted on 2026-09-13. The log is read through `psql`, or through the read-only database browse (§4), which audits its own reads. Tests that need to see what `Record` wrote query the table directly |
-| `AdminReauthAttemptRepository` | `adapter/postgres` | Twenty-fifth, and the reason a fifth login-adjacent table exists at all rather than reusing `LoginAttemptRepository`: `FailuresSince`, `Record` and `ClearFailures` run against `admin_reauth_attempts`, keyed on `user_id`, never `household_id` — see §6 and [ADR 5](adr/0005-platform-admin-authorization.md) for the blast-radius reasoning `login_attempts`' own household scoping would have carried over silently if this port had wrapped that table instead of adding its own |
+| `AdminReauthAttemptRepository` | `adapter/postgres` | Twenty-fifth, and the reason a fifth login-adjacent table exists at all rather than reusing `LoginAttemptRepository`: `ReserveFailure`, `Withdraw`, `Record` and `ClearFailures` run against `admin_reauth_attempts`, keyed on `user_id`, never `household_id` — see §6 and [ADR 5](adr/0005-platform-admin-authorization.md) for the blast-radius reasoning `login_attempts`' own household scoping would have carried over silently if this port had wrapped that table instead of adding its own |
 | `AdminDirectoryRepository` | `adapter/postgres` | Twenty-sixth. `Metrics`/`SearchHouseholds`/`Household`, read-only, and the one port that reads across household boundaries *in the product's own vocabulary* — every other repository in this table answers for a single household, which is why composing this screen out of them would have meant new methods on four ports and an N+1 call per counter. (`DatabaseBrowser` below crosses them too, but it reads whatever table it is asked for and has no concept of a household at all, so it is a different kind of read rather than a second directory.) Its SQL file is the only place `COALESCE(last_seen_at, created_at)` appears, so "when was this session last used" has exactly one definition (§6); `SearchHouseholds` reaches its matching member through a `LEFT JOIN` onto `users` itself rather than onto the lateral subquery, because sqlc types a column selected through a derived table as non-nullable and the scan then fails at runtime on the first household with no member match (`docs/LEARNING.md`) |
 | `TelegramSender` | `adapter/telegram` | The Telegram twin of `Mailer`, and justified the same way: the usecase layer must not hold an HTTP client, and `TelegramAuthService` must be testable against a double. One method, `SendMessage(ctx, chatID, text)` — plain text, no template system, exactly as the mailer has none |
-| `PasswordHasher`, `TokenGenerator` | `adapter/crypto` | argon2id with cost from config; tokens are random, stored hashed |
+| `PasswordHasher`, `TokenGenerator` | `adapter/crypto` | argon2id with cost from config; tokens are random, stored hashed. `Hash` and `Verify` take the request's context and can answer `usecase.ErrHasherBusy`: the hasher runs a few derivations at once, lets a fixed number of callers wait, and refuses the rest. `Full` is the early hint a service reads before any other work. An error from either means **no check ran**, so a caller must never count it as a wrong password — see "Sign in, with the lockout" in §5 |
 | `Mailer` | `adapter/mail` | SMTP; TLS policy and credentials from config. An unrecognised `SMTP_TLS_MODE` maps to mandatory TLS, never to plaintext: `config.Load` refuses a bad value first, so this is the second line, and a second line that fails open would silently turn encryption off the day the first one is loosened (2026-09-13) |
 | `MailOutbox` | `adapter/mail` (`MailpitOutbox`, its only implementation) | Reads what `Mailer` sent, rather than what it is about to — the operator's outbound message inspector, added 2026-09-04. `Recent(ctx, limit) (OutboxPage, error)` and `Message(ctx, id) (OutboxMessage, error)` hand back the body exactly as Mailpit holds it, unprocessed: extraction is `AdminOutboxService`'s job (§2), not the adapter's, so "which strings are links" stays testable without an HTTP server. Two Mailpit endpoints only, `GET /api/v1/messages` and `GET /api/v1/message/{id}` — a test asserts no third path is ever requested, because `GET /api/v1/message/{id}/link-check` looks like the obvious third and is not: it issues a real HTTP request to every URL it finds, and every URL in a Hearth email is a live single-use token. `Message` reports `domain.ErrNotFound` for an id Mailpit's own store no longer holds (it keeps no volume, so a restart empties it) and both methods report `usecase.ErrOutboxUnavailable` — a distinct error, because an operator needs different advice for "no such message" than for "Mailpit is down" — when the upstream cannot be reached, times out, or answers a body the adapter cannot map (a message with no recipient, since every Hearth template addresses exactly one). A 5-second timeout and no retries, the same reasoning `TokenGenerator`'s neighbours use for a same-host dependency: a slow answer means something is wrong, not far away |
 | `DatabaseBrowser` | `adapter/postgres` — **two** implementations: `BrowseRepo` (live) and `UnavailableBrowse` (a stand-in) | The operator's read-only database browse, added 2026-09-04. `Tables(ctx)` and `Rows(ctx, table, limit, offset)`. Every **cell** comes back already rendered as text — no driver type, no `any`, nothing a caller could write through; the counts beside them (`TableInfo.RowCount`, `RowPage.Total`/`Limit`/`Offset`) are plain `int64`/`int`, because a number the screen formats is not data read out of a household's row. That is not only the clean-architecture rule: it is what lets the implementation render a redacted column as a literal *inside its own `SELECT` list*, so the secret bytes never leave Postgres (spec decision 7). The contract is three clauses and all three are load-bearing: `domain.ErrNotFound` for a table this role cannot see — whether it does not exist or the role has no privilege on it, which is one answer on purpose, since the role's privileges are the guard and probing them would be the leak; `usecase.ErrBrowseUnavailable` for a failure of the *connection* rather than of the request; and never write, never be reachable through a connection that could. `BrowseRepo` is the one hand-written pgx repository in a package otherwise generated by sqlc, because sqlc turns *fixed* SQL into typed Go and this repository's whole job is a `SELECT` list and a `FROM` clause chosen at call time from `information_schema`. Its constructor takes a `*ReadOnlyDB` and nothing else, so it cannot be built over the application pool; every table name is matched against the catalogue first and quoted with `pgx.Identifier` second, never concatenated from a request, and **schema-qualified** as `public.<table>` — the lookup pins `table_schema = 'public'`, so a read that resolved through `search_path` instead could name a different relation from the one just validated, and the symptom would be an `ORDER BY` on a column that relation does not have; `ColumnInfo.DataType` is a name for a human to read rather than a catalogue value to branch on (`citext`, `text[]`, not `USER-DEFINED` and `ARRAY` — see `displayType`), while redaction is decided separately on the raw `data_type` **and** `udt_name`; and paging is `ORDER BY` the primary key, falling back to `ctid` — `OFFSET` without `ORDER BY` silently repeats and skips rows the moment anything writes between two pages (spec decision 10). **`UnavailableBrowse` is the second implementation and exists so that two different failures stay two different answers**: `DATABASE_READONLY_URL` unset leaves `Deps.AdminBrowse` nil and answers `DB_BROWSE_NOT_CONFIGURED`, while a variable that *is* set over a pool that could not be opened is wired with this stand-in and answers `DB_BROWSE_UNAVAILABLE`, carrying the boot failure so the log can say why. Without it an operator restoring onto a fresh box would be told to set a variable already in their `.env` (§4, and `cmd/api/main.go`'s `openBrowse`). It is Liskov-honest rather than a stub: `ErrBrowseUnavailable` is the port's own contract for "the store is there, I could not reach it", so no caller special-cases it |
@@ -1007,9 +1007,9 @@ graph TD
     RID --> Public{"Public route?"}
 
     Public -->|"magic-link/consume,<br/>invites/{token},<br/>currencies"| Handler
-    Public -->|"sign-in, magic-link"| PublicLimit["rateLimitByIP<br/>each route its own bucket —<br/>429 RATE_LIMITED when spent"]
+    Public -->|"sign-in, magic-link,<br/>invites/{token}/accept"| PublicLimit["rateLimitByIP<br/>each route its own bucket —<br/>429 RATE_LIMITED when spent"]
     PublicLimit --> Handler
-    Public -->|"sign-up*, telegram/start"| PublicFeature["requireFeature(flag)<br/>no Scope yet — resolves the<br/>GLOBAL flag set only; 404 if off"]
+    Public -->|"sign-up, sign-up/{token}/complete,<br/>telegram/start — each behind its<br/>own rateLimitByIP first; the<br/>sign-up preview has none"| PublicFeature["requireFeature(flag)<br/>no Scope yet — resolves the<br/>GLOBAL flag set only; 404 if off"]
     PublicFeature --> Handler
     Public -->|no| Session["requireSession<br/>reads hearth_session cookie,<br/>re-reads membership, resolves this<br/>household's flags and its calendar<br/>day (Scope.Today), extends when<br/>under a day remains, then touches<br/>last_seen_at when it is null or older<br/>than an hour — best-effort, like the extend"]
     Public -->|"no, and an Authorization<br/>header is present"| Token["requireToken<br/>Bearer hearth_… only; resolves a live<br/>api_tokens row, same membership, flags<br/>and calendar-day lookups, AuthVia = token.<br/>Never falls back to the cookie;<br/>no admin grant on the context"]
@@ -1320,7 +1320,7 @@ form their own third `requireCSRF` sub-group, for the same reason as the
 first two — Goals can grow its own route list without touching budgets',
 transactions', or categories'.
 
-**Four public routes are wrapped in an extra middleware, `rateLimitByIP` — and
+**Six public routes are wrapped in an extra middleware, `rateLimitByIP` — and
 each holds its own bucket on purpose.** It is a per-process, in-memory
 fixed-window counter keyed on the request's resolved IP.
 
@@ -1332,6 +1332,13 @@ fixed-window counter keyed on the request's resolved IP.
   office; its job is to stop a loop, not to stop guessing. The memory is capped
   a second time, whatever gets past this, inside `crypto.Argon2Hasher` — see
   "Sign in, with the lockout" in §5.
+- `POST /auth/sign-up/{token}/complete` and `POST /invites/{token}/accept` —
+  **20 per 15 minutes each**, each in its own bucket. Both turn a new password
+  into an argon2id hash. The token in the path is not a limit by itself: until
+  the first request commits, every request carrying the same token gets as far
+  as the hasher. The numbers are sign-in's, for sign-in's reason. On the
+  sign-up route the limiter sits outside `requireFeature`, so a caller over the
+  limit is answered `429` before the flag is read.
 - `POST /auth/magic-link` — **10/hour**. The per-address limit in
   `AuthService` is bypassed by varying the address, exactly as sign-up's is,
   so this is what stops the route being an unmetered way to send mail. Its own
@@ -1341,7 +1348,8 @@ fixed-window counter keyed on the request's resolved IP.
 - `POST /auth/sign-up` — **5/hour**. It is the only sign-up route that can
   trigger outbound mail without a token already proving an address, so it is
   the one an unbounded loop would hit; the preview and complete routes need a
-  token that was mailed to a real address and so are not on that path.
+  token that was mailed to a real address and so are not on that path. (The
+  complete route is limited for a different cost, above.)
 - `POST /auth/telegram/start` — **20/hour**, in its own limiter *instance*, not
   the sign-up group's. Two reasons, and the second is the one that matters:
   the limits differ because this route sends no mail and writes only a nonce
@@ -1350,6 +1358,15 @@ fixed-window counter keyed on the request's resolved IP.
   one control silently disabling an unrelated one. Twenty is also generous
   enough that the *real* limit on this flow is the per-chat one below, which is
   the one that can actually be reached by a person tapping a button.
+
+**The three hashing limits are sized against the hasher they sit in front
+of.** That hasher is shared by everyone: when its queue is full, every person
+signing in is told "busy" (§5). So one address, spending all three allowances,
+must only be able to occupy a small share of it.
+`TestHashRouteLimitsLeaveTheHasherRoomForEveryoneElse` does that sum against
+the live constants and the smallest hasher any box gets
+(`crypto.MinConcurrentDerivations`), the same kind of check
+`TestSignUpRateLimitsCompose` makes for mail (LEARNING pattern 11).
 
 Neither per-IP bucket is the whole defence. Telegram sign-in's second and
 tighter limit is per **chat**, enforced in `TelegramAuthService.HandleStart`
@@ -1388,7 +1405,7 @@ rows, and a link redemption writes neither.
 | POST | `/auth/magic-link/consume` | none — the token is the credential. No per-IP limit: it runs no argon2, sends nothing, and the token is 256 bits. The web screen that calls it waits for a click (§5, "Magic link") |
 | POST | `/auth/sign-up` | none, plus a per-IP token bucket (5/hour) and `requireFeature(signups_open)` (global set — no session exists) — always 202, the same silent contract as magic-link |
 | GET | `/auth/sign-up/{token}` | none, plus `requireFeature(signups_open)` — a half-finished sign-up must not be completable once registration closes |
-| POST | `/auth/sign-up/{token}/complete` | none, plus `requireFeature(signups_open)`, same group as the row above. The body carries `timezone` beside `primaryCurrency`: the browser's IANA zone, required, `422 INVALID_TIMEZONE` when missing or unknown — never replaced with UTC ([ADR 12](adr/0012-one-calendar-per-household.md)) |
+| POST | `/auth/sign-up/{token}/complete` | none, plus its own per-IP bucket (20 per 15 minutes) and then `requireFeature(signups_open)`, in a group of its own so the limiter sits outermost. `503 BUSY` when the password hasher's queue is full. The body carries `timezone` beside `primaryCurrency`: the browser's IANA zone, required, `422 INVALID_TIMEZONE` when missing or unknown — never replaced with UTC ([ADR 12](adr/0012-one-calendar-per-household.md)) |
 | POST | `/auth/telegram/start` | none, plus its **own** per-IP token bucket (20/hour), separate from sign-up's, and `requireFeature(telegram_sign_in)` (global set) — takes no body and no identifier, so there is nothing to probe; **`404`** both when no bot is configured and when the flag is off, the same answer any unrouted path gets, so an install without Telegram gives nothing away and the frontend hides the control on that response (§7) |
 | GET | `/auth/telegram` | session · `requireFeature(telegram_sign_in)` · CSRF · **cookie** session (`requireCookieSession`) — one group of five routes carries all four guards, `tl.Use` in that order, including the two reads: `requireCSRF` returns early for `GET`/`HEAD`/`OPTIONS` (`middleware_csrf.go`) so the polling route needs no header and the router needs no second group. This user's own binding — connected (chat, `linkedAt`) or not; a member with no chat bound gets `200 {"connected":false}`, not a `404`, because that is the ordinary case for most members reaching Settings. `Deps.TelegramLink` nil (no bot configured) answers `404`, distinct from `Deps.Telegram` above — the sign-in route and the five link/unlink routes are gated on two different `Deps` fields, wired from the same `cfg.TelegramEnabled()` check in `main.go`, so "no bot" still answers identically on both |
 | POST | `/auth/telegram/link` | same group as the row above — mints a link nonce carrying this session's `user_id`, returns `{id, url, expiresAt}`; **`429`** on the fourth mint inside an hour (`CountMintsSince`, decision 12: per-**user**, table-growth control, not a security one — the session is already authenticated) |
@@ -1401,7 +1418,7 @@ rows, and a link redemption writes neither.
 | POST | `/auth/tokens` | **cookie** session · CSRF · `requireCookieSession` — a token cannot mint a token ([ADR 7](adr/0007-personal-api-tokens.md)); the raw token is in this one response and nowhere else |
 | DELETE | `/auth/tokens/{id}` | cookie session · CSRF · `requireCookieSession` — user-scoped: another member's id is 404 |
 | GET | `/invites/{token}` | none — the token is the credential |
-| POST | `/invites/{token}/accept` | none |
+| POST | `/invites/{token}/accept` | none, plus its own per-IP bucket (20 per 15 minutes). `503 BUSY` when the password hasher's queue is full |
 | GET | `/currencies` | none — read before a session exists (sign-up's currency select) and after one (Settings) |
 | GET | `/household`, `/household/members`, `/spaces`, `/notification-preferences` | session. `GET /household` answers the household plus `primaryCurrencyLocked`: `true` when a `PATCH` that changes `primaryCurrency` would be refused with `422 PRIMARY_CURRENCY_HELD_BY_HOLDINGS`. The handler works it out **for an owner only** (`HouseholdService.PrimaryCurrencyLocked`, the same method `Update` refuses on); a limited member always gets `false`, because for them "locked" would only say that the household holds investments. The household inside `GET /auth/me` does not carry the field |
 | PATCH | `/household`, `/notification-preferences` | session · CSRF · owner. `PATCH /household` also takes `timezone` (an IANA name; `422 INVALID_TIMEZONE` for anything `domain.ParseTimezone` refuses, including `""` and `"Local"`). Like every field on it, an omitted `timezone` is left as it was |
@@ -1577,31 +1594,28 @@ sequenceDiagram
 
     B->>H: POST /auth/sign-in
     H->>A: SignIn(email, password)
+    Note over A: Hasher.Full()? Then ErrHasherBusy now,<br/>before any lookup or write.
     A->>R: ByEmail
 
-    alt address unknown
-        A->>R: record attempt (no household)
+    Note over A,R: An unknown address takes the same path, counted<br/>against the address instead of a household,<br/>and always meets the decoy.
+    A->>R: ReserveFailure — under the ledger's lock: write this<br/>attempt as a failure, read the ones ahead of it
+    alt hasher busy, or the caller left
+        A->>R: Withdraw the reserved failure
+        A-->>H: ErrHasherBusy — nothing was checked
+    else already locked, or nothing real to check
         A->>A: decoy verify — equalises timing
-        A-->>H: SignInFailedError (per-address countdown)
-    else known
-        A->>R: failures in the window
-        alt household locked
-            A->>R: record attempt
-            A->>A: decoy verify
-            A-->>H: SignInFailedError (locked, until)
-        else not locked
-            A->>A: verify password
-            alt wrong
-                A->>R: record attempt
-                A-->>H: SignInFailedError (attempts remaining)
-            else correct
-                A->>R: clear failures, create session
-                A-->>H: session token
-            end
+        A-->>H: SignInFailedError (locked until, or the countdown)
+    else room for a real check
+        A->>A: verify password
+        alt wrong
+            A-->>H: SignInFailedError (attempts remaining)
+        else correct
+            A->>R: clear failures (the reserved one too), create session
+            A-->>H: session token
         end
     end
 
-    H-->>B: 200 + Set-Cookie, or 401/423 with the same shape
+    H-->>B: 200 + Set-Cookie, 401/423 with the same shape, or 503 BUSY
 ```
 
 Three failures inside fifteen minutes lock the **household's password sign-in**
@@ -1609,12 +1623,61 @@ for fifteen minutes. Magic link is never gated by the lock — that is the
 recovery path. The decoy verification exists so argon2's cost cannot distinguish
 the branches.
 
-**That cost is bounded twice, because it is paid by strangers.** In front, the
-per-IP limit on this route (§4). Behind it, `crypto.Argon2Hasher` runs at most
-one derivation per CPU at a time (two on the production box, so 2 × 64 MiB);
-the rest wait on a channel, costing kilobytes each. They wait rather than being
-refused because `Verify` answers a bool: "busy" would have to look like "wrong
-password", count as a failure, and lock a real household out. The API
+**The attempt is written before the password is checked, and that order is
+what makes "three tries" true under load.** Counting first and writing
+afterwards lets every request in a burst read "no failures yet" and each get a
+real check. Writing first gives every attempt a place in line: each one sees
+exactly the attempts ahead of it, so the first three find room and the rest
+meet the decoy.
+
+The line is kept by a short lock. `LoginAttemptRepository.ReserveFailure`
+opens a transaction, takes an advisory lock named after the household (or
+after the address, when there is no household — an unknown address has no row
+to lock), writes the attempt, reads the earlier ones, and commits. Two things
+about that lock are load-bearing:
+
+- **It must exist.** Write-then-read with nothing holding the order makes
+  overlapping attempts count against each other in both directions, so two
+  members signing in correctly a moment apart could each be refused because of
+  the other.
+- **It is held for those two statements only, never across the password
+  check.** A hash takes a thousand times longer than the two statements;
+  holding a database connection for it would tie the pool of ten connections to
+  the two hash slots.
+
+The database decides, so the rule still holds with a second API process. The
+admin password prompt (`AdminReauthService.Verify`) has the same shape over
+its own ledger, and its locked branch runs no hash at all, which is what
+bounds `POST /admin/session` without a rate limiter of its own.
+
+One edge is accepted: an attempt still being checked counts as a failure to
+the ones behind it. If two members sign in correctly in the same instant while
+the household is one failure short of a lock, the second in line is told
+"locked" once. The first one's success clears the failures and a retry works.
+
+**That cost is bounded three times, because it is paid by strangers.** In
+front, the per-IP limit on each hashing route (§4). Behind it,
+`crypto.Argon2Hasher` runs at most one derivation per CPU at a time (two on the
+production box, so 2 × 64 MiB). Behind that, only a fixed number of callers may
+wait for a slot — eight per slot, so the longest wait is about eight
+derivations — and a caller who leaves gives the place back. Anyone past that is
+refused at once with `usecase.ErrHasherBusy`, which the HTTP layer answers as
+`503 BUSY`: a person is told "busy, try again in a moment" instead of watching
+a spinner behind a flood.
+
+**A request that will be refused is refused first.** `PasswordHasher.Full`
+is a hint each of the four hashing services reads before it does anything
+else: before the user lookup in `SignIn` and `AdminReauthService.Verify`,
+before the token lookup in `SignupService.Complete` and
+`InviteService.Accept`. It is only a hint — `Hash` and `Verify` still decide —
+but without it a refused request would first look the user up and write an
+attempt, and a flood of refused requests would queue for the ten database
+connections instead of for the hasher.
+
+**"Busy" is never a wrong password.** `PasswordHasher.Verify` returns an error
+as well as a bool for exactly this, and on that error the service withdraws the
+failure it reserved. Without that, keeping the hasher full would turn every
+real sign-in into a strike and lock households that did nothing. The API
 container also has a `mem_limit` (`deploy/docker-compose.prod.yml`), so if the
 memory still ran away, the kernel kills and restarts the API rather than
 choosing Postgres.
@@ -5469,6 +5532,7 @@ prefix, which is what made the duplication stop being optional.
 | Daily digest | **Off unless configured.** `NUDGES_AT` (local `HH:MM`) **and** `NUDGES_TIMEZONE` (IANA), both or neither, refused without Telegram; a bad clock or an unknown zone refuses the boot. A goroutine beside the poller ticks every fifteen minutes; `usecase.NudgeDue` says whether local time is past the clock and which local date to claim. One message per owner-with-Money chat per household per day, never a second one, never one that says "all fine". The start-up log line `daily digest enabled at=… timezone=…` is the tell; each send logs `nudge sent household=…`. One zone for the whole install |
 | Rate limiting | Per-address (3/hour) and a global daily ceiling (1000, reset at midnight, not a rolling 24 hours), both counted from `signups` so a restart cannot reset them — and the Telegram sign-up path counts against that **same** global ceiling, deliberately, so a flood of `/start` cannot run the shared counter up and silently stop email sign-up while having no ceiling of its own. Telegram adds two more: per-**chat**, at most 3 links delivered per hour, counted from `telegram_link_requests` (so a restart cannot reset it either), and a second per-IP bucket of 20/hour on `POST /auth/telegram/start`, in its own limiter instance so it and sign-up cannot spend each other's budget (§4). Per-IP (5/hour on sign-up) is an in-memory token bucket in the HTTP layer — process-local, spoofable in development, and keyed to the *proxy* rather than the client if a proxy is put in front of nginx without `set_real_ip_from`; Caddy is in front in production, so `web/nginx.conf` carries that directive over the compose subnet and it is verified, not assumed (both in §1). The per-IP limit binds before the global one by construction (5 × 24 = 120 ≪ 1000) so one IP alone can never exhaust the global ceiling — but that arithmetic covers only the **email** sign-up path, whose every request to `/auth/sign-up` arrives over HTTP from the stranger's own IP and passes through that 5/hour bucket on the way to the shared counter. **The Telegram sign-up path has no per-IP bound at all.** The row that actually advances the shared global counter is written by `sendSignUp` (`telegram_auth.go`), reached only from the poller processing a Telegram update — the IP on that request is Telegram's own long-poll host, not the stranger's, so no per-IP bucket sees it (the 20/hour bucket on `POST /auth/telegram/start`, above, limits only how often a *browser* can mint a nonce, a step upstream of and separate from a chat sending `/start`). What actually bounds a Telegram sign-up flood is the per-**chat** limit (3/hour, above) plus the same shared global daily ceiling the email path counts against. Account linking adds a fifth bucket, per **user**: at most 3 link nonces minted an hour (`CountMintsSince`), counted from the same `telegram_link_requests` table — a table-growth control rather than a security one, since minting requires an already-authenticated session, unlike every bucket above it |
 | Health | `/healthz` ignores the database; `/readyz` pings it |
+| Scheduler threads | `cmd/api` raises the Go runtime's thread count at start-up by the most goroutines the password hasher can have computing at once (`addSchedulerThreads(hasher.BusyThreads())`; 2 CPUs + 2 slots × 2 threads = 6 on the production box, logged as `scheduler threads`). A derivation computes for a tenth of a second or more without pausing; with one scheduler thread per CPU, two of them hold every thread and every other goroutine waits its turn. Measured on a two-CPU container under a steady stream of sign-ins from many addresses: each database round trip took about 100 ms with Postgres idle, and a signed-in page load took up to a second; with the extra threads the same page load took 4–27 ms. Don't remove it to "follow the default" |
 | Intent parsing | **Off unless configured.** `OPENROUTER_API_KEY` **and** `OPENROUTER_MODEL` set (both or neither — `config.Load` refuses one alone) means the Telegram `Commander` gets an `IntentParser` over an open-weight model through OpenRouter (`adapter/openrouter`, forced tool call, `max_tokens` 4096, 30 s client timeout; up to three comma-separated model ids, tried in order in one request, because free models are rate-limited upstream minute to minute; the ids are configuration because OpenRouter's free, tool-capable list changes month to month, and a fourth id is refused at boot since OpenRouter caps the list at three). Unset means a plain sentence to the bot from an authorised owner is answered "commands only" and a stranger's is ignored. The start-up log line names the `model` list. The key is never logged and the adapter's errors carry the status and the provider's message only — no URL, no request id. A parse is never a write: the reading is shown back and held five minutes per chat in the poller's memory, written on `/yes` with the sentence's update id as the idempotency key. Walked live on 2026-09-08 from the owner's chat against a development bot and a free model — a lunch row keyed by its update id, and a greeting refused (`docs/HANDOVER.md`); the adapter's tests run against `fakeChat`, an `httptest` stand-in for the chat-completions endpoint |
 | Automation client | `hearthctl` (`api/cmd/hearthctl`, `make hearthctl`, manual in `docs/CLI.md`, decision in `docs/adr/0006-a-cli-as-the-automation-surface.md`). A plain HTTP client of this API for scripts and AI agents: signs in with `POST /auth/sign-in`, keeps the session and CSRF cookies in `~/.config/hearth/<host>.json` (0600, one file per host), sends `X-CSRF-Token` on every write — or, on a headless machine, stores a personal API token (`login --token`, [ADR 7](adr/0007-personal-api-tokens.md)) and sends `Authorization: Bearer hearth_…` instead, which needs no CSRF header and cannot reach `/admin` or create or revoke tokens. It goes **through** every guard in §4 rather than around them — deliberately unlike `adminctl`, which wires repositories directly because its commands are operator actions with no route. It never retries anything itself: a repeated sign-in spends the household lockout, and a write is safe to repeat only with an `Idempotency-Key` on `POST /transactions` — `transaction add --key`, or `transaction import`, which keys every row so the same file run twice creates nothing new (`docs/CLI.md`). `hearthctl routes` prints the route table below from a hand-kept list that `routes_test.go` diffs against `router.go` in both directions |
 | Hosting | **Live since 2026-08-15** at <https://oink.mywire.org> — one Hetzner CX23 in Falkenstein running `deploy/docker-compose.prod.yml` (project `hearth-prod`, deliberately not the dev stack's `hearth`). `docs/adr/0002-first-production-host.md` carries the choice and its 2026-08-15 amendment: `CPX11` was renamed out of existence and Singapore does not sell the cheap `CX` line, so the region moved to the EU and the household now crosses ~195 ms of ocean — measured from the owner's network, not estimated. Follows `docs/adr/0001-optimise-for-exit-cost.md`: hosts are picked for how cheaply we can leave them |

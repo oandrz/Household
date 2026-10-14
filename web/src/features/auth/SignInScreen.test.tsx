@@ -231,6 +231,34 @@ describe("SignInScreen", () => {
   // is disabled -- so once the household locked there was no way back to a
   // usable form short of reloading the page. Editing either field must
   // re-enable it.
+  // 503 BUSY means the server checked nothing and counted nothing. The page
+  // has no copy of its own for it: it shows the server's sentence, and it must
+  // not treat it like a lock -- the same click will work in a moment.
+  it("shows the server's busy message on a 503 and leaves Continue enabled", async () => {
+    stubFetchRoutes({
+      [`POST ${SIGN_IN_URL}`]: {
+        status: 503,
+        body: {
+          error: { code: "BUSY", message: "Hearth is busy. Try again in a moment." },
+        },
+      },
+    });
+    await renderSignIn();
+
+    fireEvent.change(screen.getByLabelText("Email"), {
+      target: { value: "andreas@hearth.family" },
+    });
+    fireEvent.change(screen.getByLabelText("Password"), {
+      target: { value: "a-strong-password" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+
+    expect(
+      await screen.findByText("Hearth is busy. Try again in a moment."),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Continue" })).toBeEnabled();
+  });
+
   it("re-enables Continue when the user edits the password after being locked", async () => {
     stubFetchRoutes({
       [`POST ${SIGN_IN_URL}`]: {

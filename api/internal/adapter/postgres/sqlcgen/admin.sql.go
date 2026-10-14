@@ -11,37 +11,6 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-const adminReauthFailuresSince = `-- name: AdminReauthFailuresSince :many
-SELECT at FROM admin_reauth_attempts
-WHERE user_id = $1 AND succeeded = false AND at >= $2
-ORDER BY at
-`
-
-type AdminReauthFailuresSinceParams struct {
-	UserID pgtype.UUID
-	At     pgtype.Timestamptz
-}
-
-func (q *Queries) AdminReauthFailuresSince(ctx context.Context, arg AdminReauthFailuresSinceParams) ([]pgtype.Timestamptz, error) {
-	rows, err := q.db.Query(ctx, adminReauthFailuresSince, arg.UserID, arg.At)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []pgtype.Timestamptz
-	for rows.Next() {
-		var at pgtype.Timestamptz
-		if err := rows.Scan(&at); err != nil {
-			return nil, err
-		}
-		items = append(items, at)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const clearAdminReauthFailures = `-- name: ClearAdminReauthFailures :exec
 DELETE FROM admin_reauth_attempts WHERE user_id = $1
 `
@@ -147,6 +116,38 @@ type GrantPlatformAdminParams struct {
 func (q *Queries) GrantPlatformAdmin(ctx context.Context, arg GrantPlatformAdminParams) error {
 	_, err := q.db.Exec(ctx, grantPlatformAdmin, arg.UserID, arg.Note)
 	return err
+}
+
+const listEarlierAdminReauthFailures = `-- name: ListEarlierAdminReauthFailures :many
+SELECT at FROM admin_reauth_attempts
+WHERE user_id = $1 AND succeeded = false AND at >= $2 AND id <> $3
+ORDER BY at
+`
+
+type ListEarlierAdminReauthFailuresParams struct {
+	UserID pgtype.UUID
+	At     pgtype.Timestamptz
+	ID     pgtype.UUID
+}
+
+func (q *Queries) ListEarlierAdminReauthFailures(ctx context.Context, arg ListEarlierAdminReauthFailuresParams) ([]pgtype.Timestamptz, error) {
+	rows, err := q.db.Query(ctx, listEarlierAdminReauthFailures, arg.UserID, arg.At, arg.ID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []pgtype.Timestamptz
+	for rows.Next() {
+		var at pgtype.Timestamptz
+		if err := rows.Scan(&at); err != nil {
+			return nil, err
+		}
+		items = append(items, at)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listHouseholdFlagOverrides = `-- name: ListHouseholdFlagOverrides :many
@@ -270,6 +271,23 @@ func (q *Queries) RecordAdminReauthAttempt(ctx context.Context, arg RecordAdminR
 	return err
 }
 
+const reserveAdminReauthFailure = `-- name: ReserveAdminReauthFailure :one
+INSERT INTO admin_reauth_attempts (user_id, succeeded, at) VALUES ($1, false, $2)
+RETURNING id
+`
+
+type ReserveAdminReauthFailureParams struct {
+	UserID pgtype.UUID
+	At     pgtype.Timestamptz
+}
+
+func (q *Queries) ReserveAdminReauthFailure(ctx context.Context, arg ReserveAdminReauthFailureParams) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, reserveAdminReauthFailure, arg.UserID, arg.At)
+	var id pgtype.UUID
+	err := row.Scan(&id)
+	return id, err
+}
+
 const revokePlatformAdmin = `-- name: RevokePlatformAdmin :exec
 DELETE FROM platform_admins WHERE user_id = $1
 `
@@ -316,5 +334,14 @@ func (q *Queries) SetHouseholdFlag(ctx context.Context, arg SetHouseholdFlagPara
 		arg.Enabled,
 		arg.UpdatedBy,
 	)
+	return err
+}
+
+const withdrawAdminReauthFailure = `-- name: WithdrawAdminReauthFailure :exec
+DELETE FROM admin_reauth_attempts WHERE id = $1 AND succeeded = false
+`
+
+func (q *Queries) WithdrawAdminReauthFailure(ctx context.Context, id pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, withdrawAdminReauthFailure, id)
 	return err
 }

@@ -52,7 +52,8 @@ type AuthDeps struct {
 type AuthService struct {
 	d AuthDeps
 
-	decoyOnce sync.Once
+	// decoyMu guards decoyHash, which is empty until decoy first succeeds.
+	decoyMu   sync.Mutex
 	decoyHash string
 }
 
@@ -66,29 +67,39 @@ func NewAuthService(d AuthDeps) *AuthService {
 	return &AuthService{d: d}
 }
 
-// fallbackDecoyHash covers the rare case Hasher.Hash fails (entropy
-// exhausted): NewAuthService can't fail and mustn't silently skip the
-// timing mitigation, so this constant guarantees decoy() always has
-// something to Verify against, and being a literal, can't itself error.
+// fallbackDecoyHash covers the rare case Hasher.Hash fails for a reason
+// other than load (entropy exhausted): the timing mitigation must not be
+// skipped silently, so this constant guarantees decoy always has something
+// to Verify against, and being a literal, can't itself error.
 const fallbackDecoyHash = "decoy-hash-used-only-if-generating-a-real-one-failed"
 
 // decoy returns a hash to run Hasher.Verify against on every SignIn path
 // that would otherwise skip Verify entirely -- a real hasher costs tens to
 // hundreds of milliseconds, and skipping it is a timing tell that defeats
 // the same indistinguishability the error type and attempts countdown
-// protect. Generated lazily against the service's own Hasher (so it costs
-// what the real paths cost) and cached; SignIn always discards the result,
-// since the call exists for its cost, not its answer.
-func (s *AuthService) decoy() string {
-	s.decoyOnce.Do(func() {
-		hash, err := s.d.Hasher.Hash("decoy-password-for-timing-parity")
-		if err != nil {
-			s.decoyHash = fallbackDecoyHash
-			return
-		}
+// protect. Generated on first use against the service's own Hasher (so it
+// costs what the real paths cost) and kept; SignIn always discards the
+// result, since the call exists for its cost, not its answer.
+//
+// Only a real hash is kept. Don't keep the fallback: it fails to parse, so
+// Verify answers it instantly, and one busy moment at startup would then
+// make every later decoy check free -- the tell this exists to prevent.
+func (s *AuthService) decoy(ctx context.Context) (string, error) {
+	s.decoyMu.Lock()
+	defer s.decoyMu.Unlock()
+	if s.decoyHash != "" {
+		return s.decoyHash, nil
+	}
+
+	hash, err := s.d.Hasher.Hash(ctx, "decoy-password-for-timing-parity")
+	if err == nil {
 		s.decoyHash = hash
-	})
-	return s.decoyHash
+		return hash, nil
+	}
+	if errors.Is(err, ErrHasherBusy) || ctx.Err() != nil {
+		return "", err
+	}
+	return fallbackDecoyHash, nil
 }
 
 // verifyPassword is the one path SignIn hands a caller-supplied password
@@ -99,11 +110,11 @@ func (s *AuthService) decoy() string {
 // the length is something the caller already knows about their own input,
 // and indistinguishability only protects against a caller *guessing an
 // address* learning something new about the account.
-func (s *AuthService) verifyPassword(password, encoded string) bool {
+func (s *AuthService) verifyPassword(ctx context.Context, password, encoded string) (bool, error) {
 	if len(password) > maxPasswordLength {
-		return false
+		return false, nil
 	}
-	return s.d.Hasher.Verify(password, encoded)
+	return s.d.Hasher.Verify(ctx, password, encoded)
 }
 
 type SignInResult struct {
@@ -113,34 +124,102 @@ type SignInResult struct {
 	HouseholdID  string
 }
 
-// signInFailedForUnknownAddress is the shared failure branch for an
-// address with no user row, and a user row with no membership (an
-// ex-member -- see SignIn's second call site). Both run the same decoy
-// Hasher.Verify, in the position a real one would occupy, and the same
-// address-scoped record/countdown, so neither is distinguishable from the
-// other, or from a real wrong password, by timing or which counter
-// advances.
-func (s *AuthService) signInFailedForUnknownAddress(ctx context.Context, password, email string, now time.Time) (SignInResult, error) {
-	s.verifyPassword(password, s.decoy())
-	// Record with no household, so guessing at unknown addresses can't lock
-	// a real one; evaluate the same policy over that address's own failures
-	// so a stranger's countdown matches a member's.
-	if err := s.d.Attempts.Record(ctx, nil, nil, email, false, now); err != nil {
-		return SignInResult{}, err
-	}
-	failures, err := s.d.Attempts.FailuresSinceForEmail(ctx, email, now.Add(-s.d.Policy.Window))
+// checkAttempt is the one place SignIn spends a guess. It writes the attempt
+// down as a failure first, and only then decides whether the password gets
+// a real check -- see FailureReservation for why that order is the whole
+// point. It answers true only for a correct password checked against a real
+// hash while the household was not locked.
+//
+// householdID and userID are nil, and encoded is "", for an address with no
+// household behind it: no user row, or an ex-member whose row outlived
+// their membership. Those attempts count against the address alone, so
+// guessing at unknown addresses can't lock a real household, and a stranger
+// sees the same countdown a member does.
+//
+// Every path runs exactly one verification in the same position -- the
+// decoy when there is nothing real to check or the household is locked --
+// so no branch is distinguishable from another by timing.
+//
+// The count is household-wide, not per address, because the lockout itself
+// is: the screen says "we've locked the household," not "this address."
+// That's an accepted disclosure, not an oversight -- guessing one member's
+// address visibly decrements a countdown the other member's address also
+// reports, letting someone who knows one address confirm a candidate second
+// one belongs to the same household. The product owner weighed this against
+// a two-adult household where both addresses are already known to each
+// other, and chose household-wide over per-address scope, which would also
+// change the design's copy. Revisit this trade-off before changing that
+// scope.
+//
+// An attempt made during a lock stays on record and so extends it, for a
+// known address and an unknown one alike -- otherwise a locked household's
+// LockedUntil would freeze while an unknown address's keeps advancing, an
+// oracle telling the two apart. Accepted trade-off: with no cap, someone
+// who knows the email can keep the household locked forever, chosen over a
+// fixed expiry an active attacker could wait out. Magic-link sign-in isn't
+// gated by this lock (see domain.LockoutPolicy), so a real member always
+// has a way back in.
+//
+// One more accepted edge: an attempt still being checked counts as a
+// failure to the ones behind it. So if two members sign in correctly in the
+// same instant while the household is one failure short of a lock, the
+// second in line is told "locked" once. The first one's success clears the
+// failures, and a retry works.
+func (s *AuthService) checkAttempt(ctx context.Context, householdID, userID *string,
+	email, password, encoded string, now time.Time) (bool, domain.LockState, error) {
+	reserved, err := s.d.Attempts.ReserveFailure(ctx, householdID, userID, email, now, now.Add(-s.d.Policy.Window))
 	if err != nil {
-		return SignInResult{}, err
+		return false, domain.LockState{}, err
 	}
-	state := s.d.Policy.Evaluate(failures, now)
-	return SignInResult{}, &SignInFailedError{
+
+	// An empty encoded is the sentinel for "no password set" (StoredUser's
+	// doc comment); never hand it to Verify as a real hash.
+	checkedForReal := encoded != "" && !s.d.Policy.Evaluate(reserved.Earlier, now).Locked
+	matched, err := s.verifyOrDecoy(ctx, password, encoded, checkedForReal)
+	if err != nil {
+		// No check ran: the hasher was busy or the caller left. Leaving the
+		// reservation would turn an overloaded moment into a strike.
+		withdrawReservation(ctx, s.d.Attempts, reserved.ID)
+		return false, domain.LockState{}, err
+	}
+	// checkedForReal is tested as well as matched because the decoy can
+	// match: its password is a constant in this file.
+	if checkedForReal && matched {
+		return true, domain.LockState{}, nil
+	}
+	return false, s.d.Policy.Evaluate(append(reserved.Earlier, now), now), nil
+}
+
+// verifyOrDecoy runs the one verification every attempt pays for: against
+// encoded when the check is real, against the decoy otherwise.
+func (s *AuthService) verifyOrDecoy(ctx context.Context, password, encoded string, checkedForReal bool) (bool, error) {
+	if checkedForReal {
+		return s.verifyPassword(ctx, password, encoded)
+	}
+	decoy, err := s.decoy(ctx)
+	if err != nil {
+		return false, err
+	}
+	return s.verifyPassword(ctx, password, decoy)
+}
+
+func signInFailed(state domain.LockState) *SignInFailedError {
+	return &SignInFailedError{
 		AttemptsRemaining: state.AttemptsRemaining,
 		Locked:            state.Locked,
 		LockedUntil:       state.Until,
 	}
 }
 
+// SignIn answers a session for a correct password, *SignInFailedError for
+// every refusal a caller may see, and ErrHasherBusy when the service is too
+// loaded to check anything -- which is never counted as a failed attempt.
 func (s *AuthService) SignIn(ctx context.Context, email, password string) (SignInResult, error) {
+	// Before any lookup, so a refused request costs nothing and the refusal
+	// is the same whoever the address belongs to.
+	if s.d.Hasher.Full() {
+		return SignInResult{}, ErrHasherBusy
+	}
 	now := s.d.Clock.Now()
 
 	user, err := s.d.Users.ByEmail(ctx, email)
@@ -148,7 +227,7 @@ func (s *AuthService) SignIn(ctx context.Context, email, password string) (SignI
 		if !errors.Is(err, domain.ErrNotFound) {
 			return SignInResult{}, err
 		}
-		return s.signInFailedForUnknownAddress(ctx, password, email, now)
+		return s.signInWithNoHousehold(ctx, email, password, now)
 	}
 
 	membership, err := s.d.Members.ByUser(ctx, user.ID)
@@ -159,78 +238,24 @@ func (s *AuthService) SignIn(ctx context.Context, email, password string) (SignI
 		// A users row can outlive its membership: removing a member deletes
 		// its row from memberships, not from users (see
 		// MemberService.Remove). An ex-member's address must fail exactly
-		// like a stranger's -- same decoy verify, same address-scoped
-		// countdown. Don't let domain.ErrNotFound propagate from here
-		// instead: MapDomainError turns that into a bare 404 the sign-in
-		// screen has no copy for, and it tells a caller "this address once
-		// existed" where every other failure here tells them nothing.
-		return s.signInFailedForUnknownAddress(ctx, password, email, now)
+		// like a stranger's. Don't let domain.ErrNotFound propagate from
+		// here instead: MapDomainError turns that into a bare 404 the
+		// sign-in screen has no copy for, and it tells a caller "this
+		// address once existed" where every other failure here tells them
+		// nothing.
+		return s.signInWithNoHousehold(ctx, email, password, now)
 	}
 	householdID := membership.HouseholdID
 
-	// This counter is household-scoped, not address-scoped, because the
-	// lockout itself is household-wide by design: the screen says "we've
-	// locked the household," not "this address." That's an accepted
-	// disclosure, not an oversight -- guessing one member's address visibly
-	// decrements a countdown the other member's address also reports,
-	// letting someone who knows one address confirm a candidate second one
-	// belongs to the same household. The product owner weighed this against
-	// a two-adult household where both addresses are already known to each
-	// other, and chose household-wide over per-address scope, which would
-	// also change the design's copy. Revisit this trade-off before changing
-	// that scope.
-	failures, err := s.d.Attempts.FailuresSince(ctx, householdID, now.Add(-s.d.Policy.Window))
+	passed, state, err := s.checkAttempt(ctx, &householdID, &user.ID, email, password, user.PasswordHash, now)
 	if err != nil {
 		return SignInResult{}, err
 	}
-	if state := s.d.Policy.Evaluate(failures, now); state.Locked {
-		// Run the decoy verification in the exact position the real one
-		// would occupy (see the password check below) -- otherwise this
-		// branch never touches the hasher, timing-distinguishable from every
-		// branch that does.
-		s.verifyPassword(password, s.decoy())
-
-		// Record and re-evaluate here too, matching the wrong-password and
-		// unknown-address branches -- otherwise a locked household's
-		// LockedUntil would freeze at the third failure while an unknown
-		// address's keeps advancing, an oracle telling a real household from
-		// a stranger's address even though the error type is identical.
-		// This extends the lock on continued guessing, deliberately matching
-		// unknown-address behavior. Accepted trade-off:
-		// with no cap, someone who knows the email can keep the household
-		// locked forever, chosen over a fixed expiry an active attacker
-		// could wait out. Magic-link sign-in isn't gated by this lock (see
-		// domain.LockoutPolicy), so a real member always has a way back in.
-		updated, err := s.recordHouseholdFailure(ctx, householdID, user.ID, email, now)
-		if err != nil {
-			return SignInResult{}, err
-		}
-		return SignInResult{}, &SignInFailedError{Locked: true, LockedUntil: updated.Until}
+	if !passed {
+		return SignInResult{}, signInFailed(state)
 	}
 
-	passwordFailed := true
-	if user.PasswordHash == "" {
-		// Empty string is the sentinel for "no password set" (StoredUser's
-		// doc comment); never hand it to Verify as a real hash. Decoy
-		// verification runs instead, in the real one's position, so a
-		// credential-less member costs exactly what a wrong password costs.
-		s.verifyPassword(password, s.decoy())
-	} else {
-		passwordFailed = !s.verifyPassword(password, user.PasswordHash)
-	}
-
-	if passwordFailed {
-		state, err := s.recordHouseholdFailure(ctx, householdID, user.ID, email, now)
-		if err != nil {
-			return SignInResult{}, err
-		}
-		return SignInResult{}, &SignInFailedError{
-			AttemptsRemaining: state.AttemptsRemaining,
-			Locked:            state.Locked,
-			LockedUntil:       state.Until,
-		}
-	}
-
+	// ClearFailures also removes the attempt checkAttempt reserved.
 	if err := s.d.Attempts.ClearFailures(ctx, householdID); err != nil {
 		return SignInResult{}, err
 	}
@@ -240,20 +265,14 @@ func (s *AuthService) SignIn(ctx context.Context, email, password string) (SignI
 	return s.issueSession(ctx, user.ID, householdID, now)
 }
 
-// recordHouseholdFailure records one failure and evaluates the lock over
-// the updated set -- SignIn's already-locked and wrong-password branches
-// both end this way. It skips the password/decoy check on purpose: that
-// call's position relative to each branch is what keeps them
-// timing-indistinguishable, so it stays at each call site, before this.
-func (s *AuthService) recordHouseholdFailure(ctx context.Context, householdID, userID, email string, now time.Time) (domain.LockState, error) {
-	if err := s.d.Attempts.Record(ctx, &householdID, &userID, email, false, now); err != nil {
-		return domain.LockState{}, err
-	}
-	failures, err := s.d.Attempts.FailuresSince(ctx, householdID, now.Add(-s.d.Policy.Window))
+// signInWithNoHousehold is the failure every address without a household
+// gets; see checkAttempt.
+func (s *AuthService) signInWithNoHousehold(ctx context.Context, email, password string, now time.Time) (SignInResult, error) {
+	_, state, err := s.checkAttempt(ctx, nil, nil, email, password, "", now)
 	if err != nil {
-		return domain.LockState{}, err
+		return SignInResult{}, err
 	}
-	return s.d.Policy.Evaluate(failures, now), nil
+	return SignInResult{}, signInFailed(state)
 }
 
 func (s *AuthService) issueSession(ctx context.Context, userID, householdID string, now time.Time) (SignInResult, error) {

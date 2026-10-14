@@ -176,7 +176,7 @@ func ensureHouseholdAndAndreas(ctx context.Context, d SeedDeps) (domain.Househol
 		return domain.Household{}, "", fmt.Errorf("create household: %w", err)
 	}
 
-	passwordHash, err := d.Hasher.Hash(DevPassword)
+	passwordHash, err := d.Hasher.Hash(ctx, DevPassword)
 	if err != nil {
 		return domain.Household{}, "", fmt.Errorf("hash development password: %w", err)
 	}

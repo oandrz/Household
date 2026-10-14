@@ -125,6 +125,8 @@ func run() error {
 	adminReauthRepo := postgres.NewAdminReauthAttemptRepo(db)
 
 	hasher := crypto.NewArgon2Hasher(cfg.Argon2Time, cfg.Argon2MemoryKiB, cfg.Argon2Threads)
+	slog.Info("scheduler threads", "count", addSchedulerThreads(hasher.BusyThreads()),
+		"reserved_for_hashing", hasher.BusyThreads())
 	tokens := crypto.NewTokenGenerator()
 	sysClock := clock.System{}
 	mailer := mail.NewSMTPMailer(cfg.SMTPAddr, cfg.SMTPFrom, cfg.AppBaseURL,

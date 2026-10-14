@@ -46,10 +46,17 @@ VALUES ($1, $2, $3, $4, $5, $6);
 -- name: RecordAdminReauthAttempt :exec
 INSERT INTO admin_reauth_attempts (user_id, succeeded, at) VALUES ($1, $2, $3);
 
--- name: AdminReauthFailuresSince :many
+-- name: ReserveAdminReauthFailure :one
+INSERT INTO admin_reauth_attempts (user_id, succeeded, at) VALUES ($1, false, $2)
+RETURNING id;
+
+-- name: ListEarlierAdminReauthFailures :many
 SELECT at FROM admin_reauth_attempts
-WHERE user_id = $1 AND succeeded = false AND at >= $2
+WHERE user_id = $1 AND succeeded = false AND at >= $2 AND id <> $3
 ORDER BY at;
+
+-- name: WithdrawAdminReauthFailure :exec
+DELETE FROM admin_reauth_attempts WHERE id = $1 AND succeeded = false;
 
 -- name: ClearAdminReauthFailures :exec
 DELETE FROM admin_reauth_attempts WHERE user_id = $1;

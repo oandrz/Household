@@ -69,9 +69,13 @@ type AdminAuditRepository interface {
 	Record(ctx context.Context, entry AdminAuditEntry) error
 }
 
+// AdminReauthAttemptRepository is the admin prompt's own attempt ledger,
+// keyed by operator. ReserveFailure and Withdraw carry the same contract as
+// LoginAttemptRepository's, the write-before-read rule included.
 type AdminReauthAttemptRepository interface {
 	Record(ctx context.Context, userID string, succeeded bool, at time.Time) error
-	FailuresSince(ctx context.Context, userID string, since time.Time) ([]time.Time, error)
+	ReserveFailure(ctx context.Context, userID string, at, since time.Time) (FailureReservation, error)
+	Withdraw(ctx context.Context, attemptID string) error
 	ClearFailures(ctx context.Context, userID string) error
 }
 

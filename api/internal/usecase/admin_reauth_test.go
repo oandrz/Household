@@ -73,12 +73,8 @@ func TestAdminReauthFailuresStayOutOfTheHouseholdLedger(t *testing.T) {
 	if len(household.records) != 0 {
 		t.Fatalf("admin re-auth wrote %d rows to login_attempts; it must write none", len(household.records))
 	}
-	failures, err := attempts.FailuresSince(context.Background(), user.ID, time.Now().Add(-time.Hour))
-	if err != nil {
-		t.Fatalf("FailuresSince: %v", err)
-	}
-	if len(failures) != 5 {
-		t.Fatalf("admin ledger holds %d failures, want 5", len(failures))
+	if got := attempts.failureCount(user.ID); got != 5 {
+		t.Fatalf("admin ledger holds %d failures, want 5", got)
 	}
 }
 
@@ -106,12 +102,8 @@ func TestAdminReauthSuccessClearsEarlierFailures(t *testing.T) {
 		t.Fatalf("Verify with the right password = %v, want nil", err)
 	}
 
-	failures, err := attempts.FailuresSince(context.Background(), user.ID, time.Now().Add(-time.Hour))
-	if err != nil {
-		t.Fatalf("FailuresSince: %v", err)
-	}
-	if len(failures) != 0 {
-		t.Fatalf("FailuresSince after a successful Verify = %d, want 0 -- the earlier mistypes should have been cleared", len(failures))
+	if got := attempts.failureCount(user.ID); got != 0 {
+		t.Fatalf("failures on record after a successful Verify = %d, want 0 -- the earlier mistypes should have been cleared", got)
 	}
 }
 
