@@ -414,6 +414,9 @@ func run() error {
 	// outlasts the in-flight send; otherwise it trades a clean cancellation
 	// for a write racing process death. Add the WaitGroup once this loop
 	// writes more than one row per update.
+	// digest is the daily digest's job on the schedule below; it stays nil
+	// unless Telegram and the digest are both configured.
+	var digest func(context.Context)
 	if telegramPoller != nil {
 		// Chat commands ride the same poller. The Commander is the channel's
 		// inbound guard (ADR 8): it resolves the chat to a membership and
@@ -448,19 +451,27 @@ func run() error {
 			"model", cfg.OpenRouterModel)
 		go telegramPoller.Run(ctx)
 
-		// The daily digest: a bare goroutine like the poller's, cancelled by
-		// the same context and recovering the same way (no Recoverer over
-		// it). It ticks every fifteen minutes and lets NudgeDue and the claim
-		// ledger decide, so a restart at 09:01 still delivers at 09:15 and
-		// every tick after the first is a no-op in the database.
+		// The daily digest rides the schedule below. NudgeDue and the claim
+		// ledger decide each tick, so a restart at 09:01 still delivers at
+		// 09:15 and every tick after the first is a no-op in the database.
 		if cfg.NudgesEnabled() {
 			nudges := usecase.NewNudgeService(usecase.NudgeDeps{
 				Recipients: nudgeRepo, Bills: billSvc, Budgets: budgetSvc, Sender: telegramClient,
 			})
-			go runNudges(ctx, nudges, cfg.NudgesAt, cfg.NudgesLocation, nudgeRepo)
+			digest = func(ctx context.Context) {
+				nudgeTick(ctx, nudges, cfg.NudgesAt, cfg.NudgesLocation, nudgeRepo)
+			}
 			slog.Info("daily digest enabled", "at", cfg.NudgesAt, "timezone", cfg.NudgesLocation.String())
 		}
 	}
+
+	// The schedule is a bare goroutine like the poller's, cancelled by the
+	// same context, and it starts on every box: see schedule.
+	retention := usecase.NewRetentionService(usecase.RetentionDeps{
+		Signups: signups, LoginAttempts: loginAttempts, TelegramLinks: telegramLinks,
+		MagicLinks: magicLinks, Invites: invites, Clock: sysClock,
+	})
+	go (&schedule{now: time.Now, prune: pruneRetention(retention), digest: digest}).run(ctx)
 
 	if cfg.OutboxEnabled() {
 		slog.Info("outbound message inspector enabled", "mailpit_api_url", cfg.MailpitAPIURL)
@@ -578,30 +589,11 @@ func nudgeRepoIfEnabled(cfg config.Config, repo *postgres.NudgeRepo) usecase.Nud
 	return repo
 }
 
-// runNudges is the digest's clock. Deliveries older than a month are pruned
-// on the first tick of each run and then daily, beside the send.
-func runNudges(ctx context.Context, svc *usecase.NudgeService, at string, loc *time.Location, repo *postgres.NudgeRepo) {
-	ticker := time.NewTicker(15 * time.Minute)
-	defer ticker.Stop()
-	for {
-		nudgeTick(ctx, svc, at, loc, repo)
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-		}
-	}
-}
-
-// nudgeTick is one tick, recovering per tick the way the poller recovers per
-// update: a panic costs one delivery attempt, not the digest until the next
+// nudgeTick is the digest's job on the schedule. Deliveries older than a
+// month are pruned beside each day's send. The schedule recovers a panic
+// here, so one costs a delivery attempt, not the digest until the next
 // deploy.
 func nudgeTick(ctx context.Context, svc *usecase.NudgeService, at string, loc *time.Location, repo *postgres.NudgeRepo) {
-	defer func() {
-		if r := recover(); r != nil {
-			slog.Error("daily digest tick panicked", "panic", r)
-		}
-	}()
 	day, due := usecase.NudgeDue(time.Now(), at, loc)
 	if !due {
 		return

@@ -707,6 +707,7 @@ graph TD
         Auth["AuthService"]
         Invite["InviteService"]
         Signup["SignupService"]
+        Retention["RetentionService — Prune(olderThan): the one<br/>definition of what is deleted for being old.<br/>Run daily by the API's schedule, by hand by adminctl"]
         TelegramAuth["TelegramAuthService — delivers the magic-link<br/>and sign-up tokens the other services already<br/>mint; mints no token type of its own"]
         TelegramLink["TelegramLinkService — Start/Status/Confirm/<br/>Unlink: connects an ALREADY-EXISTING account<br/>to a chat from Settings. Writes the binding;<br/>HandleStart above never does (ADR 10)"]
         TelegramCmd["TelegramCommandService — /spend, /income,<br/>/balance, /recent, /nudges: names to ids, amount in the<br/>account's currency, update id as the key.<br/>Takes no actor: the adapter's Commander is the guard (ADR 8)"]
@@ -985,14 +986,30 @@ shape. It arrives when CSV import gives it a second implementation to
 abstract over, not automatically "with the Money slice". Automatic sync via
 SGFinDex is not available to an app like this.
 
-`LoginAttemptRepository`, `SignupRepository` and `TelegramLinkRepository` all
-carry a `Prune(ctx, before)` method, because all three back the three tables a
-stranger can grow without ever holding an account (§6 explains why).
-`telegram_link_requests` is the third — the nonce table: a link nobody ever
-redeemed has no `chat_id`, so nothing else bounds how many a stranger can
-mint. `adminctl prune` is their only caller, and refuses an `--older-than`
-under seven days so it can never reach inside `domain.LockoutPolicy.Window`
-and clear a lockout that is still live.
+Five repositories carry a `Prune(ctx, before)` method:
+`LoginAttemptRepository`, `SignupRepository`, `TelegramLinkRepository`,
+`MagicLinkRepository` and `InviteRepository`. The first four back tables a
+stranger can grow without holding an account (§6 explains why);
+`telegram_link_requests` is the nonce table, where a link nobody redeemed has
+no `chat_id`, so nothing else bounds how many a stranger can mint. Invites are
+created by owners, but one nobody accepted is dead weight once it lapses.
+Each port's doc comment says which of its rows may go; **an accepted invite
+never does**, because it is history.
+
+`RetentionService` is their one caller. It takes the window, refuses one
+under `usecase.RetentionFloor` (seven days) so it can never reach inside
+`domain.LockoutPolicy.Window` and clear a live lockout, and asks every table
+with the same cutoff. One table failing does not stop the others. The API's
+schedule runs it daily with `usecase.RetentionWindow` (30 days); `adminctl
+prune` runs it by hand. `admin_audit_log` is deliberately absent, and
+`sessions` and `api_tokens` are not pruned: strangers cannot grow them, and
+the admin pages read "last active" from old sessions.
+
+Every list of earlier login failures (`ReserveFailure`, `FailuresSince`, in
+both attempt ledgers) returns at most the newest `usecase.MaxEarlierFailures`
+(ten). The lockout needs a count up to its limit and the latest time, so a
+household with thousands of failures on record costs the same read as one
+with three.
 
 ---
 
@@ -1948,7 +1965,7 @@ Commander is called at all, the same fail-closed `switch` shape
 
 ```mermaid
 sequenceDiagram
-    participant K as runNudges (15-min tick)
+    participant K as schedule (15-min tick)
     participant N as NudgeService
     participant R as NudgeRepository
     participant B as BillService / BudgetService
@@ -1974,6 +1991,10 @@ and an opted-out chat (`/nudges off`) is simply absent from it. The claim is
 written before the send, so a restart mid-run or two ticks in one hour
 cannot deliver twice, and the scheduler is allowed to be sloppy because the
 ledger is not ([ADR 9](adr/0009-scheduled-work-runs-inside-the-api.md)).
+The digest is one of two jobs on the API's `schedule` (`cmd/api/schedule.go`);
+the other is the daily retention prune. The schedule starts on every box,
+because the prune must run whether or not Telegram is configured. The
+digest is added to it only when it is.
 The digest is rules, not a model: `BillService.List` and
 `BudgetService.Month` — the same reads the screens make — filtered to three
 days and 80%, formatted with `domain.FormatAmount`. One zone for the whole
@@ -4009,7 +4030,7 @@ erDiagram
         uuid id PK
         uuid household_id FK "nullable"
         uuid user_id FK "nullable"
-        citext email
+        citext email "indexed with at, for addresses with no household"
         bool succeeded
         timestamptz at
     }
@@ -4412,7 +4433,10 @@ Notes that are not obvious from the shapes:
   guarantee the parent belongs to the caller's household (their own notes
   below say why).
 - **`login_attempts` allows both foreign keys to be null**, so an attempt against
-  an unknown address is recorded without revealing whether it exists.
+  an unknown address is recorded without revealing whether it exists. Those
+  rows are counted by `email`, so `login_attempts_email_at_idx` (migration
+  00023) covers `(email, at DESC)`; the older index leads with
+  `household_id` and cannot serve that count.
 - **An invite is *pending* when `accepted_at IS NULL AND expires_at > now`, and
   that is the only definition.** It lives in one query, `ListPendingInvites`,
   which Settings' Pending invites list and Overview's "Invite your partner"
@@ -4484,14 +4508,11 @@ Notes that are not obvious from the shapes:
   would make a sign-in ambiguous — `ByChatID` would have to pick one.
   `UNIQUE(user_id)` stops one user accumulating chats, which would make a
   revocation miss one. Neither is a tidiness constraint.
-- **`telegram_link_requests` now has a `Prune`, closed in the whole-branch fix
-  wave, 2026-09-01.** `signups` and `login_attempts` are the other two tables
-  a stranger can grow without holding an account, and `adminctl prune`
-  already covered them; `PruneTelegramLinkRequests` joins them, mirroring
-  `PruneSignups`'s own retention condition (and the same seven-day floor
-  reasoning) exactly. It was a small row (a hash, two timestamps, a bigint)
-  bounded in rate by the per-chat and per-IP limits, so it was a slow leak
-  rather than a hole — but it was a real gap, and is not one any longer.
+- **Tables a stranger can grow are pruned daily by the API itself, since
+  2026-10-14.** `signups`, `login_attempts`, `telegram_link_requests` and
+  `magic_links` lose rows older than 30 days (used or lapsed ones, for the
+  three that have a lifetime), and `invites` loses ones nobody accepted that
+  lapsed more than 30 days ago. `RetentionService` holds the rule; see §3.
 - **Database constraints mirror the domain rules** rather than trusting the
   application: a limited member cannot hold `marriage`, an owner must hold all
   four capabilities, and capabilities must come from the known set.
@@ -5528,7 +5549,7 @@ prefix, which is what made the duplication stop being optional.
 | Telegram | **Off unless configured**, and both values travel together: `config.Load` refuses a boot where exactly one of `TELEGRAM_BOT_TOKEN`/`TELEGRAM_BOT_USERNAME` is set, the same both-or-neither rule `SMTP_USERNAME`/`SMTP_PASSWORD` already follow, because a half-configured channel misbehaves silently. Both empty means `POST /auth/telegram/start` answers `404`, the poller never starts, and `adminctl` (which runs `config.Load` before every subcommand) is unaffected; whether the production box sets them is recorded, with its uncertainty, in `docs/INFRASTRUCTURE.md` (§1). Chat commands, free-text parsing and the daily digest all hang off this same switch, so none of them runs without it. **Exactly one process may call `getUpdates`:** Telegram hands each update to a single caller, so a second `api` replica would silently steal updates and the symptom would be "sign-in works about half the time" — an operational constraint on ever scaling this service horizontally, not just a code comment (§1). Outbound only; no webhook, so nothing new faces the internet. The bot token is never logged in any branch, including error paths — `client.go` builds its errors from the method name rather than the request URL, because Telegram's own API URLs embed the token in the path and a `*url.Error` carries that URL |
 | Database browse | **Off unless configured, and off on the production box today by the owner's decision.** `DATABASE_READONLY_URL` points at `hearth_readonly`, a `SELECT`-only role created by `deploy/readonly-role.sql` during provisioning — **not by a migration**, because a role is cluster-level rather than schema, and for the same reason it is in **no backup this product takes** (`backup.sh` dumps one database with `--no-privileges`), so a restore re-runs that script. Idempotent, so "after every restore" is the whole rule. Unset means both `/admin/db/*` routes answer `503 DB_BROWSE_NOT_CONFIGURED` naming the variable; there is deliberately **no fallback to `DATABASE_URL`**, so a half-provisioned box degrades to "you cannot use this panel", never to "you are using it through the read-write connection". Set but unparseable, or set to a role that can write, **refuses the boot** — `OpenReadOnly` runs a privilege check in `AfterConnect`, so it holds on every connection the pool opens, not only the first. Set but merely unreachable does **not** refuse the boot: that is restore day, and taking the household product down over an operator panel would invert the promise. It answers `503 DB_BROWSE_UNAVAILABLE` instead, from a stand-in browser that carries the boot failure so the log says why (§3). Turning it on in production is `deploy/PROVISION.md` §10, not a deploy |
 | Seeding | `adminctl seed`, refused unless `APP_ENV=development` **and** the database host is local — both checked before the connection opens |
-| Retention | `adminctl prune --older-than=<days>` (default 30, floor 7) deletes consumed/expired `signups`, stale `login_attempts` and — closed in the whole-branch fix wave, 2026-09-01 — consumed/expired `telegram_link_requests`, the third table a stranger can grow without an account (`PruneTelegramLinkRequests` mirrors `PruneSignups`'s own retention condition exactly). `nudge_deliveries` is pruned by the api itself on its own tick, a month back. `magic_links`, `invites`, `sessions` and now `api_tokens` (revoked and expired rows are stamped, never deleted) still grow forever, a real gap rather than a decision (§6) |
+| Retention | **The API prunes itself, daily, on every box.** `RetentionService` runs on the first tick of the schedule after start-up and every 24 hours after, with a 30-day window (`usecase.RetentionWindow`), over `signups`, `login_attempts`, `telegram_link_requests`, `magic_links` and lapsed unaccepted `invites`. Each run logs `retention prune signups=… login_attempts=… telegram_link_requests=… magic_links=… expired_invites=…`; a failed run logs `retention prune failed` and is tried again on the next tick. `adminctl prune --older-than=<days>` (default 30, floor 7) is the same service run by hand. `nudge_deliveries` is pruned beside each day's digest, a month back. Not pruned, by decision: `admin_audit_log` (a log the operator can edit stops meaning anything), and `sessions` and `api_tokens` (strangers cannot grow them, and the admin pages read "last active" from old sessions) |
 | Daily digest | **Off unless configured.** `NUDGES_AT` (local `HH:MM`) **and** `NUDGES_TIMEZONE` (IANA), both or neither, refused without Telegram; a bad clock or an unknown zone refuses the boot. A goroutine beside the poller ticks every fifteen minutes; `usecase.NudgeDue` says whether local time is past the clock and which local date to claim. One message per owner-with-Money chat per household per day, never a second one, never one that says "all fine". The start-up log line `daily digest enabled at=… timezone=…` is the tell; each send logs `nudge sent household=…`. One zone for the whole install |
 | Rate limiting | Per-address (3/hour) and a global daily ceiling (1000, reset at midnight, not a rolling 24 hours), both counted from `signups` so a restart cannot reset them — and the Telegram sign-up path counts against that **same** global ceiling, deliberately, so a flood of `/start` cannot run the shared counter up and silently stop email sign-up while having no ceiling of its own. Telegram adds two more: per-**chat**, at most 3 links delivered per hour, counted from `telegram_link_requests` (so a restart cannot reset it either), and a second per-IP bucket of 20/hour on `POST /auth/telegram/start`, in its own limiter instance so it and sign-up cannot spend each other's budget (§4). Per-IP (5/hour on sign-up) is an in-memory token bucket in the HTTP layer — process-local, spoofable in development, and keyed to the *proxy* rather than the client if a proxy is put in front of nginx without `set_real_ip_from`; Caddy is in front in production, so `web/nginx.conf` carries that directive over the compose subnet and it is verified, not assumed (both in §1). The per-IP limit binds before the global one by construction (5 × 24 = 120 ≪ 1000) so one IP alone can never exhaust the global ceiling — but that arithmetic covers only the **email** sign-up path, whose every request to `/auth/sign-up` arrives over HTTP from the stranger's own IP and passes through that 5/hour bucket on the way to the shared counter. **The Telegram sign-up path has no per-IP bound at all.** The row that actually advances the shared global counter is written by `sendSignUp` (`telegram_auth.go`), reached only from the poller processing a Telegram update — the IP on that request is Telegram's own long-poll host, not the stranger's, so no per-IP bucket sees it (the 20/hour bucket on `POST /auth/telegram/start`, above, limits only how often a *browser* can mint a nonce, a step upstream of and separate from a chat sending `/start`). What actually bounds a Telegram sign-up flood is the per-**chat** limit (3/hour, above) plus the same shared global daily ceiling the email path counts against. Account linking adds a fifth bucket, per **user**: at most 3 link nonces minted an hour (`CountMintsSince`), counted from the same `telegram_link_requests` table — a table-growth control rather than a security one, since minting requires an already-authenticated session, unlike every bucket above it |
 | Health | `/healthz` ignores the database; `/readyz` pings it |

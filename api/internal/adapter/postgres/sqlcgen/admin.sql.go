@@ -121,17 +121,24 @@ func (q *Queries) GrantPlatformAdmin(ctx context.Context, arg GrantPlatformAdmin
 const listEarlierAdminReauthFailures = `-- name: ListEarlierAdminReauthFailures :many
 SELECT at FROM admin_reauth_attempts
 WHERE user_id = $1 AND succeeded = false AND at >= $2 AND id <> $3
-ORDER BY at
+ORDER BY at DESC
+LIMIT $4
 `
 
 type ListEarlierAdminReauthFailuresParams struct {
 	UserID pgtype.UUID
 	At     pgtype.Timestamptz
 	ID     pgtype.UUID
+	Newest int32
 }
 
 func (q *Queries) ListEarlierAdminReauthFailures(ctx context.Context, arg ListEarlierAdminReauthFailuresParams) ([]pgtype.Timestamptz, error) {
-	rows, err := q.db.Query(ctx, listEarlierAdminReauthFailures, arg.UserID, arg.At, arg.ID)
+	rows, err := q.db.Query(ctx, listEarlierAdminReauthFailures,
+		arg.UserID,
+		arg.At,
+		arg.ID,
+		arg.Newest,
+	)
 	if err != nil {
 		return nil, err
 	}

@@ -111,6 +111,10 @@ type PairingCodes interface {
 }
 
 type InviteRepository interface {
+	// Prune deletes invites that were never accepted and expired before
+	// `before`. An accepted invite is history and is never deleted, here or
+	// anywhere else.
+	Prune(ctx context.Context, before time.Time) (int64, error)
 	Create(ctx context.Context, householdID, email, name string, role domain.Role,
 		caps domain.Capabilities, tokenHash []byte, invitedBy string, expiresAt time.Time) (string, error)
 	// CreateTelegram writes a telegram-channel invite: no email address at

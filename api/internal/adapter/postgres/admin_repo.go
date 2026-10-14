@@ -208,6 +208,7 @@ func (r *AdminReauthAttemptRepo) ReserveFailure(ctx context.Context, userID stri
 			UserID: uuid(userID),
 			At:     timestamptz(since),
 			ID:     id,
+			Newest: usecase.MaxEarlierFailures,
 		})
 		if err != nil {
 			return err

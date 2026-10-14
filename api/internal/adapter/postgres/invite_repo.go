@@ -28,6 +28,15 @@ func NewInviteRepo(db *DB) *InviteRepo {
 	return &InviteRepo{q: sqlcgen.New(db.Pool()), pool: db.Pool()}
 }
 
+// Prune wraps PruneExpiredInvites; see usecase.InviteRepository.Prune.
+func (r *InviteRepo) Prune(ctx context.Context, before time.Time) (int64, error) {
+	n, err := r.q.PruneExpiredInvites(ctx, timestamptz(before))
+	if err != nil {
+		return 0, translate(err, "prune expired invites")
+	}
+	return n, nil
+}
+
 func (r *InviteRepo) Create(ctx context.Context, householdID, email, name string, role domain.Role,
 	caps domain.Capabilities, tokenHash []byte, invitedBy string, expiresAt time.Time) (string, error) {
 	id, err := r.q.CreateInvite(ctx, sqlcgen.CreateInviteParams{

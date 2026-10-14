@@ -44,3 +44,12 @@ other optional feature.
 - The same goroutine is the home for the next scheduled thing (a monthly
   budget rollover reminder, a weekly recap) — one ticker, several `Due`
   checks — before anyone reaches for cron again.
+
+## Since 2026-10-14
+
+The schedule has a second job, the daily retention prune
+(`usecase.RetentionService`), and so it now starts on every box. It used to
+start only when Telegram and the digest were configured, and a prune hung on
+it would silently never have run anywhere else. The digest is added to the
+same clock only when configured. The decision above is unchanged: one
+goroutine in the api process, no cron.

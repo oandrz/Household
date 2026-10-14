@@ -15,6 +15,12 @@ needed them to exist (see "Where things stand" below).
 
 **Where things stand:** 143 of 162 features built or partly built — and **five of the 162 are 🚫**, so the honest denominator for this release is 157.
 
+> **Recounted 2026-10-14 (the API prunes itself)**. No row is added and no
+> row changes state, so every count is unchanged. §1's "Retention pruning"
+> row, already ✅, now says the prune is scheduled inside the API and covers
+> magic links and lapsed invites too. Recounted by script before and after
+> the edit; both runs reproduced the table below exactly.
+
 > **Recounted 2026-10-14 (a ceiling on password checks)**. One row the design
 > does not draw is added to §1, ✅: "Password checks have a ceiling, and the
 > attempt limit holds under a burst". The row above it ("Sign-in and
@@ -1305,7 +1311,7 @@ The full checklist is at the end of `docs/LEARNING.md`.
 | Notifications — overspend alerts | 🟡 | Same gap as the row above: stored and editable, never sent |
 | Notifications — monthly retro reminder | 🟡 | Same gap as the two rows above: stored and editable, never sent. Retros itself is built now (section 6), so this row has something real to remind a household of — the gap is only that nothing in this codebase runs on a clock |
 | Notifications — weekly family digest | 🟡 | Same gap: stored and editable, never sent |
-| Retention pruning (`adminctl prune`) | ✅ | No UI — `cmd/adminctl prune --older-than=<days>` deletes consumed/expired `signups`, stale `login_attempts` and consumed/expired `telegram_link_requests` past the cutoff. Refuses anything under a seven-day floor so it can never reach inside `domain.LockoutPolicy.Window` and clear a lockout that is still live |
+| Retention pruning (scheduled, and `adminctl prune` by hand) | ✅ | No UI. Since 2026-10-14 the API prunes itself once a day on every box, Telegram or not: `RetentionService` deletes `signups`, `telegram_link_requests` and `magic_links` that were used or lapsed more than 30 days ago, `login_attempts` older than 30 days, and invites nobody accepted that lapsed more than 30 days ago. Accepted invites, sessions, API tokens and `admin_audit_log` are kept. `cmd/adminctl prune --older-than=<days>` is the same service by hand, and anything under seven days is refused so a prune can never clear a live lockout. The unknown-address failure count is indexed (`login_attempts_email_at_idx`), and every failure list reads at most the newest ten. Checked on a built image with Telegram off: the start-up prune removed each old row and kept the recent, live, pending and accepted ones |
 | Connected accounts | ⬜ | Belongs with Money. Note that automatic bank sync is not available to an app like this — see Money below |
 
 ## 4 · Overview (home)

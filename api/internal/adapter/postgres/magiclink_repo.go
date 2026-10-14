@@ -33,6 +33,15 @@ func (r *MagicLinkRepo) Consume(ctx context.Context, tokenHash []byte) (string, 
 	return uuidToString(id), nil
 }
 
+// Prune wraps PruneMagicLinks; see usecase.MagicLinkRepository.Prune.
+func (r *MagicLinkRepo) Prune(ctx context.Context, before time.Time) (int64, error) {
+	n, err := r.q.PruneMagicLinks(ctx, timestamptz(before))
+	if err != nil {
+		return 0, translate(err, "prune magic links")
+	}
+	return n, nil
+}
+
 func (r *MagicLinkRepo) CountSince(ctx context.Context, email string, since time.Time) (int, error) {
 	count, err := r.q.CountRecentMagicLinks(ctx, sqlcgen.CountRecentMagicLinksParams{
 		Email:     text(email),

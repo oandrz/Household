@@ -74,6 +74,9 @@ func (unusedMagicLinkRepo) Consume(context.Context, []byte) (string, error) {
 func (unusedMagicLinkRepo) CountSince(context.Context, string, time.Time) (int, error) {
 	panic("unusedMagicLinkRepo: CountSince should not be called by these tests")
 }
+func (unusedMagicLinkRepo) Prune(context.Context, time.Time) (int64, error) {
+	panic("unusedMagicLinkRepo: Prune should not be called by these tests")
+}
 
 type unusedSignupRepo struct{}
 

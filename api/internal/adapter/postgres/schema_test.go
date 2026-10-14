@@ -1021,3 +1021,19 @@ func openTestDB(t *testing.T) *postgres.DB {
 	t.Cleanup(db.Close)
 	return db
 }
+
+// TestLoginAttemptsAreIndexedByEmail: sign-in counts an address's failures by
+// email when the address has no household, and anyone can make those
+// attempts. Without this index that count reads the whole table.
+func TestLoginAttemptsAreIndexedByEmail(t *testing.T) {
+	db := openTestDB(t)
+	var def string
+	err := db.Pool().QueryRow(context.Background(),
+		`SELECT indexdef FROM pg_indexes WHERE tablename = 'login_attempts' AND indexname = 'login_attempts_email_at_idx'`).Scan(&def)
+	if err != nil {
+		t.Fatalf("login_attempts_email_at_idx: %v", err)
+	}
+	if !strings.Contains(def, "(email, at DESC)") {
+		t.Fatalf("index definition = %q, want it on (email, at DESC)", def)
+	}
+}

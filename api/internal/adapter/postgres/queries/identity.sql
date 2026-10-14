@@ -132,6 +132,9 @@ UPDATE magic_links SET consumed_at = now()
 WHERE token_hash = $1 AND consumed_at IS NULL AND expires_at > now()
 RETURNING user_id;
 
+-- name: PruneMagicLinks :execrows
+DELETE FROM magic_links WHERE expires_at < $1;
+
 -- name: CountRecentMagicLinks :one
 SELECT count(*) FROM magic_links m JOIN users u ON u.id = m.user_id
 WHERE u.email = $1 AND m.created_at > $2;
@@ -140,10 +143,15 @@ WHERE u.email = $1 AND m.created_at > $2;
 INSERT INTO login_attempts (household_id, user_id, email, succeeded, at)
 VALUES ($1, $2, $3, $4, $5);
 
+-- Every failure list below returns only the newest few
+-- (usecase.MaxEarlierFailures): the lockout policy needs a count up to its
+-- limit and the latest time, and nothing more. ORDER BY at DESC is what
+-- makes the ones kept the newest.
 -- name: ListRecentFailures :many
 SELECT at FROM login_attempts
 WHERE household_id = $1 AND succeeded = false AND at > $2
-ORDER BY at DESC;
+ORDER BY at DESC
+LIMIT sqlc.arg(newest);
 
 -- A lock on a name, held until the transaction ends. It is on a name and
 -- not a row because an address with no account has no row to lock. Two
@@ -159,12 +167,14 @@ RETURNING id;
 -- name: ListEarlierFailures :many
 SELECT at FROM login_attempts
 WHERE household_id = $1 AND succeeded = false AND at > $2 AND id <> $3
-ORDER BY at DESC;
+ORDER BY at DESC
+LIMIT sqlc.arg(newest);
 
 -- name: ListEarlierFailuresByEmail :many
 SELECT at FROM login_attempts
 WHERE email = $1 AND succeeded = false AND at > $2 AND id <> $3
-ORDER BY at DESC;
+ORDER BY at DESC
+LIMIT sqlc.arg(newest);
 
 -- succeeded = false keeps this from ever removing the record of a sign-in
 -- that happened, whatever id it is handed.
@@ -220,6 +230,11 @@ SELECT id, email, name, role, capabilities, channel,
 FROM invites
 WHERE household_id = $1 AND accepted_at IS NULL AND expires_at > $2
 ORDER BY created_at, id;
+
+-- name: PruneExpiredInvites :execrows
+-- accepted_at IS NULL is the whole safety of this statement: an accepted
+-- invite is history and is never deleted.
+DELETE FROM invites WHERE accepted_at IS NULL AND expires_at < $1;
 
 -- name: DeleteUnacceptedInvite :one
 -- Scoped by household in the SQL itself, so an id from another household

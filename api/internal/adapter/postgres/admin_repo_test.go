@@ -374,7 +374,7 @@ func TestAdminReauthReservationsMadeTogetherEachGetAPlaceInLine(t *testing.T) {
 
 	sort.Ints(seen)
 	for i, n := range seen {
-		if n != i {
+		if n != min(i, usecase.MaxEarlierFailures) {
 			t.Fatalf("simultaneous reservations did not each get their own place in line; "+
 				"what each one saw, sorted: %v", seen)
 		}

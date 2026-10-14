@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"github.com/andreasoentoro/hearth/api/internal/adapter/clock"
+	"github.com/andreasoentoro/hearth/api/internal/usecase"
 	"strings"
 	"testing"
 	"time"
@@ -97,10 +99,11 @@ func TestRunRefusesToSeedOutsideDevelopmentBeforeConnecting(t *testing.T) {
 // TestRunPruneRefusesAWindowUnderTheFloor: repositories are all nil here, so
 // if the floor check did not run first, a Prune call reaching any of them
 // would panic rather than merely delete the wrong rows -- proving the floor
-// is enforced before any repository is touched. See pruneFloor for why the
-// floor is seven days.
+// is enforced before any repository is touched. See usecase.RetentionFloor
+// for why the floor is seven days.
 func TestRunPruneRefusesAWindowUnderTheFloor(t *testing.T) {
-	err := runPrune(context.Background(), nil, nil, nil, 3*24*time.Hour)
+	retention := usecase.NewRetentionService(usecase.RetentionDeps{Clock: clock.System{}})
+	err := runPrune(context.Background(), retention, 3*24*time.Hour)
 	if err == nil {
 		t.Fatal("runPrune(3 days) = nil, want a refusal")
 	}

@@ -36,6 +36,7 @@ func (r *LoginAttemptRepo) FailuresSince(ctx context.Context, householdID string
 	rows, err := r.q.ListRecentFailures(ctx, sqlcgen.ListRecentFailuresParams{
 		HouseholdID: uuid(householdID),
 		At:          timestamptz(since),
+		Newest:      usecase.MaxEarlierFailures,
 	})
 	if err != nil {
 		return nil, translate(err, "list recent failures")
@@ -80,12 +81,14 @@ func (r *LoginAttemptRepo) ReserveFailure(ctx context.Context, householdID, user
 				HouseholdID: uuid(*householdID),
 				At:          timestamptz(since),
 				ID:          id,
+				Newest:      usecase.MaxEarlierFailures,
 			})
 		} else {
 			earlier, err = q.ListEarlierFailuresByEmail(ctx, sqlcgen.ListEarlierFailuresByEmailParams{
-				Email: email,
-				At:    timestamptz(since),
-				ID:    id,
+				Email:  email,
+				At:     timestamptz(since),
+				ID:     id,
+				Newest: usecase.MaxEarlierFailures,
 			})
 		}
 		if err != nil {
