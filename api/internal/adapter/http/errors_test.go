@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/andreasoentoro/hearth/api/internal/domain"
+	"github.com/andreasoentoro/hearth/api/internal/usecase"
 )
 
 // Every row must answer something: the generic logged 500, or a full status,
@@ -73,6 +74,30 @@ func TestErrorRowOrderPicksTheSpecificAnswer(t *testing.T) {
 			MapDomainError(rec, httptest.NewRequest(http.MethodGet, "/", nil), tc.err)
 			if !strings.Contains(rec.Body.String(), `"code":"`+tc.wantCode+`"`) {
 				t.Fatalf("body = %s, want code %s", rec.Body.String(), tc.wantCode)
+			}
+		})
+	}
+}
+
+// TestABusyHasherAnswers503: "busy" is its own answer, with the standard
+// envelope the frontend can parse -- never the generic 500, and never a
+// failed sign-in. The wrapped form is what the sign-up and invite services
+// actually return.
+func TestABusyHasherAnswers503(t *testing.T) {
+	for name, err := range map[string]error{
+		"bare":    usecase.ErrHasherBusy,
+		"wrapped": fmt.Errorf("hash sign-up password: %w", usecase.ErrHasherBusy),
+	} {
+		t.Run(name, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			MapDomainError(rec, httptest.NewRequest(http.MethodPost, "/", nil), err)
+
+			if rec.Code != http.StatusServiceUnavailable {
+				t.Fatalf("status = %d, want 503", rec.Code)
+			}
+			body := rec.Body.String()
+			if !strings.Contains(body, `"code":"BUSY"`) || !strings.Contains(body, "Try again in a moment") {
+				t.Fatalf("body = %s, want the BUSY envelope with its message", body)
 			}
 		})
 	}

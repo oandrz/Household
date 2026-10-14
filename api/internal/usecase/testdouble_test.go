@@ -46,10 +46,12 @@ type fakeHasher struct {
 	verifyLog []string /* encoded arguments */
 }
 
-func (h *fakeHasher) Hash(plain string) (string, error) { return "hashed:" + plain, nil }
-func (h *fakeHasher) Verify(plain, encoded string) bool {
+func (h *fakeHasher) Hash(_ context.Context, plain string) (string, error) {
+	return "hashed:" + plain, nil
+}
+func (h *fakeHasher) Verify(_ context.Context, plain, encoded string) (bool, error) {
 	h.verifyLog = append(h.verifyLog, encoded)
-	return encoded == "hashed:"+plain
+	return encoded == "hashed:"+plain, nil
 }
 
 func (h *fakeHasher) verifyCallCount() int { return len(h.verifyLog) }
@@ -513,6 +515,7 @@ func (d *sessionDouble) liveForUser(userID string) int {
 // --- LoginAttemptRepository -------------------------------------------
 
 type attemptRecord struct {
+	ID          string
 	HouseholdID *string
 	UserID      *string
 	Email       string
@@ -520,21 +523,84 @@ type attemptRecord struct {
 	At          time.Time
 }
 
+// loginAttemptDouble locks every method, because the burst tests call it
+// from many goroutines at once.
 type loginAttemptDouble struct {
+	mu      sync.Mutex
 	records []attemptRecord
+	nextID  int
 }
 
 func newLoginAttemptDouble() *loginAttemptDouble { return &loginAttemptDouble{} }
 
 func (d *loginAttemptDouble) Record(_ context.Context, householdID, userID *string, email string, succeeded bool, at time.Time) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
 	d.records = append(d.records, attemptRecord{HouseholdID: householdID, UserID: userID, Email: email, Succeeded: succeeded, At: at})
 	return nil
 }
 
-// FailuresSince and FailuresSinceForEmail mirror ListRecentFailures /
-// ListRecentFailuresByEmail exactly, including the strict "at > since"
-// comparison the SQL uses.
+// ReserveFailure mirrors the real repository: the earlier failures are the
+// household's when there is one and the address's when there is not, with
+// the strict "at > since" comparison the SQL uses. Holding the lock across
+// the read and the write is this double's version of the real one's ledger
+// lock: each reservation sees exactly the ones made before it.
+func (d *loginAttemptDouble) ReserveFailure(_ context.Context, householdID, userID *string, email string, at, since time.Time) (usecase.FailureReservation, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	var earlier []time.Time
+	for _, r := range d.records {
+		if r.Succeeded || !r.At.After(since) {
+			continue
+		}
+		if householdID != nil {
+			if r.HouseholdID == nil || *r.HouseholdID != *householdID {
+				continue
+			}
+		} else if r.Email != email {
+			continue
+		}
+		earlier = append(earlier, r.At)
+	}
+	d.nextID++
+	id := fmt.Sprintf("attempt-%d", d.nextID)
+	d.records = append(d.records, attemptRecord{ID: id, HouseholdID: householdID, UserID: userID, Email: email, At: at})
+	return usecase.FailureReservation{ID: id, Earlier: earlier}, nil
+}
+
+func (d *loginAttemptDouble) Withdraw(_ context.Context, attemptID string) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	kept := make([]attemptRecord, 0, len(d.records))
+	for _, r := range d.records {
+		if r.ID == attemptID && !r.Succeeded {
+			continue
+		}
+		kept = append(kept, r)
+	}
+	d.records = kept
+	return nil
+}
+
+// failureCount is how many failed attempts are on record, for any household
+// or address.
+func (d *loginAttemptDouble) failureCount() int {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	n := 0
+	for _, r := range d.records {
+		if !r.Succeeded {
+			n++
+		}
+	}
+	return n
+}
+
+// FailuresSince mirrors ListRecentFailures exactly, including the strict
+// "at > since" comparison the SQL uses.
 func (d *loginAttemptDouble) FailuresSince(_ context.Context, householdID string, since time.Time) ([]time.Time, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
 	var out []time.Time
 	for _, r := range d.records {
 		if r.Succeeded || r.HouseholdID == nil || *r.HouseholdID != householdID {
@@ -547,20 +613,9 @@ func (d *loginAttemptDouble) FailuresSince(_ context.Context, householdID string
 	return out, nil
 }
 
-func (d *loginAttemptDouble) FailuresSinceForEmail(_ context.Context, email string, since time.Time) ([]time.Time, error) {
-	var out []time.Time
-	for _, r := range d.records {
-		if r.Succeeded || r.Email != email {
-			continue
-		}
-		if r.At.After(since) {
-			out = append(out, r.At)
-		}
-	}
-	return out, nil
-}
-
 func (d *loginAttemptDouble) ClearFailures(_ context.Context, householdID string) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
 	kept := make([]attemptRecord, 0, len(d.records))
 	for _, r := range d.records {
 		if !r.Succeeded && r.HouseholdID != nil && *r.HouseholdID == householdID {
@@ -576,6 +631,8 @@ func (d *loginAttemptDouble) ClearFailures(_ context.Context, householdID string
 // deleted, including the NULL-HouseholdID rows ClearFailures cannot reach,
 // and the count of deleted rows is returned.
 func (d *loginAttemptDouble) Prune(_ context.Context, before time.Time) (int64, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
 	kept := make([]attemptRecord, 0, len(d.records))
 	var deleted int64
 	for _, r := range d.records {
@@ -1869,6 +1926,7 @@ type fixture struct {
 	apiTokens      *apiTokenDouble
 	mailer         *mailerDouble
 	hasher         *fakeHasher
+	attempts       *loginAttemptDouble
 	users          *userDouble
 	members        *membershipDouble
 	magicLinks     *magicLinkDouble
@@ -1999,7 +2057,8 @@ func newFixture(t *testing.T) *fixture {
 	return &fixture{
 		auth: auth, invites: invites, memberSvc: memberSvc, householdSvc: householdSvc,
 		clock: clock, sessions: sessions, apiTokens: apiTokens, mailer: mailer, hasher: hasher,
-		users: users, members: members, magicLinks: magicLinks, inviteRepo: inviteRepo,
+		attempts: attempts,
+		users:    users, members: members, magicLinks: magicLinks, inviteRepo: inviteRepo,
 		chats:          chats,
 		inviteAccounts: inviteAccounts,
 		households:     households, spaces: spaces, notifications: notifications,
@@ -2010,7 +2069,7 @@ func newFixture(t *testing.T) *fixture {
 
 func mustHash(t *testing.T, hasher usecase.PasswordHasher, plain string) string {
 	t.Helper()
-	hash, err := hasher.Hash(plain)
+	hash, err := hasher.Hash(context.Background(), plain)
 	if err != nil {
 		t.Fatalf("hash %q: %v", plain, err)
 	}
@@ -4404,6 +4463,7 @@ var _ usecase.AdminAuditRepository = (*fakeAuditRepo)(nil)
 // admin surface's own lockout table, kept by userID rather than by
 // household, unlike attemptRecord above.
 type reauthAttemptRecord struct {
+	ID        string
 	UserID    string
 	Succeeded bool
 	At        time.Time
@@ -4412,32 +4472,71 @@ type reauthAttemptRecord struct {
 // fakeReauthAttemptRepo is AdminReauthAttemptRepository: the same shape as
 // loginAttemptDouble, keyed by userID instead of householdID, because the
 // admin re-auth lockout is per-operator, not per-household (see
-// domain.ErrAdminLocked's doc comment).
+// domain.ErrAdminLocked's doc comment). It locks every method for the same
+// reason loginAttemptDouble does.
 type fakeReauthAttemptRepo struct {
+	mu      sync.Mutex
 	records []reauthAttemptRecord
+	nextID  int
 }
 
 func newFakeReauthAttemptRepo() *fakeReauthAttemptRepo { return &fakeReauthAttemptRepo{} }
 
 func (d *fakeReauthAttemptRepo) Record(_ context.Context, userID string, succeeded bool, at time.Time) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
 	d.records = append(d.records, reauthAttemptRecord{UserID: userID, Succeeded: succeeded, At: at})
 	return nil
 }
 
-func (d *fakeReauthAttemptRepo) FailuresSince(_ context.Context, userID string, since time.Time) ([]time.Time, error) {
-	var out []time.Time
+// ReserveFailure mirrors the real repository, including its "at >= since"
+// comparison, which is not the strict one login_attempts uses.
+func (d *fakeReauthAttemptRepo) ReserveFailure(_ context.Context, userID string, at, since time.Time) (usecase.FailureReservation, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	var earlier []time.Time
 	for _, r := range d.records {
-		if r.Succeeded || r.UserID != userID {
+		if r.Succeeded || r.UserID != userID || r.At.Before(since) {
 			continue
 		}
-		if r.At.After(since) {
-			out = append(out, r.At)
+		earlier = append(earlier, r.At)
+	}
+	d.nextID++
+	id := fmt.Sprintf("reauth-attempt-%d", d.nextID)
+	d.records = append(d.records, reauthAttemptRecord{ID: id, UserID: userID, At: at})
+	return usecase.FailureReservation{ID: id, Earlier: earlier}, nil
+}
+
+func (d *fakeReauthAttemptRepo) Withdraw(_ context.Context, attemptID string) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	kept := make([]reauthAttemptRecord, 0, len(d.records))
+	for _, r := range d.records {
+		if r.ID == attemptID && !r.Succeeded {
+			continue
+		}
+		kept = append(kept, r)
+	}
+	d.records = kept
+	return nil
+}
+
+// failureCount is how many failed attempts are on record for userID.
+func (d *fakeReauthAttemptRepo) failureCount(userID string) int {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	n := 0
+	for _, r := range d.records {
+		if r.UserID == userID && !r.Succeeded {
+			n++
 		}
 	}
-	return out, nil
+	return n
 }
 
 func (d *fakeReauthAttemptRepo) ClearFailures(_ context.Context, userID string) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
 	kept := make([]reauthAttemptRecord, 0, len(d.records))
 	for _, r := range d.records {
 		if r.UserID == userID && !r.Succeeded {

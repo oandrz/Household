@@ -468,7 +468,7 @@ func newTestEnvWith(t *testing.T, clk usecase.Clock, outbox usecase.MailOutbox) 
 
 	env.ownerEmail = "andreas@hearth.family"
 	env.ownerPassword = "hunter2hunter2"
-	ownerHash, err := hasher.Hash(env.ownerPassword)
+	ownerHash, err := hasher.Hash(ctx, env.ownerPassword)
 	if err != nil {
 		t.Fatalf("hash owner password: %v", err)
 	}
@@ -487,7 +487,7 @@ func newTestEnvWith(t *testing.T, clk usecase.Clock, outbox usecase.MailOutbox) 
 	// in as them through the public API, the same way a browser would.
 	env.limitedEmail = "ethan@hearth.family"
 	env.limitedPassword = "ilovechores123"
-	limitedHash, err := hasher.Hash(env.limitedPassword)
+	limitedHash, err := hasher.Hash(ctx, env.limitedPassword)
 	if err != nil {
 		t.Fatalf("hash limited password: %v", err)
 	}
@@ -509,7 +509,7 @@ func newTestEnvWith(t *testing.T, clk usecase.Clock, outbox usecase.MailOutbox) 
 	// exist alongside env.limitedEmail.
 	env.moneyLimitedEmail = "maya@hearth.family"
 	env.moneyLimitedPassword = "ilovepocketmoney"
-	moneyLimitedHash, err := hasher.Hash(env.moneyLimitedPassword)
+	moneyLimitedHash, err := hasher.Hash(ctx, env.moneyLimitedPassword)
 	if err != nil {
 		t.Fatalf("hash money-limited password: %v", err)
 	}

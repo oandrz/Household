@@ -118,13 +118,45 @@ type APITokenRepository interface {
 	Touch(ctx context.Context, tokenID string, at time.Time) error
 }
 
+// FailureReservation is a failed attempt written before its password is
+// checked, together with the failures that were already on record.
+//
+// The attempt is written first because the count decides who gets a real
+// check. Counting before writing lets every request in a burst read "no
+// failures yet" and all be checked. Writing first, in a fixed order, gives
+// every attempt a place in line: each one sees exactly the attempts ahead
+// of it, so only the first few find room.
+type FailureReservation struct {
+	// ID names the attempt, for Withdraw.
+	ID string
+	// Earlier holds the failures on record since the cutoff that were
+	// reserved or recorded before this attempt.
+	Earlier []time.Time
+}
+
 type LoginAttemptRepository interface {
 	Record(ctx context.Context, householdID, userID *string, email string, succeeded bool, at time.Time) error
+	// ReserveFailure writes a failed attempt at `at`, then answers with the
+	// failures already on record after `since`.
+	//
+	// The earlier failures are the household's when householdID is set. A nil
+	// householdID is an address with no household behind it; its earlier
+	// failures are every one recorded for that address, so a stranger sees
+	// the same countdown a member does and cannot tell the two apart.
+	//
+	// An implementation must put the attempts on one household (or one
+	// address) in a single order: each reservation sees every one made
+	// before it and none made after. Writing and then reading with nothing
+	// holding that order is not enough. Attempts that overlap would then
+	// count against each other in both directions, and two members signing
+	// in correctly a moment apart could each be refused because of the
+	// other.
+	ReserveFailure(ctx context.Context, householdID, userID *string, email string, at, since time.Time) (FailureReservation, error)
+	// Withdraw removes a reserved failure whose password check never ran.
+	// It is for that case only: a check that ran and failed keeps its row.
+	// An id that matches nothing is not an error.
+	Withdraw(ctx context.Context, attemptID string) error
 	FailuresSince(ctx context.Context, householdID string, since time.Time) ([]time.Time, error)
-	// FailuresSinceForEmail counts attempts by address rather than by household.
-	// Sign-in uses it for addresses that match no user, so a stranger sees the
-	// same countdown a member does and cannot tell the two apart.
-	FailuresSinceForEmail(ctx context.Context, email string, since time.Time) ([]time.Time, error)
 	ClearFailures(ctx context.Context, householdID string) error
 	// Prune deletes attempts older than before, including the
 	// NULL-household_id rows an unknown-address attempt records, which

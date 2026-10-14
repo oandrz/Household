@@ -1,6 +1,7 @@
 package crypto_test
 
 import (
+	"context"
 	"encoding/base64"
 	"strings"
 	"testing"
@@ -11,26 +12,26 @@ import (
 func TestHashThenVerify(t *testing.T) {
 	h := crypto.NewArgon2Hasher(3, 64*1024, 2)
 
-	encoded, err := h.Hash("correct horse battery staple")
+	encoded, err := h.Hash(context.Background(), "correct horse battery staple")
 	if err != nil {
 		t.Fatalf("Hash: %v", err)
 	}
 	if !strings.HasPrefix(encoded, "$argon2id$") {
 		t.Fatalf("encoded = %q, want the argon2id PHC format", encoded)
 	}
-	if !h.Verify("correct horse battery staple", encoded) {
-		t.Fatal("Verify rejected the correct password")
+	if ok, err := h.Verify(context.Background(), "correct horse battery staple", encoded); err != nil || !ok {
+		t.Fatalf("Verify of the correct password = (%v, %v), want (true, nil)", ok, err)
 	}
-	if h.Verify("wrong password", encoded) {
-		t.Fatal("Verify accepted the wrong password")
+	if ok, err := h.Verify(context.Background(), "wrong password", encoded); err != nil || ok {
+		t.Fatalf("Verify of the wrong password = (%v, %v), want (false, nil)", ok, err)
 	}
 }
 
 func TestHashIsSaltedPerCall(t *testing.T) {
 	h := crypto.NewArgon2Hasher(3, 64*1024, 2)
 
-	first, _ := h.Hash("same")
-	second, _ := h.Hash("same")
+	first, _ := h.Hash(context.Background(), "same")
+	second, _ := h.Hash(context.Background(), "same")
 
 	if first == second {
 		t.Fatal("two hashes of the same password must differ")
@@ -43,7 +44,7 @@ func TestVerifyRejectsMalformedInput(t *testing.T) {
 	// Real salt and hash fields from a genuine encoding, reused below to
 	// build otherwise-well-formed strings that are malformed in exactly one
 	// field at a time.
-	valid, err := h.Hash("reference password")
+	valid, err := h.Hash(context.Background(), "reference password")
 	if err != nil {
 		t.Fatalf("Hash: %v", err)
 	}
@@ -74,8 +75,10 @@ func TestVerifyRejectsMalformedInput(t *testing.T) {
 
 	for name, encoded := range cases {
 		t.Run(name, func(t *testing.T) {
-			if h.Verify("anything", encoded) {
-				t.Fatalf("Verify accepted %q (%s)", encoded, name)
+			// (false, nil), not an error: malformed input is a refusal,
+			// and an error would be read as "no check ran, try again".
+			if ok, err := h.Verify(context.Background(), "anything", encoded); err != nil || ok {
+				t.Fatalf("Verify of %q (%s) = (%v, %v), want (false, nil)", encoded, name, ok, err)
 			}
 		})
 	}

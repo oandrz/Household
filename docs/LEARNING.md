@@ -2507,6 +2507,28 @@ different component, after it was already written down here once.
   is part of the behaviour under test. Take it from the app, never from the
   library default.** The mutation is what found it; reading the test would
   not have.
+- **An in-memory double that was more orderly than the database hid what the
+  database did (2026-10-14).** Sign-in now writes an attempt down first and
+  then reads the attempts ahead of it. The first repository did that as two
+  plain statements. The use-case test for a burst of ten guesses passed, and
+  it could fail: with the limit removed it reported ten real checks. But its
+  double holds one mutex across the read and the write, so every attempt saw
+  exactly the ones before it. Postgres makes no such promise for two separate
+  statements: attempts that overlap each see the *other's* write. Nothing
+  was let through, so no test objected. The cost fell on real people: two
+  members signing in correctly a moment apart could each be refused because
+  of the other. It showed only when the same burst was sent at a built
+  image and every answer came back "locked", none "two tries left". The
+  repository now takes a short advisory lock, and
+  `TestReservationsMadeTogetherEachSeeTheOnesBeforeThem` asserts the exact
+  order against real Postgres: forty simultaneous attempts see 0, 1, 2 … 39.
+  **A double that serialises what the real thing runs in parallel proves
+  the caller, never the adapter. When the property is about ordering, test
+  it where the ordering is decided.**
+- **A timing taken while the test suite was running on the same Docker VM
+  was five times too slow (2026-10-14).** A sign-in measured 5.3 s beside a
+  flood; the same measurement on a quiet VM was about one second. Measure
+  with nothing else running, and say what else was running if you cannot.
 - **Do not name a zsh loop variable `path`.** In zsh `path` is tied to
   `PATH`, so `for path in / /sign-in; do curl ...` empties the command search
   path and every command after it reports `command not found`. A whole
@@ -2930,6 +2952,20 @@ here is a test, `TestSignUpRateLimitsCompose`, asserting
 `signUpRequestsPerIPPerHour * 24 < SignupGlobalDailyLimit` against the live
 constants — which is the entire reason `SignupGlobalDailyLimit` is exported
 at all.
+
+**Second instance, 2026-10-14: per-address limits in front of a shared
+password hasher.** The hasher runs a few derivations at once and now refuses
+callers once its queue is full, so a full queue is felt by everyone signing
+in. Three public routes reach it, each behind its own per-address limit. Each
+limit is sensible alone; the question that matters is what one address can
+do with all three at once. `TestHashRouteLimitsLeaveTheHasherRoomForEveryoneElse`
+does that sum against the live constants and the smallest hasher any box
+gets, at a deliberately pessimistic second per derivation, and fails above a
+5% share. Raising one limit to 200 fails it at 13%. Two things carried over
+from the first instance: the global limit here is at least a loud one (a
+`503` with a message, not a silent `202`), and the constant the test needs
+from the other package (`crypto.MinConcurrentDerivations`) is exported for
+that reason alone.
 
 ### 12. A sum over mixed currencies must convert before it adds
 
@@ -4037,6 +4073,33 @@ claim about both of them. Check the one you did not just edit.**
   protection was still an accident with no test, so the rule is now written
   down: `signedInAs` and `signedOut` in `useAuth.ts`.
 
+- **A comment's reason was true of one route and read as true of all
+  (2026-10-14).** `Argon2Hasher` said callers wait and are never refused,
+  because "the per-IP limiter in front of sign-in refuses the flood". That
+  was true of sign-in. Two other public routes ran the same hasher with no
+  limiter in front, so for them the stated reason did not exist. The fix
+  reverses the decision (a bounded queue, and "busy" as its own answer) and
+  the comment now says why not to go back. **When a comment justifies a
+  shortcut by pointing at a guard somewhere else, list every caller and
+  check the guard is in front of each one.**
+- **A mutation that broke the query, not the rule, was "caught"
+  (2026-10-14).** To prove the ordering test could fail, the repository was
+  changed to read before it wrote. The exclusion filter was handed an empty
+  id, which Postgres reads as NULL, so the read matched no row at all and
+  every caller saw zero. The test failed, for a reason that had nothing to
+  do with ordering. The mutation was redone with a real, unused id.
+  Checklist item 2 already says "for the reason you expect"; this is what
+  ignoring it looks like when the failure message happens to look right.
+- **A value built on first use, with an error path that was never an error
+  before (2026-10-14).** Sign-in's decoy hash was made once with `sync.Once`
+  and fell back to a constant if hashing failed. Hashing could only fail on
+  exhausted entropy, so the fallback was a curiosity. Once the hasher could
+  answer "busy", one busy moment at startup would have stored the fallback
+  for the life of the process, and the fallback does not parse, so every
+  later decoy check would have cost nothing. Only a real hash is kept now
+  (`TestABusyMomentDoesNotLeaveTheDecoyBroken`). **Adding a new way for a
+  call to fail means re-reading every caller that treated failure as
+  impossible.**
 ---
 
 ### 17. A requirement the plan drops is invisible to every review that reads the plan
@@ -4414,6 +4477,25 @@ test could not have noticed the new path was unlocked.
   what is in the database after the race (one row in total, and the rule
   still passes on it), not only how many calls were refused. A count of
   refusals alone would pass if both writes were refused.
+
+**Fourth instance, 2026-10-14: a limit on attempts, and two kinds of
+barrier.** The lockout allows three password checks. A test that sends ten
+guesses "at once" proves nothing unless all ten are in flight together, so
+the fake hasher parks every check until the test releases them. Two details
+are worth copying:
+
+- **The barrier waits for a state, not a duration.** Sign-in's test waits
+  until all ten are parked inside the hasher. The admin prompt refuses a
+  locked operator before the hasher, so its test waits until every attempt
+  has *either* been answered *or* is parked. No sleep stands in for "long
+  enough", and a broken build of the code fails on the count ("10 real
+  checks, want 3"), not on a timeout.
+- **A test that should see a refusal must not hang when the refusal is
+  missing.** The hasher's "queue full" test first called the hasher directly.
+  With the ceiling removed that call blocks for ever, and the suite would
+  have reported a ten-minute timeout instead of a failure. The call now runs
+  behind `answerOrFail`, which reports "was made to wait instead of being
+  answered" after five seconds.
 
 ### 20. Every test can pass while the page has no styling at all
 

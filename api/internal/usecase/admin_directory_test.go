@@ -61,8 +61,11 @@ func (d *directoryAttempts) FailuresSince(_ context.Context, _ string, _ time.Ti
 	d.calls++
 	return d.failures, nil
 }
-func (d *directoryAttempts) FailuresSinceForEmail(context.Context, string, time.Time) ([]time.Time, error) {
-	return nil, errAttemptsUnexpected
+func (d *directoryAttempts) ReserveFailure(context.Context, *string, *string, string, time.Time, time.Time) (usecase.FailureReservation, error) {
+	return usecase.FailureReservation{}, errAttemptsUnexpected
+}
+func (d *directoryAttempts) Withdraw(context.Context, string) error {
+	return errAttemptsUnexpected
 }
 func (d *directoryAttempts) ClearFailures(context.Context, string) error {
 	return errAttemptsUnexpected

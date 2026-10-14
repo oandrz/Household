@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/andreasoentoro/hearth/api/internal/adapter/crypto"
 	"github.com/andreasoentoro/hearth/api/internal/usecase"
 )
 
@@ -64,6 +65,43 @@ func TestSignUpRateLimitsCompose(t *testing.T) {
 		t.Fatalf("signUpRequestsPerIPPerHour (%d) * 24 = %d, want < usecase.SignupGlobalDailyLimit (%d) -- "+
 			"a single IP within its own hourly budget could exhaust the global daily ceiling alone",
 			signUpRequestsPerIPPerHour, got, usecase.SignupGlobalDailyLimit)
+	}
+}
+
+// TestHashRouteLimitsLeaveTheHasherRoomForEveryoneElse is the same kind of
+// check as TestSignUpRateLimitsCompose (LEARNING pattern 11), for the
+// password hasher. Three public routes run a derivation, each behind its own
+// per-address limit, and the hasher behind them is shared by everyone: when
+// its queue is full, every person signing in is told "busy".
+//
+// So one address, spending every allowance it has, must only be able to
+// occupy a small share of the hasher. The sum is done against the worst
+// case on purpose: the fewest slots any box gets, and a full second per
+// derivation, several times what the default cost takes.
+func TestHashRouteLimitsLeaveTheHasherRoomForEveryoneElse(t *testing.T) {
+	const (
+		pessimisticDerivation = time.Second
+		largestShare          = 0.05
+	)
+
+	// Seconds of derivation one address may ask for, per second of clock.
+	asked := 0.0
+	for _, route := range []struct {
+		limit  int
+		window time.Duration
+	}{
+		{signInAttemptsPerIPPerWindow, signInLimitWindow},
+		{signUpCompletionsPerIPPerWindow, passwordSetupLimitWindow},
+		{inviteAcceptsPerIPPerWindow, passwordSetupLimitWindow},
+	} {
+		asked += float64(route.limit) * pessimisticDerivation.Seconds() / route.window.Seconds()
+	}
+
+	share := asked / float64(crypto.MinConcurrentDerivations)
+	if share > largestShare {
+		t.Fatalf("one address can occupy %.1f%% of the password hasher, want at most %.0f%% -- "+
+			"the per-address limits on the hashing routes are too generous for a hasher of %d slots",
+			share*100, largestShare*100, crypto.MinConcurrentDerivations)
 	}
 }
 

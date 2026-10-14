@@ -5,6 +5,9 @@ import (
 	"encoding/json"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+
 	"github.com/andreasoentoro/hearth/api/internal/adapter/postgres/sqlcgen"
 	"github.com/andreasoentoro/hearth/api/internal/domain"
 	"github.com/andreasoentoro/hearth/api/internal/usecase"
@@ -167,10 +170,13 @@ func (r *AdminAuditRepo) Record(ctx context.Context, entry usecase.AdminAuditEnt
 	}), "record admin audit")
 }
 
-type AdminReauthAttemptRepo struct{ q *sqlcgen.Queries }
+type AdminReauthAttemptRepo struct {
+	q    *sqlcgen.Queries
+	pool *pgxpool.Pool
+}
 
 func NewAdminReauthAttemptRepo(db *DB) *AdminReauthAttemptRepo {
-	return &AdminReauthAttemptRepo{q: sqlcgen.New(db.Pool())}
+	return &AdminReauthAttemptRepo{q: sqlcgen.New(db.Pool()), pool: db.Pool()}
 }
 
 func (r *AdminReauthAttemptRepo) Record(ctx context.Context, userID string, succeeded bool, at time.Time) error {
@@ -181,19 +187,42 @@ func (r *AdminReauthAttemptRepo) Record(ctx context.Context, userID string, succ
 	}), "record admin reauth attempt")
 }
 
-func (r *AdminReauthAttemptRepo) FailuresSince(ctx context.Context, userID string, since time.Time) ([]time.Time, error) {
-	rows, err := r.q.AdminReauthFailuresSince(ctx, sqlcgen.AdminReauthFailuresSinceParams{
-		UserID: uuid(userID),
-		At:     timestamptz(since),
+// ReserveFailure takes this operator's ledger lock, writes the attempt,
+// reads the ones before it, and commits -- the same shape, for the same
+// reason, as LoginAttemptRepo.ReserveFailure.
+func (r *AdminReauthAttemptRepo) ReserveFailure(ctx context.Context, userID string, at, since time.Time) (usecase.FailureReservation, error) {
+	var reserved usecase.FailureReservation
+	err := pgx.BeginFunc(ctx, r.pool, func(tx pgx.Tx) error {
+		q := r.q.WithTx(tx)
+		if err := q.LockAttemptLedger(ctx, "admin-reauth-attempts:"+userID); err != nil {
+			return err
+		}
+		id, err := q.ReserveAdminReauthFailure(ctx, sqlcgen.ReserveAdminReauthFailureParams{
+			UserID: uuid(userID),
+			At:     timestamptz(at),
+		})
+		if err != nil {
+			return err
+		}
+		earlier, err := q.ListEarlierAdminReauthFailures(ctx, sqlcgen.ListEarlierAdminReauthFailuresParams{
+			UserID: uuid(userID),
+			At:     timestamptz(since),
+			ID:     id,
+		})
+		if err != nil {
+			return err
+		}
+		reserved = usecase.FailureReservation{ID: uuidToString(id), Earlier: toTimes(earlier)}
+		return nil
 	})
 	if err != nil {
-		return nil, translate(err, "admin reauth failures since")
+		return usecase.FailureReservation{}, translate(err, "reserve admin reauth failure")
 	}
-	out := make([]time.Time, 0, len(rows))
-	for _, at := range rows {
-		out = append(out, timeOf(at))
-	}
-	return out, nil
+	return reserved, nil
+}
+
+func (r *AdminReauthAttemptRepo) Withdraw(ctx context.Context, attemptID string) error {
+	return translate(r.q.WithdrawAdminReauthFailure(ctx, uuid(attemptID)), "withdraw admin reauth failure")
 }
 
 func (r *AdminReauthAttemptRepo) ClearFailures(ctx context.Context, userID string) error {

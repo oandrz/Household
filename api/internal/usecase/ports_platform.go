@@ -6,6 +6,7 @@ package usecase
 
 import (
 	"context"
+	"errors"
 	"time"
 )
 
@@ -13,10 +14,26 @@ type Clock interface {
 	Now() time.Time
 }
 
+// PasswordHasher derives and checks password hashes. A derivation is the
+// most expensive thing a stranger can ask this service to do, so an
+// implementation may run only a few at once and make the rest wait.
+//
+// Both methods answer ErrHasherBusy when too many callers are already
+// waiting, and ctx's own error when ctx ends before a derivation starts.
+// In both cases nothing was checked: a caller must not treat either as a
+// wrong password, or a flood of requests could turn every real sign-in into
+// a strike against its household.
+//
+// Verify's bool is meaningful only when its error is nil. A malformed
+// encoded hash is (false, nil): a refusal, not a fault.
 type PasswordHasher interface {
-	Hash(plain string) (string, error)
-	Verify(plain, encoded string) bool
+	Hash(ctx context.Context, plain string) (string, error)
+	Verify(ctx context.Context, plain, encoded string) (bool, error)
 }
+
+// ErrHasherBusy is PasswordHasher's "ask again shortly": the queue for a
+// derivation is full. The HTTP layer answers 503 for it.
+var ErrHasherBusy = errors.New("password hasher is busy")
 
 type TokenGenerator interface {
 	NewToken() (raw string, hash []byte, err error)

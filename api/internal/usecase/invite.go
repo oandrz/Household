@@ -418,7 +418,7 @@ func (s *InviteService) Accept(ctx context.Context, token, password, displayName
 		return SignInResult{}, err
 	}
 
-	passwordHash, err := s.d.Hasher.Hash(password)
+	passwordHash, err := s.d.Hasher.Hash(ctx, password)
 	if err != nil {
 		return SignInResult{}, fmt.Errorf("hash invite password: %w", err)
 	}

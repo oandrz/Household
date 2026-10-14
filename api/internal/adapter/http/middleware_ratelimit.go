@@ -8,9 +8,10 @@ import (
 )
 
 // ipRateLimiter is a fixed-window counter keyed by client IP. Each
-// unauthenticated endpoint -- sign-up, sign-in, magic-link request,
-// Telegram start -- holds its own instance (router.go); the reasoning below
-// is written for sign-up and applies to all of them.
+// unauthenticated endpoint that costs something -- sign-up and its
+// completion, sign-in, magic-link request, Telegram start, accepting an
+// invite -- holds its own instance (router.go); the reasoning below is
+// written for sign-up and applies to all of them.
 //
 // Sign-up is open to anyone by design, and SignupService's per-address
 // limit is trivially bypassed by varying the address, so this is what
@@ -75,10 +76,28 @@ func (l *ipRateLimiter) allow(ip string) bool {
 // lockout (3 failures), because one address can be a shared office or
 // carrier exit. Its job is not to stop guessing -- the lockout does that --
 // but to stop one client running argon2 as fast as it can send requests;
-// crypto.Argon2Hasher's concurrency bound caps whatever gets past it.
+// crypto.Argon2Hasher's slots and queue cap whatever gets past it.
 const (
 	signInAttemptsPerIPPerWindow = 20
 	signInLimitWindow            = 15 * time.Minute
+)
+
+// signUpCompletionsPerIPPerWindow and inviteAcceptsPerIPPerWindow limit the
+// two public routes that turn a new password into a hash. A link from a
+// mail is not a limit on its own: until the first request finishes, every
+// request carrying the same link gets as far as the hasher.
+//
+// The numbers are sign-in's, for sign-in's reason: one address can be a
+// whole home or office, a real person sends a handful of these, and the
+// job is only to stop one client running argon2 in a loop. Only someone on
+// the same address can use an allowance up.
+//
+// TestHashRouteLimitsLeaveTheHasherRoomForEveryoneElse ties these to the
+// hasher's size; raise one and that test says what it costs.
+const (
+	signUpCompletionsPerIPPerWindow = 20
+	inviteAcceptsPerIPPerWindow     = 20
+	passwordSetupLimitWindow        = 15 * time.Minute
 )
 
 // magicLinkRequestsPerIPPerHour matches the reasoning of sign-up's limit: the

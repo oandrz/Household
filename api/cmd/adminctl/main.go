@@ -271,7 +271,7 @@ func runResetPassword(ctx context.Context, args []string, users usecase.UserRepo
 		return errors.New("password must not be empty")
 	}
 
-	hash, err := hasher.Hash(password)
+	hash, err := hasher.Hash(ctx, password)
 	if err != nil {
 		return fmt.Errorf("hash password: %w", err)
 	}

@@ -778,6 +778,70 @@ func (q *Queries) InviteChannelForReplace(ctx context.Context, arg InviteChannel
 	return channel, err
 }
 
+const listEarlierFailures = `-- name: ListEarlierFailures :many
+SELECT at FROM login_attempts
+WHERE household_id = $1 AND succeeded = false AND at > $2 AND id <> $3
+ORDER BY at DESC
+`
+
+type ListEarlierFailuresParams struct {
+	HouseholdID pgtype.UUID
+	At          pgtype.Timestamptz
+	ID          pgtype.UUID
+}
+
+func (q *Queries) ListEarlierFailures(ctx context.Context, arg ListEarlierFailuresParams) ([]pgtype.Timestamptz, error) {
+	rows, err := q.db.Query(ctx, listEarlierFailures, arg.HouseholdID, arg.At, arg.ID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []pgtype.Timestamptz
+	for rows.Next() {
+		var at pgtype.Timestamptz
+		if err := rows.Scan(&at); err != nil {
+			return nil, err
+		}
+		items = append(items, at)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listEarlierFailuresByEmail = `-- name: ListEarlierFailuresByEmail :many
+SELECT at FROM login_attempts
+WHERE email = $1 AND succeeded = false AND at > $2 AND id <> $3
+ORDER BY at DESC
+`
+
+type ListEarlierFailuresByEmailParams struct {
+	Email string
+	At    pgtype.Timestamptz
+	ID    pgtype.UUID
+}
+
+func (q *Queries) ListEarlierFailuresByEmail(ctx context.Context, arg ListEarlierFailuresByEmailParams) ([]pgtype.Timestamptz, error) {
+	rows, err := q.db.Query(ctx, listEarlierFailuresByEmail, arg.Email, arg.At, arg.ID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []pgtype.Timestamptz
+	for rows.Next() {
+		var at pgtype.Timestamptz
+		if err := rows.Scan(&at); err != nil {
+			return nil, err
+		}
+		items = append(items, at)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listMemberships = `-- name: ListMemberships :many
 SELECT m.id, m.household_id, m.user_id, m.role, m.capabilities,
        u.email, u.display_name, u.avatar_initial
@@ -920,37 +984,6 @@ func (q *Queries) ListRecentFailures(ctx context.Context, arg ListRecentFailures
 	return items, nil
 }
 
-const listRecentFailuresByEmail = `-- name: ListRecentFailuresByEmail :many
-SELECT at FROM login_attempts
-WHERE email = $1 AND succeeded = false AND at > $2
-ORDER BY at DESC
-`
-
-type ListRecentFailuresByEmailParams struct {
-	Email string
-	At    pgtype.Timestamptz
-}
-
-func (q *Queries) ListRecentFailuresByEmail(ctx context.Context, arg ListRecentFailuresByEmailParams) ([]pgtype.Timestamptz, error) {
-	rows, err := q.db.Query(ctx, listRecentFailuresByEmail, arg.Email, arg.At)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []pgtype.Timestamptz
-	for rows.Next() {
-		var at pgtype.Timestamptz
-		if err := rows.Scan(&at); err != nil {
-			return nil, err
-		}
-		items = append(items, at)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const listSpaces = `-- name: ListSpaces :many
 SELECT id, household_id, key, name, visibility, position, is_builtin, required_capability
 FROM spaces WHERE household_id = $1 ORDER BY position, key
@@ -988,6 +1021,18 @@ func (q *Queries) ListSpaces(ctx context.Context, householdID pgtype.UUID) ([]Sp
 		return nil, err
 	}
 	return items, nil
+}
+
+const lockAttemptLedger = `-- name: LockAttemptLedger :exec
+SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0))
+`
+
+// A lock on a name, held until the transaction ends. It is on a name and
+// not a row because an address with no account has no row to lock. Two
+// names that hash alike only wait for each other; nothing breaks.
+func (q *Queries) LockAttemptLedger(ctx context.Context, name string) error {
+	_, err := q.db.Exec(ctx, lockAttemptLedger, name)
+	return err
 }
 
 const lockHouseholdMemberships = `-- name: LockHouseholdMemberships :one
@@ -1164,6 +1209,31 @@ func (q *Queries) ReplaceInviteToken(ctx context.Context, arg ReplaceInviteToken
 	return previous_knock_chat_id, err
 }
 
+const reserveLoginFailure = `-- name: ReserveLoginFailure :one
+INSERT INTO login_attempts (household_id, user_id, email, succeeded, at)
+VALUES ($1, $2, $3, false, $4)
+RETURNING id
+`
+
+type ReserveLoginFailureParams struct {
+	HouseholdID pgtype.UUID
+	UserID      pgtype.UUID
+	Email       string
+	At          pgtype.Timestamptz
+}
+
+func (q *Queries) ReserveLoginFailure(ctx context.Context, arg ReserveLoginFailureParams) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, reserveLoginFailure,
+		arg.HouseholdID,
+		arg.UserID,
+		arg.Email,
+		arg.At,
+	)
+	var id pgtype.UUID
+	err := row.Scan(&id)
+	return id, err
+}
+
 const revokeSessionByToken = `-- name: RevokeSessionByToken :exec
 UPDATE sessions SET revoked_at = now() WHERE token_hash = $1 AND revoked_at IS NULL
 `
@@ -1335,4 +1405,15 @@ func (q *Queries) UpsertNotificationPreferences(ctx context.Context, arg UpsertN
 		&i.WeeklyDigest,
 	)
 	return i, err
+}
+
+const withdrawLoginFailure = `-- name: WithdrawLoginFailure :exec
+DELETE FROM login_attempts WHERE id = $1 AND succeeded = false
+`
+
+// succeeded = false keeps this from ever removing the record of a sign-in
+// that happened, whatever id it is handed.
+func (q *Queries) WithdrawLoginFailure(ctx context.Context, id pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, withdrawLoginFailure, id)
+	return err
 }

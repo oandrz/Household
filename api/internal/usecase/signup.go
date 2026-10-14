@@ -352,7 +352,7 @@ func (s *SignupService) Complete(ctx context.Context, token, householdName, disp
 		return SignInResult{}, err
 	}
 
-	passwordHash, err := s.d.Hasher.Hash(password)
+	passwordHash, err := s.d.Hasher.Hash(ctx, password)
 	if err != nil {
 		return SignInResult{}, fmt.Errorf("hash sign-up password: %w", err)
 	}

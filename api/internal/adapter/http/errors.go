@@ -229,6 +229,18 @@ var domainErrorResponses = []domainErrorResponse{
 		message:   "Too many failed attempts. Try again in a few minutes.",
 	},
 	{
+		// 503, not 429: the caller did nothing wrong and no allowance of
+		// theirs is spent -- the whole service is short of room, and the
+		// same request will work in a moment.
+		//
+		// Not logged. One line per refused request would let the flood
+		// that causes this fill the disk as well.
+		sentinels: []error{usecase.ErrHasherBusy},
+		status:    http.StatusServiceUnavailable,
+		code:      "BUSY",
+		message:   "Hearth is busy. Try again in a moment.",
+	},
+	{
 		sentinels: []error{domain.ErrHouseholdLocked},
 		status:    http.StatusLocked,
 		code:      "HOUSEHOLD_LOCKED",

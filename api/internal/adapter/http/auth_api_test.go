@@ -764,6 +764,47 @@ func TestSignInPassesThroughThePerIPLimiter(t *testing.T) {
 	assertErrorResponse(t, rec, http.StatusTooManyRequests, "RATE_LIMITED")
 }
 
+// TestThePasswordSettingRoutesPassThroughTheirPerIPLimiters: completing a
+// sign-up and accepting an invite each hash a new password, so each sits
+// behind a limiter of its own. The tokens here match nothing on purpose:
+// the limiter must count a request whatever its token is, or guessing at
+// tokens would be the way round it. The limits are read from the router's
+// own constants.
+func TestThePasswordSettingRoutesPassThroughTheirPerIPLimiters(t *testing.T) {
+	routes := map[string]struct {
+		url   string
+		limit int
+		body  map[string]string
+	}{
+		"complete a sign-up": {
+			url:   "/api/v1/auth/sign-up/no-such-token/complete",
+			limit: httpadapter.SignUpCompletionsPerIPPerWindow,
+			body: map[string]string{
+				"householdName": "The Tans", "displayName": "Mei", "primaryCurrency": "SGD",
+				"timezone": "Asia/Singapore", "password": "a long enough password",
+			},
+		},
+		"accept an invite": {
+			url:   "/api/v1/invites/no-such-token/accept",
+			limit: httpadapter.InviteAcceptsPerIPPerWindow,
+			body:  map[string]string{"displayName": "Mei", "password": "a long enough password"},
+		},
+	}
+	for name, route := range routes {
+		t.Run(name, func(t *testing.T) {
+			env := newTestEnv(t)
+
+			for i := 0; i < route.limit; i++ {
+				if rec := env.do(http.MethodPost, route.url, route.body); rec.Code == http.StatusTooManyRequests {
+					t.Fatalf("request %d answered 429 before the limit of %d", i, route.limit)
+				}
+			}
+			assertErrorResponse(t, env.do(http.MethodPost, route.url, route.body),
+				http.StatusTooManyRequests, "RATE_LIMITED")
+		})
+	}
+}
+
 // TestMagicLinkRequestPassesThroughThePerIPLimiter: the per-address limit
 // in AuthService is bypassed by varying the address, like sign-up's, so
 // without a per-IP limit this route is an unmetered way to make the server

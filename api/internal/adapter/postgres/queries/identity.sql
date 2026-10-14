@@ -145,10 +145,31 @@ SELECT at FROM login_attempts
 WHERE household_id = $1 AND succeeded = false AND at > $2
 ORDER BY at DESC;
 
--- name: ListRecentFailuresByEmail :many
+-- A lock on a name, held until the transaction ends. It is on a name and
+-- not a row because an address with no account has no row to lock. Two
+-- names that hash alike only wait for each other; nothing breaks.
+-- name: LockAttemptLedger :exec
+SELECT pg_advisory_xact_lock(hashtextextended(sqlc.arg(name)::text, 0));
+
+-- name: ReserveLoginFailure :one
+INSERT INTO login_attempts (household_id, user_id, email, succeeded, at)
+VALUES ($1, $2, $3, false, $4)
+RETURNING id;
+
+-- name: ListEarlierFailures :many
 SELECT at FROM login_attempts
-WHERE email = $1 AND succeeded = false AND at > $2
+WHERE household_id = $1 AND succeeded = false AND at > $2 AND id <> $3
 ORDER BY at DESC;
+
+-- name: ListEarlierFailuresByEmail :many
+SELECT at FROM login_attempts
+WHERE email = $1 AND succeeded = false AND at > $2 AND id <> $3
+ORDER BY at DESC;
+
+-- succeeded = false keeps this from ever removing the record of a sign-in
+-- that happened, whatever id it is handed.
+-- name: WithdrawLoginFailure :exec
+DELETE FROM login_attempts WHERE id = $1 AND succeeded = false;
 
 -- name: ClearFailures :exec
 DELETE FROM login_attempts WHERE household_id = $1 AND succeeded = false;
