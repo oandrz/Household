@@ -782,16 +782,23 @@ const listEarlierFailures = `-- name: ListEarlierFailures :many
 SELECT at FROM login_attempts
 WHERE household_id = $1 AND succeeded = false AND at > $2 AND id <> $3
 ORDER BY at DESC
+LIMIT $4
 `
 
 type ListEarlierFailuresParams struct {
 	HouseholdID pgtype.UUID
 	At          pgtype.Timestamptz
 	ID          pgtype.UUID
+	Newest      int32
 }
 
 func (q *Queries) ListEarlierFailures(ctx context.Context, arg ListEarlierFailuresParams) ([]pgtype.Timestamptz, error) {
-	rows, err := q.db.Query(ctx, listEarlierFailures, arg.HouseholdID, arg.At, arg.ID)
+	rows, err := q.db.Query(ctx, listEarlierFailures,
+		arg.HouseholdID,
+		arg.At,
+		arg.ID,
+		arg.Newest,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -814,16 +821,23 @@ const listEarlierFailuresByEmail = `-- name: ListEarlierFailuresByEmail :many
 SELECT at FROM login_attempts
 WHERE email = $1 AND succeeded = false AND at > $2 AND id <> $3
 ORDER BY at DESC
+LIMIT $4
 `
 
 type ListEarlierFailuresByEmailParams struct {
-	Email string
-	At    pgtype.Timestamptz
-	ID    pgtype.UUID
+	Email  string
+	At     pgtype.Timestamptz
+	ID     pgtype.UUID
+	Newest int32
 }
 
 func (q *Queries) ListEarlierFailuresByEmail(ctx context.Context, arg ListEarlierFailuresByEmailParams) ([]pgtype.Timestamptz, error) {
-	rows, err := q.db.Query(ctx, listEarlierFailuresByEmail, arg.Email, arg.At, arg.ID)
+	rows, err := q.db.Query(ctx, listEarlierFailuresByEmail,
+		arg.Email,
+		arg.At,
+		arg.ID,
+		arg.Newest,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -957,15 +971,21 @@ const listRecentFailures = `-- name: ListRecentFailures :many
 SELECT at FROM login_attempts
 WHERE household_id = $1 AND succeeded = false AND at > $2
 ORDER BY at DESC
+LIMIT $3
 `
 
 type ListRecentFailuresParams struct {
 	HouseholdID pgtype.UUID
 	At          pgtype.Timestamptz
+	Newest      int32
 }
 
+// Every failure list below returns only the newest few
+// (usecase.MaxEarlierFailures): the lockout policy needs a count up to its
+// limit and the latest time, and nothing more. ORDER BY at DESC is what
+// makes the ones kept the newest.
 func (q *Queries) ListRecentFailures(ctx context.Context, arg ListRecentFailuresParams) ([]pgtype.Timestamptz, error) {
-	rows, err := q.db.Query(ctx, listRecentFailures, arg.HouseholdID, arg.At)
+	rows, err := q.db.Query(ctx, listRecentFailures, arg.HouseholdID, arg.At, arg.Newest)
 	if err != nil {
 		return nil, err
 	}
@@ -1083,6 +1103,20 @@ func (q *Queries) NextSpacePosition(ctx context.Context, householdID pgtype.UUID
 	return column_1, err
 }
 
+const pruneExpiredInvites = `-- name: PruneExpiredInvites :execrows
+DELETE FROM invites WHERE accepted_at IS NULL AND expires_at < $1
+`
+
+// accepted_at IS NULL is the whole safety of this statement: an accepted
+// invite is history and is never deleted.
+func (q *Queries) PruneExpiredInvites(ctx context.Context, expiresAt pgtype.Timestamptz) (int64, error) {
+	result, err := q.db.Exec(ctx, pruneExpiredInvites, expiresAt)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const pruneLoginAttempts = `-- name: PruneLoginAttempts :execrows
 DELETE FROM login_attempts WHERE at < $1
 `
@@ -1097,6 +1131,18 @@ DELETE FROM login_attempts WHERE at < $1
 // regression dressed as cleanup.
 func (q *Queries) PruneLoginAttempts(ctx context.Context, at pgtype.Timestamptz) (int64, error) {
 	result, err := q.db.Exec(ctx, pruneLoginAttempts, at)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const pruneMagicLinks = `-- name: PruneMagicLinks :execrows
+DELETE FROM magic_links WHERE expires_at < $1
+`
+
+func (q *Queries) PruneMagicLinks(ctx context.Context, expiresAt pgtype.Timestamptz) (int64, error) {
+	result, err := q.db.Exec(ctx, pruneMagicLinks, expiresAt)
 	if err != nil {
 		return 0, err
 	}

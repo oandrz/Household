@@ -566,6 +566,7 @@ func (d *loginAttemptDouble) ReserveFailure(_ context.Context, householdID, user
 	}
 	d.nextID++
 	id := fmt.Sprintf("attempt-%d", d.nextID)
+	earlier = newestFailures(earlier)
 	d.records = append(d.records, attemptRecord{ID: id, HouseholdID: householdID, UserID: userID, Email: email, At: at})
 	return usecase.FailureReservation{ID: id, Earlier: earlier}, nil
 }
@@ -612,7 +613,18 @@ func (d *loginAttemptDouble) FailuresSince(_ context.Context, householdID string
 			out = append(out, r.At)
 		}
 	}
-	return out, nil
+	return newestFailures(out), nil
+}
+
+// newestFailures keeps the newest usecase.MaxEarlierFailures, as every real
+// failure list does (ORDER BY at DESC LIMIT).
+func newestFailures(at []time.Time) []time.Time {
+	sorted := append([]time.Time(nil), at...)
+	sort.Slice(sorted, func(i, j int) bool { return sorted[i].After(sorted[j]) })
+	if len(sorted) > usecase.MaxEarlierFailures {
+		sorted = sorted[:usecase.MaxEarlierFailures]
+	}
+	return sorted
 }
 
 func (d *loginAttemptDouble) ClearFailures(_ context.Context, householdID string) error {
@@ -711,6 +723,19 @@ func (d *magicLinkDouble) Consume(_ context.Context, tokenHash []byte) (string, 
 	now := d.clock.Now()
 	row.ConsumedAt = &now
 	return row.UserID, nil
+}
+
+// Prune mirrors PruneMagicLinks: every link that expired before the
+// cutoff, used or not.
+func (d *magicLinkDouble) Prune(_ context.Context, before time.Time) (int64, error) {
+	var n int64
+	for key, row := range d.rows {
+		if row.ExpiresAt.Before(before) {
+			delete(d.rows, key)
+			n++
+		}
+	}
+	return n, nil
 }
 
 func (d *magicLinkDouble) CountSince(_ context.Context, email string, since time.Time) (int, error) {
@@ -818,6 +843,19 @@ func (d *inviteDouble) setFamilyName(householdID, name string) { d.familyName[ho
 // confirming the "limited member with no email" path writes no invite row
 // at all, and the "rejected before any write" path writes none either.
 func (d *inviteDouble) count() int { return len(d.rows) }
+
+// Prune mirrors PruneExpiredInvites: never accepted, and expired before the
+// cutoff.
+func (d *inviteDouble) Prune(_ context.Context, before time.Time) (int64, error) {
+	var n int64
+	for key, row := range d.rows {
+		if row.AcceptedAt == nil && row.ExpiresAt.Before(before) {
+			delete(d.rows, key)
+			n++
+		}
+	}
+	return n, nil
+}
 
 func (d *inviteDouble) byID(inviteID string) *inviteRow {
 	for _, row := range d.rows {
@@ -4505,6 +4543,7 @@ func (d *fakeReauthAttemptRepo) ReserveFailure(_ context.Context, userID string,
 	}
 	d.nextID++
 	id := fmt.Sprintf("reauth-attempt-%d", d.nextID)
+	earlier = newestFailures(earlier)
 	d.records = append(d.records, reauthAttemptRecord{ID: id, UserID: userID, At: at})
 	return usecase.FailureReservation{ID: id, Earlier: earlier}, nil
 }

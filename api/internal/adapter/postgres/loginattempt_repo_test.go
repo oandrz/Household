@@ -151,7 +151,8 @@ func TestWithdrawRemovesTheReservedFailure(t *testing.T) {
 // TestReservationsMadeTogetherEachSeeTheOnesBeforeThem is the property the
 // lockout depends on under load: reservations made at the same moment are
 // put in one order, and each sees exactly the ones ahead of it. So forty
-// simultaneous attempts see 0, 1, 2 ... 39 earlier failures, one each. With
+// simultaneous attempts see 0, 1, 2 ... earlier failures, one each, up to
+// the cap on how many one list returns (usecase.MaxEarlierFailures). With
 // a limit of three, that is what makes exactly the first three "the first
 // three", however they arrive.
 //
@@ -206,9 +207,12 @@ func TestReservationsMadeTogetherEachSeeTheOnesBeforeThem(t *testing.T) {
 				return
 			}
 
+			// Each list is capped at the newest MaxEarlierFailures, so the
+			// places in line read 0, 1 ... cap-1 and then cap for everyone
+			// behind.
 			sort.Ints(seen)
 			for i, n := range seen {
-				if n != i {
+				if n != min(i, usecase.MaxEarlierFailures) {
 					t.Fatalf("simultaneous reservations did not each get their own place in line; "+
 						"what each one saw, sorted: %v", seen)
 				}

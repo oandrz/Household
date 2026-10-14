@@ -87,6 +87,11 @@ type MagicLinkRepository interface {
 	Create(ctx context.Context, userID string, tokenHash []byte, expiresAt time.Time) error
 	Consume(ctx context.Context, tokenHash []byte) (userID string, err error)
 	CountSince(ctx context.Context, email string, since time.Time) (int, error)
+	// Prune deletes links that expired before `before`, used or not. A link
+	// lives fifteen minutes and CountSince looks back one hour, so a link
+	// that lapsed before any sane cutoff is no longer anyone's way in and no
+	// longer counts towards any limit.
+	Prune(ctx context.Context, before time.Time) (int64, error)
 }
 
 // APITokenRepository stores a member's long-lived credentials. Only the
@@ -133,6 +138,15 @@ type FailureReservation struct {
 	// reserved or recorded before this attempt.
 	Earlier []time.Time
 }
+
+// MaxEarlierFailures caps every list of earlier failures a repository
+// returns -- ReserveFailure's and FailuresSince's, in both attempt ledgers --
+// to the newest ones. domain.LockoutPolicy needs a count up to its limit and
+// the latest time, so a household with thousands of failures on record costs
+// the same read as one with three. A policy whose limit is above this would
+// never see itself reached; TestTheLockoutPolicyFitsTheEarlierFailuresCap
+// holds the default to it.
+const MaxEarlierFailures = 10
 
 type LoginAttemptRepository interface {
 	Record(ctx context.Context, householdID, userID *string, email string, succeeded bool, at time.Time) error

@@ -4121,6 +4121,17 @@ claim about both of them. Check the one you did not just edit.**
   (`TestABusyMomentDoesNotLeaveTheDecoyBroken`). **Adding a new way for a
   call to fail means re-reading every caller that treated failure as
   impossible.**
+- **The audit's own fix would have run nowhere it was needed
+  (2026-10-14).** It said to prune "inside the API next to the digest
+  ticker". The digest's goroutine starts only when Telegram and `NUDGES_AT`
+  are both set, so a prune added to it would have run on a box with the
+  digest and silently never on one without, and the start-up log would have
+  looked the same either way. Reading where `go runNudges` is called found
+  it before any code existed. The schedule now always starts and the digest
+  is one optional job on it; `TestTheScheduledPruneRunsWithTheDigestOff`
+  holds the rule, and a built image with Telegram off logged its first prune
+  at start-up. **Before hanging new work on an existing loop, find the line
+  that starts the loop and read the condition around it.**
 ---
 
 ### 17. A requirement the plan drops is invisible to every review that reads the plan

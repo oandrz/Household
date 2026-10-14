@@ -148,12 +148,20 @@ func run(args []string) error {
 	case "prune":
 		fs := flag.NewFlagSet("prune", flag.ContinueOnError)
 		fs.SetOutput(io.Discard) // see the matching comment in runResetPassword
-		days := fs.Int("older-than", 30, "delete consumed/expired rows older than this many days")
+		days := fs.Int("older-than", int(usecase.RetentionWindow.Hours()/24),
+			"delete consumed/expired rows older than this many days")
 		if err := fs.Parse(args[1:]); err != nil {
 			return err
 		}
-		return runPrune(ctx, postgres.NewSignupRepo(db), loginAttempts,
-			postgres.NewTelegramLinkRepo(db), time.Duration(*days)*24*time.Hour)
+		retention := usecase.NewRetentionService(usecase.RetentionDeps{
+			Signups:       postgres.NewSignupRepo(db),
+			LoginAttempts: loginAttempts,
+			TelegramLinks: postgres.NewTelegramLinkRepo(db),
+			MagicLinks:    postgres.NewMagicLinkRepo(db),
+			Invites:       postgres.NewInviteRepo(db),
+			Clock:         clock.System{},
+		})
+		return runPrune(ctx, retention, time.Duration(*days)*24*time.Hour)
 	case "grant-platform-admin":
 		fs := flag.NewFlagSet("grant-platform-admin", flag.ContinueOnError)
 		fs.SetOutput(io.Discard) // see the matching comment in runResetPassword
@@ -516,53 +524,16 @@ func runUnlockAdmin(ctx context.Context, users usecase.UserRepository,
 	return nil
 }
 
-// pruneFloor is the shortest retention window `prune` will accept. It is far
-// outside domain.LockoutPolicy.Window (15 minutes), because deleting a
-// login_attempts row still inside that window would clear a live lockout --
-// which would turn a cleanup command into a way to unlock a household that is
-// actively being guessed at. The floor is enforced rather than documented so
-// nobody can reach that state with a plausible-looking flag value.
-const pruneFloor = 7 * 24 * time.Hour
-
-// runPrune deletes consumed/expired signups, login attempts and Telegram
-// link requests older than olderThan. See pruneFloor for why a window under
-// seven days is refused rather than merely discouraged.
-func runPrune(ctx context.Context, signups usecase.SignupRepository,
-	attempts usecase.LoginAttemptRepository, telegramLinks usecase.TelegramLinkRepository,
-	olderThan time.Duration) error {
-	if olderThan < pruneFloor {
-		return fmt.Errorf("--older-than must be at least %d days: pruning login attempts inside the "+
-			"lockout window would clear a live lockout", int(pruneFloor.Hours()/24))
-	}
-	before := time.Now().Add(-olderThan)
-
-	prunedSignups, err := signups.Prune(ctx, before)
-	if err != nil {
-		return fmt.Errorf("prune signups: %w", err)
-	}
-	// login_attempts is pruned here rather than in its own command because
-	// ClearFailures -- the only thing that ever deleted from it -- is scoped
-	// WHERE household_id = $1, which never matches the NULL rows an
-	// unknown-address sign-in attempt records. Those rows were deleted by
-	// nothing at all, and a public sign-in endpoint means a stranger can create
-	// them without limit.
-	prunedAttempts, err := attempts.Prune(ctx, before)
-	if err != nil {
-		return fmt.Errorf("prune login attempts: %w", err)
-	}
-
-	// telegram_link_requests is the third table a stranger can grow without
-	// an account: a nonce nobody ever redeemed has no chat_id (its own CHECK
-	// enforces that), so no per-chat limit ever bounds it the way
-	// CountLinksSince bounds a redeemed one.
-	prunedTelegramLinks, err := telegramLinks.Prune(ctx, before)
-	if err != nil {
-		return fmt.Errorf("prune telegram link requests: %w", err)
-	}
-
-	fmt.Printf("Pruned %d signups, %d login attempts and %d Telegram link requests older than %s.\n",
-		prunedSignups, prunedAttempts, prunedTelegramLinks, before.Format(time.RFC3339))
-	return nil
+// runPrune is the API's daily prune run by hand, for an operator who wants a
+// different window. The window's floor is usecase.RetentionFloor, enforced
+// by the service before anything is deleted.
+func runPrune(ctx context.Context, retention *usecase.RetentionService, olderThan time.Duration) error {
+	counts, err := retention.Prune(ctx, olderThan)
+	fmt.Printf("Pruned %d signups, %d login attempts, %d Telegram link requests, %d magic links "+
+		"and %d expired invites older than %d days.\n",
+		counts.Signups, counts.LoginAttempts, counts.TelegramLinks, counts.MagicLinks, counts.Invites,
+		int(olderThan.Hours()/24))
+	return err
 }
 
 // capturingTokens wraps the real TokenGenerator, recording the raw value of

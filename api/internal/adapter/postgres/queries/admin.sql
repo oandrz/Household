@@ -53,7 +53,8 @@ RETURNING id;
 -- name: ListEarlierAdminReauthFailures :many
 SELECT at FROM admin_reauth_attempts
 WHERE user_id = $1 AND succeeded = false AND at >= $2 AND id <> $3
-ORDER BY at;
+ORDER BY at DESC
+LIMIT sqlc.arg(newest);
 
 -- name: WithdrawAdminReauthFailure :exec
 DELETE FROM admin_reauth_attempts WHERE id = $1 AND succeeded = false;
