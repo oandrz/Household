@@ -118,6 +118,9 @@ describe("RecurringBillsCard", () => {
 
     const family = screen.getAllByTestId("recurring-row")[1];
     expect(within(family).getByText("2 bills not counted: no exchange rate")).toBeInTheDocument();
+    // No figure rather than S$0.00, which would read as "costs nothing".
+    expect(within(family).queryByText("S$0.00")).not.toBeInTheDocument();
+    expect(within(family).getByText("—")).toBeInTheDocument();
     expect(within(screen.getAllByTestId("recurring-row")[0]).queryByText(/not counted/)).not.toBeInTheDocument();
   });
 

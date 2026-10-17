@@ -70,7 +70,16 @@ export function RecurringBillsCard({
                 <div className="text-[11px] text-muted">{BILL_COPY.recurringRowExcluded(row.excludedNoRate)}</div>
               )}
             </div>
-            <span className="tabular text-[13px] font-semibold text-ink">{money(row.monthlyMinor)}</span>
+            {/* A category whose every bill has no rate has no figure at all;
+                "S$0.00" would read as "costs nothing". */}
+            {row.annualMinor === 0 && row.excludedNoRate > 0 ? (
+              <span className="text-[13px] text-muted">
+                <span aria-hidden="true">—</span>
+                <span className="sr-only">{BILL_COPY.recurringRowNoFigure}</span>
+              </span>
+            ) : (
+              <span className="tabular text-[13px] font-semibold text-ink">{money(row.monthlyMinor)}</span>
+            )}
           </div>
         ))}
       </div>

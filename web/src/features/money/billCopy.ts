@@ -335,6 +335,7 @@ export const BILL_COPY = {
   recurringNoCategory: "No category",
   recurringRowExcluded: (count: number) =>
     `${count} ${count === 1 ? "bill" : "bills"} not counted: no exchange rate`,
+  recurringRowNoFigure: "Not counted",
   recurringEquivalentNote: "Monthly equivalents: a yearly bill counts as 1/12 of its amount each month.",
   // Never a bare S$0: a household with only one-off bills would otherwise
   // read it as "Hearth lost my bills".
