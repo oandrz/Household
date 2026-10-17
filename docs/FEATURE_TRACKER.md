@@ -22,6 +22,9 @@ needed them to exist (see "Where things stand" below).
 > goes 37 → 38 built and 7 → 8 not started. Recounted by script before and
 > after the edit; the first run reproduced the previous table exactly.
 > Totals **124/21/15/5 = 165**, Built + Partial **145**, denominator **160**.
+> Later the same day the pre-landing review found two gaps, so the new row
+> moves ✅ → 🟡 with both named: Money 38 → 37 built, 5 → 6 partial. Totals
+> **123/22/15/5 = 165**, Built + Partial **145**, denominator **160**.
 
 > **Recounted 2026-10-16 (per-household limits)**. One row the design does
 > not draw is added to §3, ✅: "Per-household limits on stored data".
@@ -1190,13 +1193,13 @@ above now states Built + Partial **113** of **134**, denominator **129**.
 | Navigation shell | 7 | 1 | 1 | 0 |
 | Household settings | 17 | 8 | 2 | 0 |
 | Overview (home) | 9 | 2 | 1 | 0 |
-| Money | 38 | 5 | 8 | 0 |
+| Money | 37 | 6 | 8 | 0 |
 | Marriage | 17 | 2 | 2 | 0 |
 | Family | 0 | 0 | 0 | 3 |
 | Household extras | 0 | 0 | 0 | 1 |
 | Platform administration | 7 | 1 | 0 | 1 |
 | Automation | 10 | 0 | 0 | 0 |
-| **Total** | **124** | **21** | **15** | **5** |
+| **Total** | **123** | **22** | **15** | **5** |
 
 ---
 
@@ -1753,7 +1756,7 @@ as their own rows rather than folded silently into the cards above them.
 | Add bill (modal) | ✅ |
 | Undo a payment (no mockup — see below) | ✅ |
 | Archive and restore a bill (no mockup — see below) | ✅ |
-| Recurring bills total, by category (no mockup) | ✅ — 2026-10-17. What every live bill that repeats costs a month and a year, subscription or not, so a household can see whether it has cut its fixed costs: archiving a cancelled bill makes the headline drop. One-offs are left out, since they do not repeat. A quarterly or yearly bill counts as its yearly cost divided by 12. Below the headline, one row per category, largest first, plus a "No category" row; a category holding only one-offs has no row. The rows add up exactly to the headline (`domain.MonthlySharesMinor`). A bill in a currency with no rate is left out, counted in the page's note, and its category row says so; a category with no convertible bill shows "—" rather than S$0.00, which would read as "costs nothing". The total is the card's 24px headline figure, the size the stat cards above it use. Worked out by `BillService.List` and sent in `summary` (`recurringMonthlyMinor`, `recurringAnnualMinor`, `recurringByCategory`); the browser does no sums. On a phone the card sits above the bill list. Deliberately a breakdown, not a category filter: a filter would either re-ask the server on every tap or narrow some figures on the page and not others. Walked 2026-10-17: a yearly S$1,200 bill raised the month by S$100.00, a one-off changed nothing, a S$19.98 subscription raised it by S$19.98, archiving the yearly bill dropped it by S$100.00, and at 375px the card came before the list. Then a quarterly S$90 bill added S$30.00 a month, a S$50 bill with no category appeared as a "No category" row, and a yearly bill paid from a USD account (no rate to SGD) left the headline unchanged, showed its category with no figure ("—", read out as "Not counted") and "1 bill not counted: no exchange rate", and raised the page note to 1 |
+| Recurring bills total, by category (no mockup) | 🟡 — 2026-10-17. What every live bill that repeats costs a month and a year, subscription or not, so a household can see whether it has cut its fixed costs: archiving a cancelled bill makes the headline drop. One-offs are left out, since they do not repeat. A quarterly or yearly bill counts as its yearly cost divided by 12. Below the headline, one row per category, largest first, plus a "No category" row; a category holding only one-offs has no row. The rows add up exactly to the headline (`domain.MonthlySharesMinor`). A bill in a currency with no rate is left out, counted in the page's note, and its category row says so; a category with no convertible bill shows "—" rather than S$0.00, which would read as "costs nothing". The total is the card's 24px headline figure, the size the stat cards above it use. Worked out by `BillService.List` and sent in `summary` (`recurringMonthlyMinor`, `recurringAnnualMinor`, `recurringByCategory`); the browser does no sums. On a phone the card sits above the bill list. Deliberately a breakdown, not a category filter: a filter would either re-ask the server on every tap or narrow some figures on the page and not others. Walked 2026-10-17: a yearly S$1,200 bill raised the month by S$100.00, a one-off changed nothing, a S$19.98 subscription raised it by S$19.98, archiving the yearly bill dropped it by S$100.00, and at 375px the card came before the list. Then a quarterly S$90 bill added S$30.00 a month, a S$50 bill with no category appeared as a "No category" row, and a yearly bill paid from a USD account (no rate to SGD) left the headline unchanged, showed its category with no figure ("—", read out as "Not counted") and "1 bill not counted: no exchange rate", and raised the page note to 1. When no bill repeats, the card shows only its empty message and leaves the subscriptions section out: a ticked one-off is covered by "One-offs aren't counted". **Two known gaps, both open decisions on the pull request:** (1) the "All caught up" panel is hidden whenever any repeating bill has no exchange rate, even one not due this month, because the page note's count now includes every such bill; (2) a single bill near the amount ceiling in a household whose primary currency is far weaker (S$619bn a month into IDR) overflows when its yearly figure is converted, and `GET /bills` then fails for that household. The second already happened for subscriptions before this row. Also open: when every repeating bill has no rate, the headline reads S$0.00 /mo |
 | Paid on bills, last 6 months (no mockup) | ⬜ — the named follow-up to the row above, which shows the total today but not whether it has fallen. Can be worked out on each read from `bill_payments` (`due_on`, `amount_minor`) with nothing new stored. Two limits: it shows what was paid, so a yearly bill makes one month spike, and it only knows about bills someone marked paid. A history of what each bill was *set* to cost cannot be rebuilt today, because editing a bill overwrites `bills.amount_minor`; that would need a new table recording each change |
 
 **A household can add a bill, see it come due, mark it paid and undo that if

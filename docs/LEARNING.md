@@ -5157,6 +5157,18 @@ the code is not evidence until checked against it):
   bill having changed. `TestRecurringTotalExcludesANoRateBillAndMarksItsRow`
   pins it.
 
+- **A new total multiplies the ceiling it inherits (Recurring bills,
+  2026-10-17).** `domain.MaxAmountMinor` promises that one amount survives
+  conversion into the primary currency. The recurring total first multiplies
+  a monthly bill by 12 and only then converts it, so one bill under the
+  ceiling (S$619bn a month into IDR) overflows inside `Rate.Apply` and every
+  `GET /bills` for that household fails. The subscriptions total had the same
+  path before; widening it to every repeating bill widened the exposure. Found
+  by the pre-landing Red Team review, not by any test, because every fixture
+  uses ordinary amounts. **When a figure is derived from a capped amount
+  (multiplied, summed, converted), check the derived figure against the cap's
+  promise, not just the input.**
+
 ### Database and repositories
 
 - `MarkInviteAccepted` had no guard and no `RETURNING`, so two concurrent
