@@ -84,7 +84,7 @@ export function RecurringBillsCard({
         ))}
       </div>
 
-      <p data-testid="recurring-equivalent-note" className="mt-3 text-[11px] text-muted">
+      <p data-testid="recurring-equivalent-note" className="mt-3 text-[12px] text-muted">
         {BILL_COPY.recurringEquivalentNote}
       </p>
 

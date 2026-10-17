@@ -94,7 +94,7 @@ export function SubscriptionsSection({
           while the totals are monthly equivalents; without this sentence the
           two kinds of figure cannot be told apart. No "last reviewed" date:
           nothing in the product can set one. */}
-      <p data-testid="subscriptions-equivalent-note" className="mt-1.5 text-[11px] text-muted">
+      <p data-testid="subscriptions-equivalent-note" className="mt-3 text-[12px] text-muted">
         {BILL_COPY.subscriptionsEquivalentNote}
       </p>
     </section>
