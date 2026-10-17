@@ -142,6 +142,7 @@ type BillDeps struct {
 	FX         FXRateProvider
 	Accounts   AccountLookup
 	Categories CategoryLookup
+	Usage      HouseholdUsage
 }
 
 // BillService composes the Bills screen and every write against it. Like
@@ -452,6 +453,9 @@ func (s *BillService) Create(ctx context.Context, in NewBill, today time.Time) (
 	if name == "" {
 		return BillView{}, domain.ErrBillNameRequired
 	}
+	if err := domain.CheckTextLength(domain.TextName, name, domain.MaxNameLen); err != nil {
+		return BillView{}, err
+	}
 	if in.AmountMinor <= 0 {
 		return BillView{}, domain.ErrBillAmountNotPositive
 	}
@@ -487,6 +491,9 @@ func (s *BillService) Create(ctx context.Context, in NewBill, today time.Time) (
 	}
 
 	if err := s.validateCategory(ctx, in.HouseholdID, in.CategoryID); err != nil {
+		return BillView{}, err
+	}
+	if err := refuseAtCap(ctx, s.deps.Usage, in.HouseholdID, domain.LimitBills); err != nil {
 		return BillView{}, err
 	}
 
@@ -547,6 +554,9 @@ func (s *BillService) Update(ctx context.Context, householdID, billID string, pa
 		name := strings.TrimSpace(*patch.Name)
 		if name == "" {
 			return BillView{}, domain.ErrBillNameRequired
+		}
+		if err := domain.CheckTextLength(domain.TextName, name, domain.MaxNameLen); err != nil {
+			return BillView{}, err
 		}
 		b.Name = name
 	}

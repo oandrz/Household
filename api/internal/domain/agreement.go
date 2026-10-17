@@ -221,9 +221,9 @@ func validateAgreementBody(body string) error {
 	return nil
 }
 
-// ValidateAgreementSectionName is the New-section modal's rule. There is no
-// cap on how many sections a household may have: a count cap is a
-// check-then-write two owners can both pass.
+// ValidateAgreementSectionName is the New-section modal's rule. How many
+// sections a household may hold is capped by LimitAgreementSections, checked
+// in AgreementService.CreateSection.
 func ValidateAgreementSectionName(name string) error {
 	trimmed := strings.TrimSpace(name)
 	if trimmed == "" {

@@ -11,11 +11,12 @@ import (
 // writes Budget's "Edit categories" screen makes -- add, rename, archive,
 // restore. Transactions reads the same list this service seeds and writes.
 type CategoryService struct {
-	repo CategoryRepository
+	repo  CategoryRepository
+	usage HouseholdUsage
 }
 
-func NewCategoryService(repo CategoryRepository) *CategoryService {
-	return &CategoryService{repo: repo}
+func NewCategoryService(repo CategoryRepository, usage HouseholdUsage) *CategoryService {
+	return &CategoryService{repo: repo, usage: usage}
 }
 
 // List returns the household's live categories, seeding the starter set first
@@ -61,6 +62,9 @@ func (s *CategoryService) Create(ctx context.Context, householdID, name string) 
 	if err != nil {
 		return domain.Category{}, err
 	}
+	if err := refuseAtCap(ctx, s.usage, householdID, domain.LimitCategories); err != nil {
+		return domain.Category{}, err
+	}
 	return s.repo.Create(ctx, domain.Category{
 		HouseholdID: householdID,
 		Name:        name,
@@ -98,6 +102,9 @@ func validateCategoryName(name string) (string, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
 		return "", domain.ErrCategoryNameRequired
+	}
+	if err := domain.CheckTextLength(domain.TextName, name, domain.MaxNameLen); err != nil {
+		return "", err
 	}
 	return name, nil
 }

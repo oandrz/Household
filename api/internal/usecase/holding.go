@@ -61,6 +61,7 @@ type HoldingDeps struct {
 	Income     HoldingIncomeRepository
 	Accounts   AccountLookup
 	Households HouseholdRepository
+	Usage      HouseholdUsage
 }
 
 // HoldingService composes the portfolio screen and every write against it.
@@ -95,10 +96,24 @@ func (s *HoldingService) Create(ctx context.Context, h domain.Holding) (domain.H
 	if h.Unit == "" {
 		h.Unit = "unit"
 	}
+	if err := checkHoldingText(h); err != nil {
+		return domain.Holding{}, err
+	}
 	if err := s.requireInvestmentAccount(ctx, h.HouseholdID, h.AccountID); err != nil {
 		return domain.Holding{}, err
 	}
+	if err := refuseAtCap(ctx, s.d.Usage, h.HouseholdID, domain.LimitHoldings); err != nil {
+		return domain.Holding{}, err
+	}
 	return s.d.Holdings.Create(ctx, h)
+}
+
+// checkHoldingText is the name and unit length rule Create and Update share.
+func checkHoldingText(h domain.Holding) error {
+	if err := domain.CheckTextLength(domain.TextName, h.Name, domain.MaxNameLen); err != nil {
+		return err
+	}
+	return domain.CheckTextLength(domain.TextUnit, h.Unit, domain.MaxHoldingUnitLen)
 }
 
 // requireInvestmentAccount fails closed on the account's type. An account in
@@ -133,6 +148,9 @@ func (s *HoldingService) Update(ctx context.Context, h domain.Holding) (domain.H
 		return domain.Holding{}, domain.ErrHoldingNameRequired
 	}
 	if _, err := domain.ParseInstrumentKind(string(h.Instrument)); err != nil {
+		return domain.Holding{}, err
+	}
+	if err := checkHoldingText(h); err != nil {
 		return domain.Holding{}, err
 	}
 	return s.d.Holdings.Update(ctx, h)

@@ -290,6 +290,7 @@ func newTestEnvWith(t *testing.T, clk usecase.Clock, outbox usecase.MailOutbox) 
 		Tokens: apiTokens, Chats: telegramAccounts, Members: memberships,
 	})
 	householdSvc := usecase.NewHouseholdService(usecase.HouseholdDeps{
+		Usage:         usage,
 		Households:    households,
 		Spaces:        spaces,
 		Notifications: notifications,
@@ -313,13 +314,14 @@ func newTestEnvWith(t *testing.T, clk usecase.Clock, outbox usecase.MailOutbox) 
 	categoryRepo := postgres.NewCategoryRepo(db)
 	fxProvider := fx.NewStaticProvider()
 	accountSvc := usecase.NewAccountService(usecase.AccountDeps{
+		Usage:      usage,
 		Accounts:   accountRepo,
 		Households: households,
 		FX:         fxProvider,
 		Clock:      clk,
 		Holdings:   postgres.NewHoldingRepo(db),
 	})
-	categorySvc := usecase.NewCategoryService(categoryRepo)
+	categorySvc := usecase.NewCategoryService(categoryRepo, usage)
 	transactionRepo := postgres.NewTransactionRepo(db)
 	transactionSvc := usecase.NewTransactionService(usecase.TransactionDeps{
 		Transactions: transactionRepo,
@@ -331,6 +333,7 @@ func newTestEnvWith(t *testing.T, clk usecase.Clock, outbox usecase.MailOutbox) 
 	})
 	goalRepo := postgres.NewGoalRepo(db)
 	holdingSvc := usecase.NewHoldingService(usecase.HoldingDeps{
+		Usage:      usage,
 		Holdings:   postgres.NewHoldingRepo(db),
 		Events:     postgres.NewHoldingEventRepo(db),
 		Valuations: postgres.NewHoldingValuationRepo(db),
@@ -339,6 +342,7 @@ func newTestEnvWith(t *testing.T, clk usecase.Clock, outbox usecase.MailOutbox) 
 		Households: households,
 	})
 	goalSvc := usecase.NewGoalService(usecase.GoalDeps{
+		Usage:      usage,
 		Goals:      goalRepo,
 		Households: households,
 		FX:         fxProvider,
@@ -357,6 +361,7 @@ func newTestEnvWith(t *testing.T, clk usecase.Clock, outbox usecase.MailOutbox) 
 		Goals: goalRepo,
 	})
 	billSvc := usecase.NewBillService(usecase.BillDeps{
+		Usage:      usage,
 		Bills:      postgres.NewBillRepo(db),
 		Households: households,
 		FX:         fxProvider,
@@ -369,7 +374,7 @@ func newTestEnvWith(t *testing.T, clk usecase.Clock, outbox usecase.MailOutbox) 
 	// percentage from Goals and the narrow port is what keeps it from
 	// depending on GoalRepository's whole surface.
 	visionSvc := usecase.NewVisionService(postgres.NewVisionRepo(db), goalRepo)
-	agreementSvc := usecase.NewAgreementService(postgres.NewAgreementRepo(db), memberships)
+	agreementSvc := usecase.NewAgreementService(postgres.NewAgreementRepo(db), memberships, usage)
 
 	platformAdminRepo := postgres.NewPlatformAdminRepo(db)
 	featureFlagRepo := postgres.NewFeatureFlagRepo(db)

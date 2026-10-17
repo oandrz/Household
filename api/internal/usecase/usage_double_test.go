@@ -35,6 +35,21 @@ func (u *usageDouble) setMonth(month time.Time, n int) {
 	u.months[month.Format("2006-01")] = n
 }
 
+// adopt copies other's counts into u, for a fixture that built its own
+// double before the test chose the counts.
+func (u *usageDouble) adopt(other *usageDouble) {
+	other.mu.Lock()
+	defer other.mu.Unlock()
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	for k, n := range other.counts {
+		u.counts[k] = n
+	}
+	for m, n := range other.months {
+		u.months[m] = n
+	}
+}
+
 func (u *usageDouble) Count(_ context.Context, _ string, kind domain.LimitKind) (int, error) {
 	u.mu.Lock()
 	defer u.mu.Unlock()

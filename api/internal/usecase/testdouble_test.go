@@ -1961,6 +1961,7 @@ type fixture struct {
 	invites        *usecase.InviteService
 	memberSvc      *usecase.MemberService
 	householdSvc   *usecase.HouseholdService
+	householdUsage *usageDouble
 	clock          *fixedClock
 	sessions       *sessionDouble
 	apiTokens      *apiTokenDouble
@@ -2087,15 +2088,17 @@ func newFixture(t *testing.T) *fixture {
 	})
 
 	holdings := &holdingCounterDouble{}
+	householdUsage := newUsageDouble()
 	householdSvc := usecase.NewHouseholdService(usecase.HouseholdDeps{
 		Households:    households,
 		Spaces:        spaces,
 		Notifications: notifications,
 		Holdings:      holdings,
+		Usage:         householdUsage,
 	})
 
 	return &fixture{
-		auth: auth, invites: invites, memberSvc: memberSvc, householdSvc: householdSvc,
+		auth: auth, invites: invites, memberSvc: memberSvc, householdSvc: householdSvc, householdUsage: householdUsage,
 		clock: clock, sessions: sessions, apiTokens: apiTokens, mailer: mailer, hasher: hasher,
 		attempts: attempts,
 		users:    users, members: members, magicLinks: magicLinks, inviteRepo: inviteRepo,

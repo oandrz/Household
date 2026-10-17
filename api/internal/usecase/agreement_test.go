@@ -49,7 +49,7 @@ func TestAgreementGetComposesTheWholeDocument(t *testing.T) {
 	repo.seedProposal("parked", "add", money.ID, "We split the holiday fund", nil, "m1")
 	repo.seedProposal("withdrawn", "add", money.ID, "Never mind", &september, "m1")
 
-	view, err := usecase.NewAgreementService(repo, members).Get(context.Background(), "hh")
+	view, err := usecase.NewAgreementService(repo, members, newUsageDouble()).Get(context.Background(), "hh")
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
@@ -110,7 +110,7 @@ func TestAgreementGetIsLockedForOneOwnerAndStillCarriesTheDocument(t *testing.T)
 	repo.seedAgreement(money.ID, "Anything over $200 gets a conversation")
 	repo.seedProposal("pending", "add", money.ID, "We split the holiday fund", nil, "m1")
 
-	view, err := usecase.NewAgreementService(repo, members).Get(context.Background(), "hh")
+	view, err := usecase.NewAgreementService(repo, members, newUsageDouble()).Get(context.Background(), "hh")
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
@@ -135,7 +135,7 @@ func TestAgreementGetHasNoUpdatedAtUntilSomethingIsAccepted(t *testing.T) {
 	repo.seedProposal("pending", "add", money.ID, "We split the holiday fund", nil, "m1")
 	repo.seedProposal("withdrawn", "add", money.ID, "Never mind", &withdrawnAt, "m1")
 
-	view, err := usecase.NewAgreementService(repo, members).Get(context.Background(), "hh")
+	view, err := usecase.NewAgreementService(repo, members, newUsageDouble()).Get(context.Background(), "hh")
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
@@ -156,7 +156,7 @@ func TestAgreementWritesAreRefusedOnAOneOwnerHouseholdBeforeAnyRepositoryCall(t 
 	repo.setMembers(members)
 	section := repo.seedSection("Money")
 	open := repo.seedProposal("pending", "add", section.ID, "We split the holiday fund", nil, "m1")
-	svc := usecase.NewAgreementService(repo, members)
+	svc := usecase.NewAgreementService(repo, members, newUsageDouble())
 	ctx, now := context.Background(), time.Date(2026, 9, 5, 20, 0, 0, 0, time.UTC)
 
 	for name, write := range map[string]func() error{
@@ -191,7 +191,7 @@ func TestAgreementProposeSignsTheProposerAndTheAwaitingListFollowsTheOwners(t *t
 	repo := newAgreementRepoDouble()
 	repo.setMembers(members)
 	section := repo.seedSection("Us")
-	svc := usecase.NewAgreementService(repo, members)
+	svc := usecase.NewAgreementService(repo, members, newUsageDouble())
 	ctx, now := context.Background(), time.Date(2026, 9, 5, 20, 0, 0, 0, time.UTC)
 
 	proposal, doc, err := svc.Propose(ctx, "hh", "m1", domain.AgreementProposal{
@@ -274,7 +274,7 @@ func TestAgreementSignAppliesAnEditAndARemoveAndRenumbersWhatIsLeft(t *testing.T
 	overTwoHundred := repo.seedAgreement(money.ID, "Anything over $200 gets a conversation")
 	firstSunday := repo.seedAgreement(money.ID, "We review the budget on the first Sunday")
 	repo.seedAgreement(home.ID, "Phone-free dinners")
-	svc := usecase.NewAgreementService(repo, members)
+	svc := usecase.NewAgreementService(repo, members, newUsageDouble())
 	ctx := context.Background()
 	proposedAt := time.Date(2026, 9, 5, 20, 0, 0, 0, time.UTC)
 	agreedAt := proposedAt.Add(time.Hour)
@@ -359,7 +359,7 @@ func TestAgreementWithdrawOnAnAcceptedProposalWritesNothing(t *testing.T) {
 	resolved := time.Date(2026, 8, 1, 9, 0, 0, 0, time.UTC)
 	accepted := repo.seedProposal("accepted", "add", money.ID,
 		"Anything over $200 gets a conversation", &resolved, "m1", "m2")
-	svc := usecase.NewAgreementService(repo, members)
+	svc := usecase.NewAgreementService(repo, members, newUsageDouble())
 	ctx, now := context.Background(), time.Date(2026, 9, 5, 20, 0, 0, 0, time.UTC)
 
 	before := repo.writes
@@ -389,7 +389,7 @@ func TestAgreementWithdrawHandsTheProposerCheckToTheStore(t *testing.T) {
 	repo := newAgreementRepoDouble()
 	repo.setMembers(members)
 	money := repo.seedSection("Money")
-	svc := usecase.NewAgreementService(repo, members)
+	svc := usecase.NewAgreementService(repo, members, newUsageDouble())
 	ctx, now := context.Background(), time.Date(2026, 9, 5, 20, 0, 0, 0, time.UTC)
 
 	proposed, _, err := svc.Propose(ctx, "hh", "m1", domain.AgreementProposal{
@@ -426,7 +426,7 @@ func TestAgreementStarterSetIsIdempotentAndCreatesNoAgreements(t *testing.T) {
 	members := seedMembers(t, 2)
 	repo := newAgreementRepoDouble()
 	repo.setMembers(members)
-	svc := usecase.NewAgreementService(repo, members)
+	svc := usecase.NewAgreementService(repo, members, newUsageDouble())
 	ctx, now := context.Background(), time.Date(2026, 9, 5, 20, 0, 0, 0, time.UTC)
 
 	first, err := svc.SeedStarterSections(ctx, "hh", now)
@@ -473,7 +473,7 @@ func TestAgreementParkCapsItsOwnNoteSeparatelyFromTheProposalNote(t *testing.T) 
 	repo.setMembers(members)
 	money := repo.seedSection("Money")
 	open := repo.seedProposal("pending", "add", money.ID, "We split the holiday fund", nil, "m1")
-	svc := usecase.NewAgreementService(repo, members)
+	svc := usecase.NewAgreementService(repo, members, newUsageDouble())
 	ctx, now := context.Background(), time.Date(2026, 9, 5, 20, 0, 0, 0, time.UTC)
 
 	// Three bytes to the rune, so a byte cap and a rune cap disagree about

@@ -47,12 +47,12 @@ func telegramCommandFixtureWithUsage(t *testing.T, now time.Time, timezone strin
 	households.put(domain.Household{ID: "house-1", PrimaryCurrency: "SGD", Timezone: timezone})
 	accountSvc := usecase.NewAccountService(usecase.AccountDeps{
 		Accounts: accountRepo, Households: households, FX: newFXDouble(), Clock: &fixedClock{now: now},
-		Holdings: holdingCounterDouble{},
+		Holdings: holdingCounterDouble{}, Usage: newUsageDouble(),
 	})
 	categorySvc := usecase.NewCategoryService(&fakeCategoryRepo{categories: []domain.Category{
 		{ID: "cat-groceries", HouseholdID: "house-1", Name: "Groceries", Kind: domain.CategoryExpense},
 		{ID: "cat-income", HouseholdID: "house-1", Name: "Salary", Kind: domain.CategoryIncome},
-	}})
+	}}, newUsageDouble())
 	svc := usecase.NewTelegramCommandService(usecase.TelegramCommandDeps{
 		Accounts: accountSvc, Categories: categorySvc, Transactions: txnSvc,
 		Households: households, Clock: &fixedClock{now: now},

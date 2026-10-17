@@ -47,6 +47,7 @@ type HouseholdDeps struct {
 	// Holdings is consulted for one question only: does this household hold
 	// anything. See PrimaryCurrencyLocked.
 	Holdings HoldingCounter
+	Usage    HouseholdUsage
 }
 
 // HouseholdService covers the household settings screen: the household
@@ -146,6 +147,12 @@ func (s *HouseholdService) CreateSpace(ctx context.Context, householdID, name st
 	trimmedName := strings.TrimSpace(name)
 	if trimmedName == "" {
 		return domain.Space{}, ErrSpaceNameRequired
+	}
+	if err := domain.CheckTextLength(domain.TextName, trimmedName, domain.MaxNameLen); err != nil {
+		return domain.Space{}, err
+	}
+	if err := refuseAtCap(ctx, s.d.Usage, householdID, domain.LimitSpaces); err != nil {
+		return domain.Space{}, err
 	}
 
 	key := spaceKey(name)
