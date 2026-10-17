@@ -487,4 +487,11 @@ describe("TransactionModal", () => {
 
     await waitFor(() => expect(screen.getByLabelText(/date/i)).toHaveValue("2026-10-01"));
   });
+
+  // The server refuses a description over 200 characters; the box stops
+  // there so nobody types a sentence only to be told it is too long.
+  it("stops the description at the server's 200-character limit", () => {
+    renderModal();
+    expect(screen.getByLabelText(/description/i)).toHaveAttribute("maxLength", "200");
+  });
 });

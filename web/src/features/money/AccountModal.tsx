@@ -33,6 +33,7 @@ import { useCreateAccount, useUpdateAccount } from "./useAccounts";
 import { parseEnum } from "../../lib/parseEnum";
 import { accountTypeSchema, type Account, type AccountType } from "./schemas";
 import { useHouseholdDateInput } from "../auth/useHouseholdDateInput";
+import { MAX_NAME_LENGTH } from "../../api/textLimits";
 
 // AccountFormValues is exactly the POST body the create route accepts, so the
 // modal and useCreateAccount cannot disagree about field names.
@@ -244,6 +245,7 @@ export function AccountModal({
             type="text"
             required
             value={nickname}
+            maxLength={MAX_NAME_LENGTH}
             onChange={(event) => setNickname(event.target.value)}
             className={FIELD_CONTROL_CLASS}
           />

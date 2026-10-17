@@ -23,6 +23,7 @@ import { apiErrorMessage } from "../../api/errorMessage";
 import type { MemberView } from "../settings/schemas";
 import { RETRO_COPY } from "./retroCopy";
 import type { useRetro } from "./useRetro";
+import { MAX_NOTE_LENGTH } from "../../api/textLimits";
 
 export function AddActionComposer({
   members,
@@ -104,6 +105,7 @@ export function AddActionComposer({
       <input
         type="text"
         value={newActionBody}
+        maxLength={MAX_NOTE_LENGTH}
         onChange={(event) => setNewActionBody(event.target.value)}
         // Enter adds the action, which is what someone typing one
         // means by it. handleAddAction re-checks the same conditions

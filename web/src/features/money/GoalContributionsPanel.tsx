@@ -37,6 +37,7 @@ import { GOAL_COPY, contributionSourceLabel } from "./goalCopy";
 import { useGoalContributions, useGoals } from "./useGoals";
 import type { Goal, GoalContribution } from "./goalSchemas";
 import { useHouseholdDateInput } from "../auth/useHouseholdDateInput";
+import { MAX_NOTE_LENGTH } from "../../api/textLimits";
 
 function ContributionRow({
   contribution,
@@ -243,6 +244,7 @@ export function GoalContributionsPanel({
             id="contribution-note"
             type="text"
             value={note}
+            maxLength={MAX_NOTE_LENGTH}
             onChange={(event) => setNote(event.target.value)}
             className={FIELD_CONTROL_CLASS}
           />

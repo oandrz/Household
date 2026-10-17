@@ -40,6 +40,7 @@ import type { TemplatePrefill } from "./budgetTemplates";
 import { formatMoney, minorUnitsToInputValue, toMinorUnits } from "./formatMoney";
 import { useBudget, type SaveBudgetBody } from "./useBudget";
 import { useBudgetRows, type BudgetRow, type CategoryOption } from "./useBudgetRows";
+import { MAX_NAME_LENGTH } from "../../api/textLimits";
 
 // GET /api/v1/categories?includeArchived=true's shape -- distinct from
 // transactionSchemas.ts's `categoriesResponseSchema`, whose own
@@ -381,6 +382,7 @@ function BudgetModalForm({
                 id="budget-modal-new-category-name"
                 type="text"
                 value={newCategoryName}
+                maxLength={MAX_NAME_LENGTH}
                 onChange={(event) => setNewCategoryName(event.target.value)}
                 className={`${FIELD_CONTROL_CLASS} flex-1`}
               />

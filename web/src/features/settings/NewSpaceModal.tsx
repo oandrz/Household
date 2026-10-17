@@ -10,6 +10,7 @@ import { Modal } from "../../components/Modal";
 import { ModalActions } from "../../components/ModalActions";
 import { apiErrorMessage } from "../../api/errorMessage";
 import { useCreateSpace, type VisibilityOption } from "./useSpaces";
+import { MAX_NAME_LENGTH } from "../../api/textLimits";
 
 // The design's four template tiles. Selecting one prefills the Name field
 // (the design shows "Kids" selected with Name already reading "Kids") --
@@ -97,6 +98,7 @@ export function NewSpaceModal({
             type="text"
             required
             value={name}
+            maxLength={MAX_NAME_LENGTH}
             onChange={(event) => setName(event.target.value)}
             className={FIELD_CONTROL_CLASS}
           />

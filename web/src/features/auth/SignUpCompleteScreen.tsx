@@ -23,6 +23,7 @@ import { browserTimeZone } from "../../lib/browserTimeZone";
 import { type Currency, type SignUpPreview } from "./schemas";
 import { useCompleteSignUp, useCurrencies, useSignUpPreview } from "./useAuth";
 import { BrandMark } from "../../components/BrandMark";
+import { MAX_NAME_LENGTH } from "../../api/textLimits";
 
 function currencyLabel(c: Currency) {
   return c.symbol ? `${c.code} (${c.symbol}) — ${c.name}` : `${c.code} — ${c.name}`;
@@ -217,6 +218,7 @@ function CompleteSignUpForm({
             type="text"
             required
             value={householdName}
+            maxLength={MAX_NAME_LENGTH}
             onChange={(event) => setHouseholdName(event.target.value)}
             className="rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px]"
           />
@@ -281,6 +283,7 @@ function CompleteSignUpForm({
             autoComplete="name"
             required
             value={displayName}
+            maxLength={MAX_NAME_LENGTH}
             onChange={(event) => setDisplayName(event.target.value)}
             className="rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px]"
           />

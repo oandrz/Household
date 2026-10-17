@@ -480,4 +480,14 @@ describe("AccountModal", () => {
       await screen.findByText("Limited members can see this account exists, not the balance"),
     ).toBeInTheDocument();
   });
+
+  it("stops the nickname at the server's 80-character limit", async () => {
+    stubFetchRoutes({
+      "GET /api/v1/auth/me": { status: 200, body: meFixture() },
+      "GET /api/v1/currencies": CURRENCIES,
+      "GET /api/v1/household/members": NO_MEMBERS,
+    });
+    renderWithRouter(<AccountModal open onClose={() => {}} />);
+    expect(await screen.findByLabelText("Nickname")).toHaveAttribute("maxLength", "80");
+  });
 });

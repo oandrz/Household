@@ -22,6 +22,7 @@ import { formatMoney, toMinorUnits } from "./formatMoney";
 import { useHoldingIncome, useHoldings } from "./useHoldings";
 import { parseEnum } from "../../lib/parseEnum";
 import { incomeKindSchema, type Holding, type IncomeKind } from "./holdingSchemas";
+import { MAX_NOTE_LENGTH } from "../../api/textLimits";
 
 export function HoldingIncomePanel({
   holding,
@@ -116,6 +117,7 @@ export function HoldingIncomePanel({
               className={FIELD_CONTROL_CLASS}
               type="text"
               value={note}
+              maxLength={MAX_NOTE_LENGTH}
               onChange={(e) => setNote(e.target.value)}
               placeholder="Q3 dividend"
             />
