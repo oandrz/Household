@@ -134,6 +134,9 @@ func NewRouter(deps Deps) http.Handler {
 	// middleware_recoverer.go for why chi's version (a bare, bodyless 500)
 	// is wrong for this API.
 	r.Use(recoverer)
+	// After recoverer, so a panic in a slow handler is still answered with
+	// the standard envelope; before every route, public ones included.
+	r.Use(withRequestDeadline(RequestDeadline))
 
 	// writeNotFound, not an inline WriteError: requirePlatformAdmin answers
 	// with the identical helper, so a hidden admin route and a genuinely

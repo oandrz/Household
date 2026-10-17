@@ -1,6 +1,7 @@
 package httpadapter_test
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -124,4 +125,22 @@ func TestEverySignedInRouteIsHouseholdLimited(t *testing.T) {
 		t.Fatalf("checked %d signed-in routes, want at least 102 -- "+
 			"the walk may not be enumerating routes correctly", checked)
 	}
+}
+
+func TestTheRouterGivesEveryRequestADeadline(t *testing.T) {
+	env := newTestEnv(t)
+	d := env.deps
+	var ok bool
+	d.Pinger = deadlineProbe{seen: &ok}
+	httpadapter.NewRouter(d).ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/readyz", nil))
+	if !ok {
+		t.Fatal("GET /readyz ran without a request deadline on its context")
+	}
+}
+
+type deadlineProbe struct{ seen *bool }
+
+func (p deadlineProbe) Ping(ctx context.Context) error {
+	_, *p.seen = ctx.Deadline()
+	return nil
 }
