@@ -124,6 +124,25 @@ describe("RecurringBillsCard", () => {
     expect(within(screen.getAllByTestId("recurring-row")[0]).queryByText(/not counted/)).not.toBeInTheDocument();
   });
 
+  // Value: protects=a partly short category shows its counted figure and the singular "1 bill not counted" note together;
+  // fails_when=the dash rule drops its annualMinor === 0 half, hiding real money, or the count loses its singular;
+  // why_new=the test above covers only a row with nothing counted; seam=none;
+  // no_claim=server figures (props stand in for the API; jsdom render only)
+  it("keeps a category's figure when only some of its bills have no exchange rate, and says how many are missing", () => {
+    renderCard(
+      summary({
+        recurringMonthlyMinor: 18000,
+        recurringAnnualMinor: 216000,
+        recurringByCategory: [row({ categoryId: "cat-family", categoryName: "Family", excludedNoRate: 1 })],
+      }),
+    );
+
+    const family = screen.getByTestId("recurring-row");
+    expect(within(family).getByText("S$180.00")).toBeInTheDocument();
+    expect(within(family).getByText("1 bill not counted: no exchange rate")).toBeInTheDocument();
+    expect(within(family).queryByText("—")).not.toBeInTheDocument();
+  });
+
   it("explains an empty total instead of showing S$0.00, and leaves the subscriptions section out", () => {
     renderCard(summary());
 

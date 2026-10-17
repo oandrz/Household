@@ -371,6 +371,40 @@ func TestBillsSummaryCarriesTheRecurringTotalAndItsCategoryRows(t *testing.T) {
 	if second.CategoryID != "" || second.MonthlyMinor != 10_000 {
 		t.Fatalf("second row = %+v, want the no-category row at 10000/mo", second)
 	}
+	// Value: protects=each row's annualMinor reaches the wire as the yearly figure;
+	// fails_when=toBillsSummaryDTO copies the monthly amount into annualMinor;
+	// why_new=the checks above read only the rows' id, name and monthly figure; seam=none;
+	// no_claim=a non-zero row count on the wire (no no-rate currency here; real Postgres via testcontainers)
+	// The screen's "no figure" dash reads annualMinor, so it must be the
+	// yearly figure, not a copy of the monthly one.
+	if first.AnnualMinor != 540_000 || second.AnnualMinor != 120_000 || first.ExcludedNoRate != 0 || second.ExcludedNoRate != 0 {
+		t.Fatalf("rows = %+v, want annual 540000 and 120000 with nothing excluded", s.RecurringByCategory)
+	}
+}
+
+// The test env's rate provider knows SGD and IDR only, so a USD bill has no
+// rate: its category row must reach the wire marked short, or the screen
+// never shows the dash or the "not counted" note.
+func TestBillsSummaryMarksARecurringRowShortOnTheWire(t *testing.T) {
+	env := newTestEnv(t)
+	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
+	usdAccount := env.mustCreateAccountWithCurrency(t, session, csrf, "USD")
+	env.mustCreateBill(t, session, csrf, map[string]any{
+		"name": "US hosting", "amountMinor": 12_000, "cadence": "yearly",
+		"nextDue": farFutureDate(), "payFromAccountId": usdAccount,
+	})
+
+	s := decodeBillsList(t, env.authedGet(t, "/api/v1/bills", session)).Summary
+	if len(s.RecurringByCategory) != 1 {
+		t.Fatalf("rows = %+v, want one", s.RecurringByCategory)
+	}
+	row := s.RecurringByCategory[0]
+	if row.ExcludedNoRate != 1 || row.AnnualMinor != 0 || row.MonthlyMinor != 0 {
+		t.Fatalf("row = %+v, want one short row with no figure", row)
+	}
+	if s.RecurringAnnualMinor != 0 || s.ExcludedNoRate != 1 {
+		t.Fatalf("summary = %d/yr, excludedNoRate %d; want 0/yr and 1", s.RecurringAnnualMinor, s.ExcludedNoRate)
+	}
 }
 
 // TestBillsCreateSerialisesSettledAndNullableFields pins two wire-shape facts
