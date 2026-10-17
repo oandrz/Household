@@ -2564,6 +2564,15 @@ different component, after it was already written down here once.
   building` showed the single build. **Before a walk, restart `api` (or check
   the last `building...` line is newer than your last change), and make the
   walk include one request whose answer only the new code gives.**
+  Seen again the same evening on the Recurring bills card: the API's last
+  `building...` was four hours before the change. Restarting `api` and then
+  reading the new card's figures before anything else is what showed the
+  walk was against the new code. **The web container has the same gap.**
+  During the design review that followed, Vite served the edited copy file
+  but the old card component, and the page threw `recurringHeading is not
+  a function`: a crash no tree on disk could produce. Restarting `web` after
+  each edit cleared it. A console error that names code you just deleted
+  means a stale dev server, not a bug.
 
 ### 4. Guards scoped to the wrong interval
 
@@ -5149,6 +5158,43 @@ the code is not evidence until checked against it):
   is a file on the machine unless the binary embeds it. The tests pass on a
   developer's Mac either way, and a minimal container may have none, so
   `cmd/api` and `cmd/adminctl` import `time/tzdata`.
+- **A breakdown printed under its total must add up to it (Recurring bills,
+  2026-10-17).** The card shows a monthly total and one monthly figure per
+  category. Dividing each category's yearly figure by 12 and rounding down
+  loses up to a cent per row: three yearly bills of S$12.06 in three
+  categories print S$1.00 three times under a total of S$3.01. Caught when
+  the design was reviewed, before any code. `domain.MonthlySharesMinor`
+  starts each row at its rounded-down share and gives the missing cents to
+  the rows that lost the most. Mutation-checked by giving them to the first
+  rows instead: `TestMonthlySharesGiveTheLeftoverToTheLargestRemainders`
+  failed. **When a figure is split into parts on screen, decide the
+  rounding rule for the parts, or the screen contradicts itself.**
+- **A new total widens what "not counted" counts (Recurring bills,
+  2026-10-17).** Before the recurring total, a bill in a currency with no
+  rate was counted in `ExcludedNoRate` only if it touched a figure: due this
+  month, paid this month, or ticked as a subscription. A plain monthly bill
+  due next month touched none, so it was left out of nothing. Now it is left
+  out of the recurring total and the count includes it. That is correct,
+  but it means the note under the page can show a higher number with no
+  bill having changed. `TestRecurringTotalExcludesANoRateBillAndMarksItsRow`
+  pins it.
+
+- **A new total multiplies the ceiling it inherits (Recurring bills,
+  2026-10-17).** `domain.MaxAmountMinor` promises that one amount survives
+  conversion into the primary currency. The recurring total first multiplies
+  a monthly bill by 12 and only then converts it, so one bill under the
+  ceiling (S$619bn a month into IDR) overflows inside `Rate.Apply` and every
+  `GET /bills` for that household fails. The subscriptions total had the same
+  path before; widening it to every repeating bill widened the exposure. Found
+  by the pre-landing Red Team review, not by any test, because every fixture
+  uses ordinary amounts. Fixed by leaving such a bill out of the totals and
+  saying so on its row, checking every recurring sum against 2^53
+  (`domain.MaxExactTotalMinor`), the last figure a browser shows exactly.
+  That deliberately departs from "an overflowing sum fails the read" for this
+  one card, because failing takes down the page the bill is fixed from.
+  **When a figure is derived from a capped amount (multiplied, summed,
+  converted), check the derived figure against the cap's promise, not just
+  the input.**
 
 ### Database and repositories
 
@@ -6635,6 +6681,17 @@ route with a missing guard has no second line of defence.
   offered "Show SGD equivalents" beside an SGD primary currency. A value
   that is stored only because a column needs something in it is not a
   choice, and the screen must not present it as one.
+- **CSS `order` moves a box on screen, not in the page (Recurring bills,
+  2026-10-17).** The Recurring bills card had to sit above the bill list on
+  a phone, where the page is one column. The first cut kept it after the
+  list in the source and added `order-first`. A phone then drew it first,
+  but a screen reader still read every bill before it,
+  and jsdom, which applies no CSS, could not tell the two apart. The page
+  test asserting the card comes before the list in the document failed
+  against that cut. The card now comes first in the source and
+  `lg:order-last` moves it beside the list on a wide screen. **Put content
+  in the source in the order a phone should read it, and use CSS order only
+  for the wide layout.**
 
 ### Tooling and infrastructure
 

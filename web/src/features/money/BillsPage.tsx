@@ -11,21 +11,18 @@
 // matches the spec (`ORDER BY next_due NULLS LAST, name`), so an overdue
 // bill's earlier date is what sorts it first; nothing here re-sorts.
 //
-// SubscriptionsCard (Task 15) sits in the right column of the two-column
-// grid below, beside the lists -- the design's own layout, deferred to that
-// task because it is the thing that needed to sit beside. It does its own
-// isSubscription/archived filtering internally (its own header comment), so
-// this file passes it `data.bills` unfiltered, the identical shape
-// GoalsPage.tsx passes MonthlyContributionsCard.tsx. BillModal (Task 13) is
-// wired at all three of its entry points
-// below: the header's "+ Add bill", the empty state's own call to action,
+// RecurringBillsCard sits in the right column of the two-column grid below,
+// beside the lists, and above them on a phone. Its subscriptions section
+// does its own isSubscription/archived filtering, so this file passes it
+// `data.bills` unfiltered. BillModal is wired at all three of its entry
+// points below: the header's "+ Add bill", the empty state's own call to action,
 // and BillRow's `onEdit` for a live row -- Goals shipped its own modal with
 // no screen that ever mounted it, and a whole task's review missed the gap
 // (docs/LEARNING.md pattern 15), so this task's own tests (BillModal.test.tsx)
 // assert each entry point separately rather than trusting that wiring one
 // proves the other two.
 //
-// MarkPaidModal (Task 14) is wired the identical way, on every live bill's
+// MarkPaidModal is wired the identical way, on every live bill's
 // own `onMarkPaid` (MarkPaidModal.test.tsx asserts it opens from a real
 // BillsPage render, the same reason above). Undo lives entirely as page-level
 // state in usePendingBillActions.ts -- its useConfirmAction, keyed by payment
@@ -47,7 +44,7 @@ import { BillModal } from "./BillModal";
 import { MarkPaidModal } from "./MarkPaidModal";
 import { BillRow } from "./BillRow";
 import { BillStatCards } from "./BillStatCards";
-import { SubscriptionsCard } from "./SubscriptionsCard";
+import { RecurringBillsCard } from "./RecurringBillsCard";
 import { BILL_COPY, dayMonthLabel } from "./billCopy";
 import { useBills } from "./useBills";
 import { usePendingBillActions } from "./usePendingBillActions";
@@ -291,15 +288,44 @@ export function BillsPage() {
             nextDue={summary.nextDue}
           />
 
-          {/* The design's own two-column row: lists on the left, the
-              Subscriptions panel and (when it applies) "All caught up"
-              stacked on the right -- Task 12 shipped this single-column and
-              deferred the grid to this task, since the Subscriptions panel
-              is what sits beside the lists (this task's own brief). Single
-              column below `lg` -- BudgetPage.tsx's own identical
-              [1.7fr 1fr] row is the precedent this mirrors, proportions
-              included. */}
+          {/* Two columns from `lg`: lists on the left, Recurring bills and
+              (when it applies) "All caught up" on the right, BudgetPage.tsx's
+              [1.7fr 1fr] proportions. The right-hand column comes first in
+              the source, so a phone's single column (and a screen reader)
+              reaches the recurring total before every bill; `lg:order-last`
+              moves it back beside the lists. */}
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1.7fr_1fr]">
+            <div data-testid="bills-side-column" className="flex flex-col gap-4 lg:order-last">
+              <RecurringBillsCard bills={data.bills} summary={summary} symbolFor={symbolFor} />
+
+              {allCaughtUp && (
+                // The border is what RecurringBillsCard above has and this panel
+                // did not, which left it reading as loose text on the canvas
+                // rather than as one of the page's panels. The fill stays
+                // `bg-callout` rather than becoming `bg-card`: this is the one
+                // panel on the page that is good news, and both halves of its line
+                // are `text-accent`/`text-accent-dark`, which the app only ever
+                // puts on the callout tint (InviteScreen.tsx, TransactionsPage.tsx)
+                // and never on a card. So the border
+                // is `border-callout-border`, the tint's own edge, not the
+                // `border-hairline` a `bg-card` panel gets.
+                <div
+                  data-testid="bills-all-caught-up"
+                  className="rounded-xl border border-callout-border bg-callout px-5 py-[18px]"
+                >
+                  <p className="text-[12.5px] leading-relaxed text-accent-dark">
+                    <span className="font-semibold text-accent">{BILL_COPY.allCaughtUpHeadline}</span>{" "}
+                    {BILL_COPY.allCaughtUpBody(
+                      currentMonthName,
+                      summary.nextDue
+                        ? BILL_COPY.nextBillClause(summary.nextDue.billName, dayMonthLabel(summary.nextDue.dueOn))
+                        : null,
+                    )}
+                  </p>
+                </div>
+              )}
+            </div>
+
             <div className="rounded-xl border border-hairline bg-card p-[22px]">
               <div data-testid="bills-due-soon">
                 <h2 className="mb-2 text-[11px] uppercase tracking-[0.08em] text-muted">{BILL_COPY.dueSoon}</h2>
@@ -369,54 +395,13 @@ export function BillsPage() {
               )}
             </div>
 
-            <div className="flex flex-col gap-4">
-              <SubscriptionsCard
-                bills={data.bills}
-                currency={summary.currency}
-                symbolFor={symbolFor}
-                monthlyMinor={summary.subscriptionsMonthlyMinor}
-                annualMinor={summary.subscriptionsAnnualMinor}
-              />
-
-              {allCaughtUp && (
-                // The border is what SubscriptionsCard above has and this panel
-                // did not, which left it reading as loose text on the canvas
-                // rather than as one of the page's panels. The fill stays
-                // `bg-callout` rather than becoming `bg-card`: this is the one
-                // panel on the page that is good news, and both halves of its line
-                // are `text-accent`/`text-accent-dark`, which the app only ever
-                // puts on the callout tint (InviteScreen.tsx:155,
-                // TransactionsPage.tsx:480) and never on a card. So the border
-                // is `border-callout-border`, the tint's own edge, not the
-                // `border-hairline` a `bg-card` panel gets.
-                <div
-                  data-testid="bills-all-caught-up"
-                  className="rounded-xl border border-callout-border bg-callout px-5 py-[18px]"
-                >
-                  <p className="text-[12.5px] leading-relaxed text-accent-dark">
-                    <span className="font-semibold text-accent">{BILL_COPY.allCaughtUpHeadline}</span>{" "}
-                    {BILL_COPY.allCaughtUpBody(
-                      currentMonthName,
-                      summary.nextDue
-                        ? BILL_COPY.nextBillClause(summary.nextDue.billName, dayMonthLabel(summary.nextDue.dueOn))
-                        : null,
-                    )}
-                  </p>
-                </div>
-              )}
-            </div>
           </div>
 
-          {/* Stays a page-level footnote rather than moving inside
-              SubscriptionsCard the way MonthlyContributionsCard.tsx nests
-              goals-excluded-no-rate -- that precedent holds when the count
-              is scoped to the one card it sits beside, but BillsSummary's
-              own ExcludedNoRate is deduped ACROSS three totals (due this
-              month, paid so far, and subscriptions -- bill.go's own
-              comment: "counts once per BILL," not once per total), so a
-              bill it counts might never touch the subscriptions rollup at
-              all. Nesting it in the one card that only explains a third of
-              what it counts would misattribute the other two thirds. */}
+          {/* A page-level footnote, not inside RecurringBillsCard: the
+              count is deduped across every total on the page (due this
+              month, paid so far, recurring, subscriptions -- "once per
+              BILL", bill.go), so a bill it counts may never touch that
+              card. The card marks its own short rows instead. */}
           {summary.excludedNoRate > 0 && (
             <p data-testid="bills-excluded-no-rate" className="text-xs text-muted">
               {BILL_COPY.excludedNoRate(summary.excludedNoRate)}

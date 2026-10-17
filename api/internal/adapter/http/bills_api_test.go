@@ -2,11 +2,14 @@ package httpadapter_test
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/andreasoentoro/hearth/api/internal/domain"
 )
 
 // --- bill routes: DTOs and fixtures -------------------------------------
@@ -55,7 +58,17 @@ type billsSummaryBody struct {
 	BillCount                 int              `json:"billCount"`
 	SubscriptionsMonthlyMinor int64            `json:"subscriptionsMonthlyMinor"`
 	SubscriptionsAnnualMinor  int64            `json:"subscriptionsAnnualMinor"`
-	ExcludedNoRate            int              `json:"excludedNoRate"`
+	RecurringMonthlyMinor     int64            `json:"recurringMonthlyMinor"`
+	RecurringAnnualMinor      int64            `json:"recurringAnnualMinor"`
+	RecurringByCategory       []struct {
+		CategoryID       string `json:"categoryId"`
+		CategoryName     string `json:"categoryName"`
+		AnnualMinor      int64  `json:"annualMinor"`
+		MonthlyMinor     int64  `json:"monthlyMinor"`
+		ExcludedNoRate   int    `json:"excludedNoRate"`
+		ExcludedTooLarge int    `json:"excludedTooLarge"`
+	} `json:"recurringByCategory"`
+	ExcludedNoRate int `json:"excludedNoRate"`
 }
 
 type billPaymentBody struct {
@@ -324,6 +337,104 @@ func TestBillsCreateRoundTripsThroughGet(t *testing.T) {
 	}
 	if list.Summary.AutopayCount != 1 {
 		t.Fatalf("summary.autopayCount = %d, want 1 (the bill above has autopay = true)", list.Summary.AutopayCount)
+	}
+}
+
+func TestBillsSummaryCarriesTheRecurringTotalAndItsCategoryRows(t *testing.T) {
+	env := newTestEnv(t)
+	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
+
+	empty := env.authedGet(t, "/api/v1/bills", session)
+	if !strings.Contains(empty.Body.String(), `"recurringByCategory":[]`) {
+		t.Fatalf("a household with no bills must get recurringByCategory [] not null: %s", empty.Body.String())
+	}
+
+	categoryID, categoryName := env.firstExpenseCategory(t, session)
+	accountID := env.mustCreateAccountID(t, session, csrf)
+	env.mustCreateBill(t, session, csrf, map[string]any{
+		"name": "Internet", "amountMinor": 45_000, "cadence": "monthly",
+		"nextDue": farFutureDate(), "categoryId": categoryID, "payFromAccountId": accountID,
+	})
+	env.mustCreateBill(t, session, csrf, map[string]any{
+		"name": "Insurance", "amountMinor": 120_000, "cadence": "yearly",
+		"nextDue": farFutureDate(), "payFromAccountId": accountID,
+	})
+
+	list := decodeBillsList(t, env.authedGet(t, "/api/v1/bills", session))
+	s := list.Summary
+	if s.RecurringAnnualMinor != 45_000*12+120_000 || s.RecurringMonthlyMinor != 55_000 {
+		t.Fatalf("recurring = %d/yr %d/mo, want 660000/yr 55000/mo", s.RecurringAnnualMinor, s.RecurringMonthlyMinor)
+	}
+	if len(s.RecurringByCategory) != 2 {
+		t.Fatalf("rows = %+v, want 2", s.RecurringByCategory)
+	}
+	first, second := s.RecurringByCategory[0], s.RecurringByCategory[1]
+	if first.CategoryID != categoryID || first.CategoryName != categoryName || first.MonthlyMinor != 45_000 {
+		t.Fatalf("first row = %+v, want %s at 45000/mo", first, categoryName)
+	}
+	if second.CategoryID != "" || second.MonthlyMinor != 10_000 {
+		t.Fatalf("second row = %+v, want the no-category row at 10000/mo", second)
+	}
+	// Value: protects=each row's annualMinor reaches the wire as the yearly figure;
+	// fails_when=toBillsSummaryDTO copies the monthly amount into annualMinor;
+	// why_new=the checks above read only the rows' id, name and monthly figure; seam=none;
+	// no_claim=a non-zero row count on the wire (no no-rate currency here; real Postgres via testcontainers)
+	// The screen's "no figure" dash reads annualMinor, so it must be the
+	// yearly figure, not a copy of the monthly one.
+	if first.AnnualMinor != 540_000 || second.AnnualMinor != 120_000 || first.ExcludedNoRate != 0 || second.ExcludedNoRate != 0 {
+		t.Fatalf("rows = %+v, want annual 540000 and 120000 with nothing excluded", s.RecurringByCategory)
+	}
+}
+
+// The test env's rate provider knows SGD and IDR only, so a USD bill has no
+// rate: its category row must reach the wire marked short, or the screen
+// never shows the dash or the "not counted" note.
+func TestBillsSummaryMarksARecurringRowShortOnTheWire(t *testing.T) {
+	env := newTestEnv(t)
+	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
+	usdAccount := env.mustCreateAccountWithCurrency(t, session, csrf, "USD")
+	env.mustCreateBill(t, session, csrf, map[string]any{
+		"name": "US hosting", "amountMinor": 12_000, "cadence": "yearly",
+		"nextDue": farFutureDate(), "payFromAccountId": usdAccount,
+	})
+
+	s := decodeBillsList(t, env.authedGet(t, "/api/v1/bills", session)).Summary
+	if len(s.RecurringByCategory) != 1 {
+		t.Fatalf("rows = %+v, want one", s.RecurringByCategory)
+	}
+	row := s.RecurringByCategory[0]
+	if row.ExcludedNoRate != 1 || row.AnnualMinor != 0 || row.MonthlyMinor != 0 {
+		t.Fatalf("row = %+v, want one short row with no figure", row)
+	}
+	if s.RecurringAnnualMinor != 0 || s.ExcludedNoRate != 1 {
+		t.Fatalf("summary = %d/yr, excludedNoRate %d; want 0/yr and 1", s.RecurringAnnualMinor, s.ExcludedNoRate)
+	}
+}
+
+// Eight bills at the amount ceiling, monthly, would total past 2^53, the
+// largest figure the browser holds exactly. The page must still answer 200,
+// with the eighth bill left out and its row saying so on the wire.
+func TestBillsSummaryFlagsABillTooLargeToAddUpRatherThanFailing(t *testing.T) {
+	env := newTestEnv(t)
+	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
+	accountID := env.mustCreateAccountID(t, session, csrf)
+	for i := 0; i < 8; i++ {
+		env.mustCreateBill(t, session, csrf, map[string]any{
+			"name": fmt.Sprintf("Ceiling bill %d", i), "amountMinor": domain.MaxAmountMinor, "cadence": "monthly",
+			"nextDue": farFutureDate(), "payFromAccountId": accountID,
+		})
+	}
+
+	rec := env.authedGet(t, "/api/v1/bills", session)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 -- an oversized total must not fail the page; body = %s", rec.Code, rec.Body.String())
+	}
+	s := decodeBillsList(t, rec).Summary
+	if s.RecurringAnnualMinor != 7*12*domain.MaxAmountMinor {
+		t.Fatalf("recurring annual = %d, want seven bills' worth", s.RecurringAnnualMinor)
+	}
+	if len(s.RecurringByCategory) != 1 || s.RecurringByCategory[0].ExcludedTooLarge != 1 {
+		t.Fatalf("rows = %+v, want one row with 1 bill too large", s.RecurringByCategory)
 	}
 }
 

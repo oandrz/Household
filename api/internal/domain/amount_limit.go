@@ -44,6 +44,13 @@ import "fmt"
 // pins the conversion, browser and row-count promises.
 const MaxAmountMinor int64 = 100_000_000_000_000
 
+// MaxExactTotalMinor is the largest total a page may show: 2^53 - 1, the
+// last integer a browser's number holds exactly. Past it a figure arrives
+// rounded, so a breakdown printed under its total would stop adding up.
+// It is about S$90 trillion, or Rp 9 quadrillion. One amount at
+// MaxAmountMinor, repeated twelve times a year, stays well under it.
+const MaxExactTotalMinor int64 = 1<<53 - 1
+
 // CheckAmountWithinLimit refuses an amount further from zero than
 // MaxAmountMinor with ErrAmountTooLarge. Negative amounts get the same limit
 // as positive ones: an opening balance or a goal withdrawal can be negative,

@@ -3,6 +3,7 @@ package usecase_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -30,6 +31,7 @@ func day(s string) time.Time {
 // billServiceFixture is what newBillService's opts mutate before the
 // service is built.
 type billServiceFixture struct {
+	primary    string
 	accounts   *fakeAccountLookup
 	categories *fakeCategoryLookup
 	fx         usecase.FXRateProvider
@@ -72,6 +74,12 @@ func withUsage(usage usecase.HouseholdUsage) billServiceOption {
 	return func(f *billServiceFixture) { f.usage = usage }
 }
 
+// withPrimaryCurrency sets household h1's primary currency, for a test about
+// converting into a currency other than the default SGD.
+func withPrimaryCurrency(currency string) billServiceOption {
+	return func(f *billServiceFixture) { f.primary = currency }
+}
+
 // withFX swaps the FX double -- newBillServiceWithFX's own reason to exist,
 // factored out as one more option rather than a second constructor with its
 // own household/account wiring to keep in sync with newBillService's.
@@ -85,10 +93,8 @@ func withFX(fx usecase.FXRateProvider) billServiceOption {
 // account every plain bill() fixture pays from; opts layer on anything else.
 func newBillService(t *testing.T, repo *fakeBillRepo, opts ...billServiceOption) *usecase.BillService {
 	t.Helper()
-	households := newHouseholdDouble()
-	households.put(domain.Household{ID: "h1", PrimaryCurrency: "SGD"})
-
 	f := &billServiceFixture{
+		primary: "SGD",
 		accounts: &fakeAccountLookup{
 			accounts: map[string]fakeAccountRecord{
 				"acct-1": {householdID: "h1", currency: "SGD"},
@@ -110,6 +116,8 @@ func newBillService(t *testing.T, repo *fakeBillRepo, opts ...billServiceOption)
 	for _, opt := range opts {
 		opt(f)
 	}
+	households := newHouseholdDouble()
+	households.put(domain.Household{ID: "h1", PrimaryCurrency: f.primary})
 
 	return usecase.NewBillService(usecase.BillDeps{
 		Bills:      repo,
@@ -424,6 +432,302 @@ func TestSubscriptionsRollupDividesTheCombinedAnnualTotalNotEachBill(t *testing.
 	}
 	if got := view.Summary.SubscriptionsMonthly.Amount; got != 201 {
 		t.Fatalf("monthly = %d, want 201 -- dividing per bill before adding loses a minor unit the combined total does not", got)
+	}
+}
+
+// inCategory moves rec into another category; "" is a bill with none.
+func inCategory(rec usecase.BillRecord, id, name string) usecase.BillRecord {
+	rec.Bill.CategoryID = id
+	rec.CategoryName = name
+	return rec
+}
+
+func withCadence(rec usecase.BillRecord, cadence domain.Cadence) usecase.BillRecord {
+	rec.Bill.Cadence = cadence
+	return rec
+}
+
+// A household tracking whether it has cut its bills needs every bill that
+// repeats, not only the ones ticked as subscriptions. A one-off does not
+// repeat and an archived bill is no longer paid, so neither counts.
+func TestRecurringTotalCountsEveryRepeatingBillButNotOneOffsOrArchived(t *testing.T) {
+	svc := newBillServiceWith(t,
+		bill("SP utilities", "2026-08-20", 14230),
+		subscription("Netflix", domain.CadenceMonthly, 1998),
+		withCadence(bill("Car insurance", "2026-11-01", 120000), domain.CadenceYearly),
+		oneOff("Plumber", "2026-08-15", 50000),
+		archivedBill(bill("Old gym", "2026-08-20", 9999)),
+	)
+	view, err := svc.List(context.Background(), "h1", false, day("2026-08-09"))
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	// 14230*12 + 1998*12 + 120000 = 314736 a year; /12 = 26228 a month.
+	if got := view.Summary.RecurringAnnual.Amount; got != 314736 {
+		t.Fatalf("recurring annual = %d, want 314736", got)
+	}
+	if got := view.Summary.RecurringMonthly.Amount; got != 26228 {
+		t.Fatalf("recurring monthly = %d, want 26228", got)
+	}
+}
+
+// "Show archived" lists archived bills, so List sees them; they must still
+// never count, or turning the toggle on would undo the drop archiving made.
+func TestRecurringTotalLeavesOutAnArchivedBillEvenWhenArchivedAreShown(t *testing.T) {
+	svc := newBillServiceWith(t,
+		bill("SP utilities", "2026-08-20", 14230),
+		archivedBill(bill("Old gym", "2026-08-20", 9999)),
+	)
+	view, err := svc.List(context.Background(), "h1", true, day("2026-08-09"))
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(view.Bills) != 2 {
+		t.Fatalf("bills = %d, want the archived row listed too", len(view.Bills))
+	}
+	if got := view.Summary.RecurringAnnual.Amount; got != 14230*12 {
+		t.Fatalf("recurring annual = %d, want %d -- an archived bill never counts", got, 14230*12)
+	}
+	if len(view.Summary.RecurringByCategory) != 1 {
+		t.Fatalf("rows = %+v, want only the live bill's category", view.Summary.RecurringByCategory)
+	}
+}
+
+func TestRecurringBreakdownGroupsByCategoryLargestFirst(t *testing.T) {
+	svc := newBillServiceWith(t,
+		inCategory(bill("SP utilities", "2026-08-20", 14230), "cat-utilities", "Utilities"),
+		inCategory(bill("Water", "2026-08-21", 3000), "cat-utilities", "Utilities"),
+		inCategory(bill("Rent", "2026-08-01", 250000), "cat-housing", "Housing"),
+		inCategory(bill("Gift fund", "2026-08-03", 5000), "", ""),
+	)
+	view, err := svc.List(context.Background(), "h1", false, day("2026-08-09"))
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	rows := view.Summary.RecurringByCategory
+	want := []struct {
+		id      string
+		monthly int64
+	}{{"cat-housing", 250000}, {"cat-utilities", 17230}, {"", 5000}}
+	if len(rows) != len(want) {
+		t.Fatalf("rows = %+v, want %d rows", rows, len(want))
+	}
+	for i, w := range want {
+		if rows[i].CategoryID != w.id || rows[i].Monthly.Amount != w.monthly {
+			t.Fatalf("row %d = %s %d, want %s %d", i, rows[i].CategoryID, rows[i].Monthly.Amount, w.id, w.monthly)
+		}
+	}
+	if got := rows[1].Annual.Amount; got != 17230*12 {
+		t.Fatalf("utilities annual = %d, want %d", got, 17230*12)
+	}
+}
+
+// Rows each worth 100.5 a month would print 100 + 100 + 100 under a
+// headline of 301. The breakdown must add up to the figure above it.
+func TestRecurringBreakdownAddsUpToTheMonthlyHeadline(t *testing.T) {
+	svc := newBillServiceWith(t,
+		withCadence(inCategory(bill("Backup", "2026-11-01", 1206), "cat-a", "A"), domain.CadenceYearly),
+		withCadence(inCategory(bill("Domain", "2026-11-01", 1206), "cat-b", "B"), domain.CadenceYearly),
+		withCadence(inCategory(bill("Licence", "2026-11-01", 1206), "cat-c", "C"), domain.CadenceYearly),
+	)
+	view, err := svc.List(context.Background(), "h1", false, day("2026-08-09"))
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if got := view.Summary.RecurringMonthly.Amount; got != 301 {
+		t.Fatalf("monthly = %d, want 301", got)
+	}
+	var sum int64
+	for _, row := range view.Summary.RecurringByCategory {
+		sum += row.Monthly.Amount
+	}
+	if sum != 301 {
+		t.Fatalf("rows add up to %d, want 301 -- %+v", sum, view.Summary.RecurringByCategory)
+	}
+
+	// Value: protects=a remainder tie gives the leftover unit to the same row (first by name) on every request;
+	// fails_when=the sort before the shares or its name tie-break is dropped, so map order picks the row;
+	// why_new=the sum check above passes whichever row takes the unit; seam=none;
+	// no_claim=none beyond protects (in-memory repo and FX double; unit only)
+	// Ten requests, because a map-order regression picks the right row by
+	// luck one time in three.
+	for range 10 {
+		again, err := svc.List(context.Background(), "h1", false, day("2026-08-09"))
+		if err != nil {
+			t.Fatalf("List: %v", err)
+		}
+		rows := again.Summary.RecurringByCategory
+		if len(rows) != 3 || rows[0].CategoryID != "cat-a" || rows[0].Monthly.Amount != 101 ||
+			rows[1].CategoryID != "cat-b" || rows[2].CategoryID != "cat-c" {
+			t.Fatalf("rows = %+v, want A at 101 then B and C at 100 on every request", rows)
+		}
+	}
+}
+
+func TestRecurringBreakdownLeavesOutACategoryWithOnlyOneOffs(t *testing.T) {
+	svc := newBillServiceWith(t,
+		inCategory(bill("SP utilities", "2026-08-20", 14230), "cat-utilities", "Utilities"),
+		inCategory(oneOff("Plumber", "2026-08-15", 50000), "cat-repairs", "Repairs"),
+	)
+	view, err := svc.List(context.Background(), "h1", false, day("2026-08-09"))
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	rows := view.Summary.RecurringByCategory
+	if len(rows) != 1 || rows[0].CategoryID != "cat-utilities" {
+		t.Fatalf("rows = %+v, want only Utilities", rows)
+	}
+}
+
+// A repeating bill in a currency with no rate cannot be added to the total.
+// It is counted in ExcludedNoRate even when it is neither due this month nor
+// a subscription, and its category row says it is short.
+func TestRecurringTotalExcludesANoRateBillAndMarksItsRow(t *testing.T) {
+	svc := newBillServiceWithFX(t, newFXDouble().withNoRates(),
+		inCategory(bill("SP utilities", "2026-08-20", 14230), "cat-utilities", "Utilities"),
+		inCategory(billOn("Arisan", "IDR", "2026-11-20", 500_000), "cat-family", "Family"),
+	)
+	view, err := svc.List(context.Background(), "h1", false, day("2026-08-09"))
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if got := view.Summary.RecurringMonthly.Amount; got != 14230 {
+		t.Fatalf("monthly = %d, want 14230 -- the no-rate bill must not be summed", got)
+	}
+	if got := view.Summary.ExcludedNoRate; got != 1 {
+		t.Fatalf("ExcludedNoRate = %d, want 1", got)
+	}
+	var family *usecase.RecurringCategory
+	for i := range view.Summary.RecurringByCategory {
+		if view.Summary.RecurringByCategory[i].CategoryID == "cat-family" {
+			family = &view.Summary.RecurringByCategory[i]
+		}
+	}
+	if family == nil || family.ExcludedNoRate != 1 || family.Monthly.Amount != 0 {
+		t.Fatalf("family row = %+v, want a zero row marked with 1 excluded bill", family)
+	}
+}
+
+// Value: protects=a category holding a counted bill and a no-rate bill keeps one row with the counted figure and the short count;
+// fails_when=add files a no-rate bill under its own row or resets the row's sum; why_new=the test above has
+// only the no-rate bill in its category; seam=none; no_claim=none beyond protects (FX double with no rates; unit only)
+// A category that is only partly convertible still shows what it can
+// count, marked short, rather than a second row or a lost figure.
+func TestRecurringRowKeepsItsFigureWhenOnlySomeOfItsBillsHaveNoRate(t *testing.T) {
+	svc := newBillServiceWithFX(t, newFXDouble().withNoRates(),
+		inCategory(bill("Allowance", "2026-08-20", 14230), "cat-family", "Family"),
+		inCategory(billOn("Arisan", "IDR", "2026-11-20", 500_000), "cat-family", "Family"),
+	)
+	view, err := svc.List(context.Background(), "h1", false, day("2026-08-09"))
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	rows := view.Summary.RecurringByCategory
+	if len(rows) != 1 {
+		t.Fatalf("rows = %+v, want one Family row", rows)
+	}
+	if rows[0].Monthly.Amount != 14230 || rows[0].Annual.Amount != 14230*12 || rows[0].ExcludedNoRate != 1 {
+		t.Fatalf("family row = %+v, want 14230/mo with 1 excluded bill", rows[0])
+	}
+}
+
+// Value: protects=a repeating bill in another currency reaches the recurring and subscriptions totals converted into primary;
+// fails_when=annualInPrimary returns the bill's own unconverted amount;
+// why_new=every other rollup test uses SGD bills or no rates; seam=none;
+// no_claim=real rate-provider accuracy (fixed FX double at 1/12410; unit only)
+// 1,241,000 IDR a month is 14,892,000 a year, exactly 1,200 SGD minor units
+// at 1/12410, so no rounding rule decides the expected figures.
+func TestRecurringTotalConvertsAForeignCurrencyBillIntoPrimary(t *testing.T) {
+	gym := inCategory(billOn("Gym Jakarta", "IDR", "2026-11-20", 1_241_000), "cat-family", "Family")
+	gym.Bill.IsSubscription = true
+	svc := newBillServiceWith(t,
+		inCategory(bill("SP utilities", "2026-08-20", 14230), "cat-utilities", "Utilities"),
+		gym,
+	)
+	view, err := svc.List(context.Background(), "h1", false, day("2026-08-09"))
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	s := view.Summary
+	if s.RecurringAnnual.Amount != 14230*12+1200 || s.RecurringMonthly.Amount != 14330 {
+		t.Fatalf("recurring = %d/yr %d/mo, want %d/yr 14330/mo", s.RecurringAnnual.Amount, s.RecurringMonthly.Amount, 14230*12+1200)
+	}
+	if s.SubscriptionsAnnual.Amount != 1200 || s.SubscriptionsMonthly.Amount != 100 {
+		t.Fatalf("subscriptions = %d/yr %d/mo, want 1200/yr 100/mo", s.SubscriptionsAnnual.Amount, s.SubscriptionsMonthly.Amount)
+	}
+	if len(s.RecurringByCategory) != 2 {
+		t.Fatalf("rows = %+v, want 2", s.RecurringByCategory)
+	}
+	family := s.RecurringByCategory[1]
+	if family.CategoryID != "cat-family" || family.Annual.Amount != 1200 || family.Monthly.Amount != 100 ||
+		family.Annual.Currency != "SGD" || family.ExcludedNoRate != 0 {
+		t.Fatalf("family row = %+v, want 1200 SGD/yr, 100/mo, nothing excluded", family)
+	}
+	if s.ExcludedNoRate != 0 {
+		t.Fatalf("ExcludedNoRate = %d, want 0 -- the IDR bill has a rate", s.ExcludedNoRate)
+	}
+}
+
+// One bill at the amount ceiling, monthly, in SGD, is S$12tn a year; in an
+// IDR household that is past what an int64 holds. The page must still load,
+// with that bill left out of the total and its row saying so, rather than
+// every read of the Bills page failing.
+func TestRecurringTotalFlagsABillTooLargeToConvertInsteadOfFailing(t *testing.T) {
+	repo := &fakeBillRepo{}
+	repo.add(inCategory(bill("Typo rent", "2026-08-20", domain.MaxAmountMinor), "cat-utilities", "Utilities"))
+	repo.add(inCategory(billOn("Arisan", "IDR", "2026-11-20", 500_000), "cat-family", "Family"))
+	svc := newBillService(t, repo, withPrimaryCurrency("IDR"))
+
+	view, err := svc.List(context.Background(), "h1", false, day("2026-08-09"))
+	if err != nil {
+		t.Fatalf("List: %v -- one oversized bill must not fail the whole page", err)
+	}
+	s := view.Summary
+	if s.RecurringMonthly.Amount != 500_000 || s.RecurringMonthly.Currency != "IDR" {
+		t.Fatalf("recurring monthly = %v, want IDR 500000 -- only the bill that fits", s.RecurringMonthly)
+	}
+	var utilities *usecase.RecurringCategory
+	for i := range s.RecurringByCategory {
+		if s.RecurringByCategory[i].CategoryID == "cat-utilities" {
+			utilities = &s.RecurringByCategory[i]
+		}
+	}
+	if utilities == nil || utilities.ExcludedTooLarge != 1 || utilities.Annual.Amount != 0 {
+		t.Fatalf("utilities row = %+v, want a zero row marked with 1 bill too large", utilities)
+	}
+	if s.ExcludedNoRate != 0 {
+		t.Fatalf("ExcludedNoRate = %d, want 0 -- the bill has a rate, it is just too large", s.ExcludedNoRate)
+	}
+}
+
+// Every bill below fits on its own, but the browser holds numbers exactly
+// only up to 2^53, so the total stops before that: the bill that would
+// cross it is left out and flagged, never a figure the page would round.
+func TestRecurringTotalStopsBeforeTheLargestExactFigure(t *testing.T) {
+	var records []usecase.BillRecord
+	for i := 0; i < 8; i++ {
+		rec := bill(fmt.Sprintf("Ceiling bill %d", i), "2026-08-20", domain.MaxAmountMinor)
+		rec.Bill.IsSubscription = true
+		records = append(records, rec)
+	}
+	svc := newBillServiceWith(t, records...)
+
+	view, err := svc.List(context.Background(), "h1", false, day("2026-08-09"))
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	s := view.Summary
+	// 1e14 a month is 1.2e15 a year; seven of them are 8.4e15, and an eighth
+	// would pass 2^53 (about 9.007e15).
+	want := 7 * 12 * domain.MaxAmountMinor
+	if s.RecurringAnnual.Amount != want || s.SubscriptionsAnnual.Amount != want {
+		t.Fatalf("recurring %d, subscriptions %d; want both %d", s.RecurringAnnual.Amount, s.SubscriptionsAnnual.Amount, want)
+	}
+	if s.RecurringAnnual.Amount > domain.MaxExactTotalMinor {
+		t.Fatalf("recurring annual %d is past the largest exact figure", s.RecurringAnnual.Amount)
+	}
+	if len(s.RecurringByCategory) != 1 || s.RecurringByCategory[0].ExcludedTooLarge != 1 {
+		t.Fatalf("rows = %+v, want one row with 1 bill too large", s.RecurringByCategory)
 	}
 }
 

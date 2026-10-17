@@ -1,24 +1,12 @@
-// Unit tests for the Subscriptions panel -- this component takes `bills`
-// (every LIVE bill, MonthlyContributionsCard.test.tsx's own precedent: the
-// card does its own isSubscription filter, the page only ever filters out
-// archived) plus the server's own subscriptionsMonthlyMinor/
-// subscriptionsAnnualMinor as props and does no fetching or arithmetic of
-// its own, so a plain `render` is enough -- no router, no
-// QueryClientProvider, no stubbed fetch.
+// Unit tests for the "Of which subscriptions" section. It takes `bills` and
+// the server's subscription totals as props and does no fetching or
+// arithmetic, so a plain `render` is enough.
 //
-// Literal strings are asserted throughout, not BILL_COPY's own exports --
-// BillsPage.test.tsx's own convention: importing the copy module here would
-// make an assertion tautological against a typo in that same module.
-//
-// The four behaviours below are the task brief's own numbered list:
-// 1. heading carries the monthly total, the annual figure sits beneath.
-// 2. a quarterly/yearly row shows its own amount and cadence, and the panel
-//    says the totals are monthly equivalents.
-// 3. no "last reviewed" line, anywhere, in any state.
-// 4. an empty state explaining how a bill becomes a subscription.
+// Literal strings are asserted, not BILL_COPY's exports, so a typo in the
+// copy module cannot make an assertion pass against itself.
 import { render, screen, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import { SubscriptionsCard } from "./SubscriptionsCard";
+import { SubscriptionsSection } from "./SubscriptionsSection";
 import type { Bill } from "./billSchemas";
 
 function billFixture(overrides: Partial<Bill> = {}): Bill {
@@ -52,7 +40,7 @@ function renderCard(
   props: Partial<{ currency: string; monthlyMinor: number; annualMinor: number }> = {},
 ) {
   render(
-    <SubscriptionsCard
+    <SubscriptionsSection
       bills={bills}
       currency={props.currency ?? "SGD"}
       symbolFor={symbolFor}
@@ -62,7 +50,7 @@ function renderCard(
   );
 }
 
-describe("SubscriptionsCard", () => {
+describe("SubscriptionsSection", () => {
   it("lists the ticked bills with the monthly total in the heading and the annual figure beneath", () => {
     // monthlyMinor/annualMinor deliberately disagree with any sum a naive
     // client-side recompute of the one $19.98 bill below would produce --
@@ -73,7 +61,7 @@ describe("SubscriptionsCard", () => {
       annualMinor: 85080,
     });
 
-    expect(screen.getByTestId("subscriptions-heading")).toHaveTextContent("Subscriptions · S$70.90/mo");
+    expect(screen.getByTestId("subscriptions-heading")).toHaveTextContent("Of which subscriptions · S$70.90/mo");
     expect(screen.getByTestId("subscriptions-annual")).toHaveTextContent("S$850.80/year");
 
     const row = screen.getByTestId("subscription-row");
@@ -81,7 +69,7 @@ describe("SubscriptionsCard", () => {
     expect(within(row).getByText("S$19.98")).toBeInTheDocument();
   });
 
-  it("a quarterly subscription renders its own amount and cadence, and the panel says the totals are monthly equivalents", () => {
+  it("a quarterly subscription renders its own amount and cadence, and the section says rows are what's charged", () => {
     renderCard(
       [
         billFixture({
@@ -104,7 +92,7 @@ describe("SubscriptionsCard", () => {
     expect(within(row).getByText("Quarterly")).toBeInTheDocument();
 
     expect(screen.getByTestId("subscriptions-equivalent-note")).toHaveTextContent(
-      "Totals above are monthly equivalents",
+      "Each subscription row shows what's actually charged.",
     );
   });
 
@@ -146,6 +134,8 @@ describe("SubscriptionsCard", () => {
 
     expect(screen.queryByTestId("subscription-row")).not.toBeInTheDocument();
     expect(screen.queryByTestId("subscriptions-annual")).not.toBeInTheDocument();
+    // Same heading as the populated state, so it reads as the same section.
+    expect(screen.getByTestId("subscriptions-heading")).toHaveTextContent("Of which subscriptions");
     const empty = screen.getByTestId("subscriptions-empty");
     // Names the exact control (the modal's own checkbox label) that turns
     // this state into the populated one -- not just "nothing here yet".

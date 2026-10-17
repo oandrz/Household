@@ -93,6 +93,9 @@ function billsResponseFixture(bills: Bill[], paidThisMonth: BillPayment[] = []):
       billCount: live.length,
       subscriptionsMonthlyMinor: 0,
       subscriptionsAnnualMinor: 0,
+      recurringMonthlyMinor: 0,
+      recurringAnnualMinor: 0,
+      recurringByCategory: [],
       excludedNoRate: 0,
     },
   };

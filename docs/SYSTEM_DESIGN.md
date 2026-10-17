@@ -3179,10 +3179,24 @@ retroactively empty the month it was paid in.
 **`BillsView` composes the whole screen in one call**, the same shape every
 other Money screen uses: every bill row (with `DueSoon`/`Overdue`/`Settled`
 computed server-side, so the rule lives in one place), the paid-this-month
-list, and the summary — due this month, paid so far, the next-due bill, and
-the subscriptions rollup (`AnnualEquivalentMinor`, converted like every other
-cross-currency sum, with `ExcludedNoRate` naming what could not convert
-rather than silently dropping it). `Settled` exists because a live bill can
+list, and the summary — due this month, paid so far, the next-due bill, the
+recurring total with its per-category rows, and the subscriptions rollup.
+Each live bill that repeats is turned into its yearly cost
+(`AnnualEquivalentMinor`) and converted once (`annualInPrimary`); that one
+figure feeds both the recurring rollup (`usecase/bill_recurring.go`) and,
+for a ticked bill, the subscriptions total, so subscriptions are always a
+part of the recurring total and never added to it. A one-off reaches
+neither. `ExcludedNoRate` names what could not convert rather than
+silently dropping it, counted once per bill across every total. Each
+monthly figure is the yearly one divided by 12 once, at the end; the
+category rows' monthly figures come from `domain.MonthlySharesMinor`, which
+hands out the cents lost to rounding so the rows add up exactly to the
+headline the screen prints above them. No recurring figure passes
+`domain.MaxExactTotalMinor` (2^53, the last integer a browser holds
+exactly): a bill whose yearly figure overflows when converted, or would push
+its row or the total past that, is left out and counted in its row's
+`ExcludedTooLarge`, so one absurd amount never fails the page it would be
+fixed from. Any other conversion error still fails the request. `Settled` exists because a live bill can
 have `NextDue == nil` — a paid one-off — which the design's own "Due soon"
 and "Later" formulas both define as requiring a non-null due date; without
 the flag there would be no way to tell "genuinely far out" from "done, and
@@ -5048,7 +5062,10 @@ web/src/
                        and the Budget page's own rollover card, mounted at
                        /money/goals; the Bills page — Due soon / Later /
                        Archived lists, the Add/Edit bill modal, Mark paid
-                       and its undo, and the Subscriptions panel, mounted
+                       and its undo, and the Recurring bills card (the
+                       category breakdown, with the subscriptions as its
+                       last section; first in the source so a phone shows
+                       it above the lists), mounted
                        at /money/bills (replacing moneySplatRoute, the
                        last route that ever used it)
     overview/          the interim Overview at / — six of the design's
