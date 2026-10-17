@@ -1,6 +1,7 @@
 package httpadapter
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -1223,13 +1224,32 @@ var domainErrorResponses = []domainErrorResponse{
 // logAndWriteInternal logs the real error -- which is never returned to the
 // caller -- and answers 500 INTERNAL with the request ID, so a user can quote
 // it when reporting the problem.
+//
+// A request whose own deadline passed answers 503 TIMEOUT and logs at warn;
+// one whose caller left logs at info. Both are decided by the request's
+// context, not the error: an unrelated timeout inside a live request is
+// still a defect and keeps the 500.
 func logAndWriteInternal(w http.ResponseWriter, r *http.Request, err error) {
 	reqID := middleware.GetReqID(r.Context())
+	switch r.Context().Err() {
+	case context.DeadlineExceeded:
+		slog.Warn("request ran out of time", "error", err, "request_id", reqID)
+		WriteError(w, http.StatusServiceUnavailable, "TIMEOUT", requestTimeoutMessage, nil)
+		return
+	case context.Canceled:
+		// Nobody reads this answer; it is written so the handler's path ends
+		// the same way every time.
+		slog.Info("caller left before the answer", "error", err, "request_id", reqID)
+		WriteError(w, http.StatusServiceUnavailable, "TIMEOUT", requestTimeoutMessage, nil)
+		return
+	}
 	slog.Error("unhandled error", "error", err, "request_id", reqID)
 	WriteError(w, http.StatusInternalServerError, "INTERNAL",
 		"Something went wrong. Please try again, or quote this reference if it keeps happening.",
 		map[string]any{"requestId": reqID})
 }
+
+const requestTimeoutMessage = "Hearth took too long to answer. Try again in a moment."
 
 // sessionRevocationWarning is the message a membership mutation's own
 // success body carries when usecase.ErrSessionRevocationFailed comes back:

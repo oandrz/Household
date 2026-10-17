@@ -50,17 +50,18 @@ func NewArgon2Hasher(time uint32, memoryKiB uint32, threads uint8) *Argon2Hasher
 	return &Argon2Hasher{
 		time: time, memory: memoryKiB, threads: threads, keyLen: 32, saltLen: 16,
 		slots: make(chan struct{}, maxConcurrentDerivations()),
-		queue: make(chan struct{}, maxConcurrentDerivations()*waitersPerSlot),
+		queue: make(chan struct{}, maxConcurrentDerivations()*WaitersPerSlot),
 		idKey: argon2.IDKey,
 	}
 }
 
-// waitersPerSlot sizes the line behind each slot, and so the longest anyone
-// waits: about waitersPerSlot derivations. At the default cost a derivation
-// takes roughly 0.1 to 0.3 seconds on a small server, so eight keeps the
-// worst wait under about three seconds. Raise ARGON2_TIME or
-// ARGON2_MEMORY_KIB and that wait grows with them; lower this to match.
-const waitersPerSlot = 8
+// WaitersPerSlot sizes the line behind each slot, and so the longest anyone
+// waits: about WaitersPerSlot derivations. On the 2-vCPU production box one
+// derivation at the default cost takes about 0.35 to 0.5 seconds, so the
+// worst wait is about 4 seconds. Raise ARGON2_TIME or ARGON2_MEMORY_KIB and
+// that wait grows with them; lower this to match. httpadapter.RequestDeadline
+// must stay well above it.
+const WaitersPerSlot = 8
 
 // MinConcurrentDerivations is the fewest slots any box gets. It is exported
 // so the HTTP layer's rate-limit test can check its per-address allowances

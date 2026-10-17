@@ -441,6 +441,10 @@ func newTestEnvWith(t *testing.T, clk usecase.Clock, outbox usecase.MailOutbox) 
 		Tokens:         tokens,
 		Clock:          clk,
 		Secure:         false,
+		// Limits that never bind: these tests are not about them, and send
+		// many requests from one household. household_limit_api_test.go
+		// tests the production limits.
+		HouseholdLimiter: httpadapter.NewHouseholdLimiter(httpadapter.LimitsThatNeverBind, time.Now),
 	}
 	router := httpadapter.NewRouter(deps)
 

@@ -240,6 +240,18 @@ Hearth's limit of 200 accounts. Archived accounts count towards it." The
 Telegram bot says the same instead of "try again". Remove something to make
 room.
 
+### If Hearth says the household is sending too many requests
+
+Each household can send a generous number of requests at a time. The whole
+household shares that allowance: every member's browser, the household's API
+tokens and `hearthctl`. Normal use never comes near it. If you see "This
+household is sending too many requests. Wait a few seconds and try again.",
+wait a few seconds and it clears by itself; nothing was lost. `hearthctl
+transaction import` slows itself to half the allowance, so the app keeps
+working while an import runs.
+
+If Hearth says it "took too long to answer", try again in a moment.
+
 ## What is not built yet
 
 The sidebar shows where these will go. Clicking through tells you which stage

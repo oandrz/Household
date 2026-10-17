@@ -116,6 +116,10 @@ type Deps struct {
 	// (config.Config.TrustedProxies, from TRUSTED_PROXY_CIDRS). Empty trusts
 	// nobody, which is what every test router gets by leaving it unset.
 	TrustedProxies []netip.Prefix
+	// HouseholdLimiter applies the per-household request limits after
+	// requireSession (limitHousehold). main.go builds it with
+	// ProductionHouseholdLimits. Nil fails every signed-in request closed.
+	HouseholdLimiter *HouseholdLimiter
 }
 
 func NewRouter(deps Deps) http.Handler {
@@ -130,6 +134,9 @@ func NewRouter(deps Deps) http.Handler {
 	// middleware_recoverer.go for why chi's version (a bare, bodyless 500)
 	// is wrong for this API.
 	r.Use(recoverer)
+	// After recoverer, so a panic in a slow handler is still answered with
+	// the standard envelope; before every route, public ones included.
+	r.Use(withRequestDeadline(RequestDeadline))
 
 	// writeNotFound, not an inline WriteError: requirePlatformAdmin answers
 	// with the identical helper, so a hidden admin route and a genuinely
@@ -140,6 +147,10 @@ func NewRouter(deps Deps) http.Handler {
 	r.MethodNotAllowed(func(w http.ResponseWriter, _ *http.Request) {
 		WriteError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "That method is not allowed here.", nil)
 	})
+
+	// One limiter for every signed-in group, so a household's requests
+	// share one allowance whichever group they land in.
+	householdLimit := limitHousehold(deps.HouseholdLimiter)
 
 	r.Get("/healthz", handleHealthz)
 	r.Get("/readyz", handleReadyz(deps.Pinger))
@@ -227,6 +238,7 @@ func NewRouter(deps Deps) http.Handler {
 			// GET, HEAD and OPTIONS -- so the polling route needs no header.
 			auth.Group(func(tl chi.Router) {
 				tl.Use(requireSession(deps))
+				tl.Use(householdLimit)
 				tl.Use(requireFeature(deps, domain.FlagTelegramSignIn))
 				tl.Use(requireCSRF)
 				tl.Use(requireCookieSession)
@@ -239,6 +251,7 @@ func NewRouter(deps Deps) http.Handler {
 
 			auth.Group(func(g chi.Router) {
 				g.Use(requireSession(deps))
+				g.Use(householdLimit)
 				g.Get("/me", handleMe(deps))
 				g.Get("/tokens", handleListAPITokens(deps))
 
@@ -277,6 +290,7 @@ func NewRouter(deps Deps) http.Handler {
 
 		api.Group(func(g chi.Router) {
 			g.Use(requireSession(deps))
+			g.Use(householdLimit)
 
 			g.Get("/household", handleGetHousehold(deps))
 			g.Get("/household/members", handleListMembers(deps))

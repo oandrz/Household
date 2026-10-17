@@ -80,6 +80,14 @@ func run() error {
 	}
 	defer db.Close()
 
+	// The daily prune runs on its own small pool with a longer query limit;
+	// see postgres.OpenJobs.
+	jobsDB, err := postgres.OpenJobs(ctx, cfg.DatabaseURL)
+	if err != nil {
+		return err
+	}
+	defer jobsDB.Close()
+
 	adminBrowseSvc, readonlyDB, err := openBrowse(ctx, cfg)
 	if err != nil {
 		return err
@@ -345,54 +353,42 @@ func run() error {
 		adminOutboxSvc = usecase.NewAdminOutboxService(mail.NewMailpitOutbox(cfg.MailpitAPIURL))
 	}
 
-	srv := &http.Server{
-		Addr: fmt.Sprintf(":%d", cfg.Port),
-		Handler: httpadapter.NewRouter(httpadapter.Deps{
-			Pinger:         db,
-			Auth:           authSvc,
-			Invites:        inviteSvc,
-			Members:        memberSvc,
-			Households:     householdSvc,
-			Signups:        signupSvc,
-			Accounts:       accountSvc,
-			Transactions:   transactionSvc,
-			Categories:     categorySvc,
-			Budgets:        budgetSvc,
-			Goals:          goalSvc,
-			Holdings:       holdingSvc,
-			Bills:          billSvc,
-			Retros:         retroSvc,
-			Visions:        visionSvc,
-			Agreements:     agreementSvc,
-			APITokens:      apiTokenSvc,
-			APITokenRepo:   apiTokens,
-			Telegram:       telegramSvc,
-			TelegramLink:   telegramLinkSvc,
-			Access:         accessSvc,
-			Admin:          adminSvc,
-			AdminReauth:    adminReauthSvc,
-			AdminDirectory: adminDirectorySvc,
-			AdminOutbox:    adminOutboxSvc,
-			AdminBrowse:    adminBrowseSvc,
-			Users:          users,
-			Memberships:    memberships,
-			Sessions:       sessions,
-			Tokens:         tokens,
-			Clock:          sysClock,
-			Secure:         !cfg.IsDevelopment(),
-			TrustedProxies: cfg.TrustedProxies,
-		}),
-		ReadHeaderTimeout: 10 * time.Second,
-		// ReadTimeout bounds the whole request, not just its headers --
-		// ReadHeaderTimeout alone leaves a slow-body attack, or a request
-		// that never finishes, free to hold the connection open indefinitely.
-		ReadTimeout: 15 * time.Second,
-		// MaxHeaderBytes is set explicitly rather than left to net/http's
-		// unstated default: it is the request-size bound on the *server*,
-		// alongside the JSON-body bound (httpadapter's maxRequestBodyBytes,
-		// in errors.go) that lives in the handler layer.
-		MaxHeaderBytes: 1 << 20,
-	}
+	srv := newHTTPServer(fmt.Sprintf(":%d", cfg.Port), httpadapter.NewRouter(httpadapter.Deps{
+		Pinger:           db,
+		Auth:             authSvc,
+		Invites:          inviteSvc,
+		Members:          memberSvc,
+		Households:       householdSvc,
+		Signups:          signupSvc,
+		Accounts:         accountSvc,
+		Transactions:     transactionSvc,
+		Categories:       categorySvc,
+		Budgets:          budgetSvc,
+		Goals:            goalSvc,
+		Holdings:         holdingSvc,
+		Bills:            billSvc,
+		Retros:           retroSvc,
+		Visions:          visionSvc,
+		Agreements:       agreementSvc,
+		APITokens:        apiTokenSvc,
+		APITokenRepo:     apiTokens,
+		Telegram:         telegramSvc,
+		TelegramLink:     telegramLinkSvc,
+		Access:           accessSvc,
+		Admin:            adminSvc,
+		AdminReauth:      adminReauthSvc,
+		AdminDirectory:   adminDirectorySvc,
+		AdminOutbox:      adminOutboxSvc,
+		AdminBrowse:      adminBrowseSvc,
+		Users:            users,
+		Memberships:      memberships,
+		Sessions:         sessions,
+		Tokens:           tokens,
+		Clock:            sysClock,
+		Secure:           !cfg.IsDevelopment(),
+		TrustedProxies:   cfg.TrustedProxies,
+		HouseholdLimiter: httpadapter.NewHouseholdLimiter(httpadapter.ProductionHouseholdLimits, time.Now),
+	}))
 
 	// serveErr carries ListenAndServe's outcome back to the main path.
 	// Buffered so the goroutine never blocks sending, and read only after
@@ -477,8 +473,14 @@ func run() error {
 	// The schedule is a bare goroutine like the poller's, cancelled by the
 	// same context, and it starts on every box: see schedule.
 	retention := usecase.NewRetentionService(usecase.RetentionDeps{
-		Signups: signups, LoginAttempts: loginAttempts, TelegramLinks: telegramLinks,
-		MagicLinks: magicLinks, Invites: invites, APITokens: apiTokens, Sessions: sessions, Clock: sysClock,
+		Signups:       postgres.NewSignupRepo(jobsDB),
+		LoginAttempts: postgres.NewLoginAttemptRepo(jobsDB),
+		TelegramLinks: postgres.NewTelegramLinkRepo(jobsDB),
+		MagicLinks:    postgres.NewMagicLinkRepo(jobsDB),
+		Invites:       postgres.NewInviteRepo(jobsDB),
+		APITokens:     postgres.NewAPITokenRepo(jobsDB),
+		Sessions:      postgres.NewSessionRepo(jobsDB),
+		Clock:         sysClock,
 	})
 	go (&schedule{now: time.Now, prune: pruneRetention(retention), digest: digest}).run(ctx)
 

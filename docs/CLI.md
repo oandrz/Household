@@ -120,6 +120,13 @@ re-key the ones below. Output is `{"created":n,"replayed":n,"failed":[…]}`;
 exit 3 if any row was refused. A network failure stops the run — re-run the
 file, the rows already sent replay.
 
+**An import sends about 5 rows a second**: half the household's request
+allowance, so people using the app at the same time are not held up. 500 rows
+take about two minutes. If the server still answers "too many
+requests" (`429`), the import waits as long as its `Retry-After` says (at
+most 30 s) and sends the same row again, which its key makes safe. After 10
+tries the row is listed under `failed` and the import carries on.
+
 ## Reach anything else
 
 `hearthctl routes` prints every route, who may call it, and its body shape.
@@ -171,6 +178,9 @@ person goes to stderr. A 204 prints nothing.
 
 ## Limits to know
 
+- **Every signed-in call shares the household's request allowance** with the
+  app and the household's other tokens. Over it, the API answers `429` with
+  `Retry-After`; `api` and `add` report that as exit 3, like any refusal.
 - **Writes need an owner.** A limited member's session gets 403 on every
   insert, the same as in the app.
 - **Retrying a write is safe only with a key.** `transaction add --key=<k>`

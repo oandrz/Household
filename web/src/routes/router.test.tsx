@@ -147,6 +147,59 @@ describe("the real route tree", () => {
     expect(await screen.findByText("Welcome back.")).toBeInTheDocument();
   });
 
+  // A household over its request allowance, or a request that ran out of
+  // time, gets a sentence written for people. The first call a page makes
+  // is ['me'], so this screen is where a person meets it.
+  it.each([
+    [429, "RATE_LIMITED", "This household is sending too many requests. Wait a few seconds and try again."],
+    [503, "TIMEOUT", "Hearth took too long to answer. Try again in a moment."],
+  ])("shows the server's own words when loading the account answers %i", async (status, code, message) => {
+    stubFetchRoutes({ "GET /api/v1/auth/me": { status, body: { error: { code, message } } } });
+
+    renderApp("/");
+
+    expect(await screen.findByText(message)).toBeInTheDocument();
+    expect(screen.queryByText(/Something went wrong loading your account/)).not.toBeInTheDocument();
+  });
+
+  // ['me'] refetches in the background (on window focus once stale, and
+  // after settings changes). A refusal then must not swap a working app,
+  // and any form open in it, for the error screen: the data already shown
+  // is still the right person's.
+  it("keeps the app on screen when a background refresh of the account is refused", async () => {
+    stubFetchRoutes({
+      "GET /api/v1/auth/me": [
+        { status: 200, body: meFixture() },
+        {
+          status: 429,
+          body: { error: { code: "RATE_LIMITED", message: "This household is sending too many requests. Wait a few seconds and try again." } },
+        },
+      ],
+    });
+
+    const { queryClient } = renderApp("/", createAppQueryClient());
+    expect(await screen.findByRole("heading", { level: 1, name: "Overview" })).toBeInTheDocument();
+
+    await queryClient.refetchQueries({ queryKey: ["me"] });
+    await waitFor(() => expect(queryClient.getQueryState(["me"])?.status).toBe("error"));
+
+    expect(screen.getByRole("heading", { level: 1, name: "Overview" })).toBeInTheDocument();
+    expect(screen.queryByText(/sending too many requests/)).not.toBeInTheDocument();
+  });
+
+  it("keeps the general message when loading the account fails for another reason", async () => {
+    stubFetchRoutes({
+      "GET /api/v1/auth/me": {
+        status: 500,
+        body: { error: { code: "INTERNAL", message: "Something went wrong. Please try again, or quote this reference if it keeps happening." } },
+      },
+    });
+
+    renderApp("/");
+
+    expect(await screen.findByText("Something went wrong loading your account. Please try again.")).toBeInTheDocument();
+  });
+
   // Sign-out used to reach /sign-in by a detour: the cache kept the old
   // ['me'], so /sign-in believed someone was still signed in and sent the
   // tab back to a signed-in page, and only the 401 that followed cleared the

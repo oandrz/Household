@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jackc/pgx/v5"
+
 	"github.com/andreasoentoro/hearth/api/internal/adapter/postgres"
 	"github.com/andreasoentoro/hearth/api/internal/testsupport"
 )
@@ -71,10 +73,17 @@ func TestReadOnlyRoleCanReadAndCannotWrite(t *testing.T) {
 	})
 
 	// Named so a failure says which of the two mechanisms is missing rather
-	// than only that a write went through.
+	// than only that a write went through. A bare connection, not db: Open
+	// sets its own statement_timeout on every connection, which would hide
+	// the role's.
 	t.Run("its statement timeout is set", func(t *testing.T) {
+		conn, err := pgx.Connect(ctx, testsupport.ReadOnlyURL(t, adminURL))
+		if err != nil {
+			t.Fatalf("connect as hearth_readonly: %v", err)
+		}
+		defer conn.Close(ctx)
 		var setting string
-		if err := db.Pool().QueryRow(ctx, `SHOW statement_timeout`).Scan(&setting); err != nil {
+		if err := conn.QueryRow(ctx, `SHOW statement_timeout`).Scan(&setting); err != nil {
 			t.Fatalf("show: %v", err)
 		}
 		if !strings.HasPrefix(setting, "3") {
