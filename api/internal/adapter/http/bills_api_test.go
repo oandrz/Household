@@ -55,7 +55,16 @@ type billsSummaryBody struct {
 	BillCount                 int              `json:"billCount"`
 	SubscriptionsMonthlyMinor int64            `json:"subscriptionsMonthlyMinor"`
 	SubscriptionsAnnualMinor  int64            `json:"subscriptionsAnnualMinor"`
-	ExcludedNoRate            int              `json:"excludedNoRate"`
+	RecurringMonthlyMinor     int64            `json:"recurringMonthlyMinor"`
+	RecurringAnnualMinor      int64            `json:"recurringAnnualMinor"`
+	RecurringByCategory       []struct {
+		CategoryID     string `json:"categoryId"`
+		CategoryName   string `json:"categoryName"`
+		AnnualMinor    int64  `json:"annualMinor"`
+		MonthlyMinor   int64  `json:"monthlyMinor"`
+		ExcludedNoRate int    `json:"excludedNoRate"`
+	} `json:"recurringByCategory"`
+	ExcludedNoRate int `json:"excludedNoRate"`
 }
 
 type billPaymentBody struct {
@@ -324,6 +333,43 @@ func TestBillsCreateRoundTripsThroughGet(t *testing.T) {
 	}
 	if list.Summary.AutopayCount != 1 {
 		t.Fatalf("summary.autopayCount = %d, want 1 (the bill above has autopay = true)", list.Summary.AutopayCount)
+	}
+}
+
+func TestBillsSummaryCarriesTheRecurringTotalAndItsCategoryRows(t *testing.T) {
+	env := newTestEnv(t)
+	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
+
+	empty := env.authedGet(t, "/api/v1/bills", session)
+	if !strings.Contains(empty.Body.String(), `"recurringByCategory":[]`) {
+		t.Fatalf("a household with no bills must get recurringByCategory [] not null: %s", empty.Body.String())
+	}
+
+	categoryID, categoryName := env.firstExpenseCategory(t, session)
+	accountID := env.mustCreateAccountID(t, session, csrf)
+	env.mustCreateBill(t, session, csrf, map[string]any{
+		"name": "Internet", "amountMinor": 45_000, "cadence": "monthly",
+		"nextDue": farFutureDate(), "categoryId": categoryID, "payFromAccountId": accountID,
+	})
+	env.mustCreateBill(t, session, csrf, map[string]any{
+		"name": "Insurance", "amountMinor": 120_000, "cadence": "yearly",
+		"nextDue": farFutureDate(), "payFromAccountId": accountID,
+	})
+
+	list := decodeBillsList(t, env.authedGet(t, "/api/v1/bills", session))
+	s := list.Summary
+	if s.RecurringAnnualMinor != 45_000*12+120_000 || s.RecurringMonthlyMinor != 55_000 {
+		t.Fatalf("recurring = %d/yr %d/mo, want 660000/yr 55000/mo", s.RecurringAnnualMinor, s.RecurringMonthlyMinor)
+	}
+	if len(s.RecurringByCategory) != 2 {
+		t.Fatalf("rows = %+v, want 2", s.RecurringByCategory)
+	}
+	first, second := s.RecurringByCategory[0], s.RecurringByCategory[1]
+	if first.CategoryID != categoryID || first.CategoryName != categoryName || first.MonthlyMinor != 45_000 {
+		t.Fatalf("first row = %+v, want %s at 45000/mo", first, categoryName)
+	}
+	if second.CategoryID != "" || second.MonthlyMinor != 10_000 {
+		t.Fatalf("second row = %+v, want the no-category row at 10000/mo", second)
 	}
 }
 

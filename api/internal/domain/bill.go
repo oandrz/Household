@@ -2,6 +2,7 @@ package domain
 
 import (
 	"fmt"
+	"sort"
 	"time"
 )
 
@@ -207,4 +208,31 @@ func AnnualEquivalentMinor(c Cadence, amountMinor int64) (int64, bool) {
 		return 0, false
 	}
 	return amountMinor * int64(periods), true
+}
+
+// MonthlySharesMinor turns several annual figures into monthly ones that add
+// up exactly to the combined total divided by 12. Dividing each figure on
+// its own loses up to a minor unit per figure, so a breakdown printed under
+// its own total would visibly not add up. Each share starts at its floor,
+// and the minor units still missing go one each to the figures with the
+// largest remainder, the earlier figure first on a tie.
+func MonthlySharesMinor(annualMinors []int64) []int64 {
+	shares := make([]int64, len(annualMinors))
+	var total, floored int64
+	for i, annual := range annualMinors {
+		shares[i] = annual / 12
+		total += annual
+		floored += shares[i]
+	}
+	order := make([]int, len(annualMinors))
+	for i := range order {
+		order[i] = i
+	}
+	sort.SliceStable(order, func(a, b int) bool {
+		return annualMinors[order[a]]%12 > annualMinors[order[b]]%12
+	})
+	for i := int64(0); i < total/12-floored; i++ {
+		shares[order[i]]++
+	}
+	return shares
 }

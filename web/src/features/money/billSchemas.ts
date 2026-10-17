@@ -74,8 +74,21 @@ const nextDueBillSchema = z.object({
   autopay: z.boolean(),
 });
 
-// billsSummarySchema mirrors billsSummaryDTO -- the page header and the
-// three stat cards. Currency, dueThisMonthMinor, paidSoFarMinor,
+// recurringCategorySchema mirrors recurringCategoryDTO -- one row of the
+// Recurring bills breakdown. categoryId is "" for the row holding bills with
+// no category. monthlyMinor across every row adds up exactly to
+// recurringMonthlyMinor; the server guarantees it, so nothing here re-sums.
+const recurringCategorySchema = z.object({
+  categoryId: z.string(),
+  categoryName: z.string(),
+  annualMinor: z.number(),
+  monthlyMinor: z.number(),
+  excludedNoRate: z.number(),
+});
+export type RecurringCategory = z.infer<typeof recurringCategorySchema>;
+
+// billsSummarySchema mirrors billsSummaryDTO -- the page header, the
+// three stat cards and the Recurring bills card. Currency, dueThisMonthMinor, paidSoFarMinor,
 // subscriptionsMonthlyMinor and subscriptionsAnnualMinor are all in the
 // household's primary currency (billsSummaryDTO's own comment) -- unlike
 // nextDue's own figures above. nextDue is nullable, not optional -- a
@@ -91,6 +104,9 @@ export const billsSummarySchema = z.object({
   billCount: z.number(),
   subscriptionsMonthlyMinor: z.number(),
   subscriptionsAnnualMinor: z.number(),
+  recurringMonthlyMinor: z.number(),
+  recurringAnnualMinor: z.number(),
+  recurringByCategory: z.array(recurringCategorySchema),
   excludedNoRate: z.number(),
 });
 export type BillsSummary = z.infer<typeof billsSummarySchema>;

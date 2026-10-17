@@ -40,11 +40,15 @@ type BillPaymentView struct {
 	Autopay  bool
 }
 
-// BillsSummary is the page header and the three stat cards. DueThisMonth,
-// PaidSoFar, SubscriptionsMonthly and SubscriptionsAnnual are all in the
-// household's primary currency; a bill with no rate to primary is excluded
-// from all of them and counted in ExcludedNoRate instead of silently
-// dropped.
+// BillsSummary is the page header, the three stat cards and the Recurring
+// bills card. Every total here is in the household's primary currency; a
+// bill with no rate to primary is excluded from all of them and counted in
+// ExcludedNoRate instead of silently dropped.
+//
+// RecurringAnnual and RecurringMonthly cover every live bill that repeats,
+// subscription or not, so the subscriptions totals are a part of them, never
+// an addition to them. RecurringByCategory breaks them down, and its rows'
+// Monthly figures add up exactly to RecurringMonthly.
 //
 // NextDueAmount does NOT convert -- it stays in the next-due bill's own
 // currency, the way BillView's Amount does, so the card never pairs an
@@ -65,6 +69,9 @@ type BillsSummary struct {
 	BillCount            int
 	SubscriptionsMonthly domain.Money
 	SubscriptionsAnnual  domain.Money
+	RecurringMonthly     domain.Money
+	RecurringAnnual      domain.Money
+	RecurringByCategory  []RecurringCategory
 	ExcludedNoRate       int
 }
 
@@ -199,6 +206,7 @@ func (s *BillService) List(ctx context.Context, householdID string, includeArchi
 		return BillsView{}, err
 	}
 	subscriptionsAnnual := zero
+	recurring := newRecurringRollup(zero)
 	excludedNoRate := 0
 	// excludedBillIDs stops the per-bill and per-payment passes below from
 	// counting the same bill twice -- a bill that is both due this month and
@@ -242,14 +250,21 @@ func (s *BillService) List(ctx context.Context, householdID string, includeArchi
 			}
 		}
 
-		if b.IsSubscription {
-			var noRate bool
-			subscriptionsAnnual, noRate, err = s.addSubscriptionAnnual(ctx, conv, subscriptionsAnnual, b)
-			if err != nil {
+		annual, repeats, noRate, err := annualInPrimary(ctx, conv, b)
+		if err != nil {
+			return BillsView{}, err
+		}
+		if repeats {
+			if err := recurring.add(rec, annual, noRate); err != nil {
 				return BillsView{}, err
 			}
 			if noRate {
 				excludedThisBill = true
+			} else if b.IsSubscription {
+				subscriptionsAnnual, err = subscriptionsAnnual.Add(annual)
+				if err != nil {
+					return BillsView{}, err
+				}
 			}
 		}
 
@@ -285,6 +300,7 @@ func (s *BillService) List(ctx context.Context, householdID string, includeArchi
 	// every bill's own annual equivalent, converted then added -- the only
 	// division in the whole rollup happens here, exactly once.
 	subscriptionsMonthly := domain.Money{Amount: subscriptionsAnnual.Amount / 12, Currency: primary}
+	recurringAnnual, recurringMonthly, recurringRows := recurring.totals()
 
 	return BillsView{
 		Bills:         views,
@@ -303,6 +319,9 @@ func (s *BillService) List(ctx context.Context, householdID string, includeArchi
 			BillCount:            billCount,
 			SubscriptionsMonthly: subscriptionsMonthly,
 			SubscriptionsAnnual:  subscriptionsAnnual,
+			RecurringMonthly:     recurringMonthly,
+			RecurringAnnual:      recurringAnnual,
+			RecurringByCategory:  recurringRows,
 			ExcludedNoRate:       excludedNoRate,
 		},
 	}, nil
@@ -342,28 +361,24 @@ func dueInMonthOf(due, today time.Time) bool {
 	return c.Year() == t.Year() && c.Month() == t.Month()
 }
 
-// addSubscriptionAnnual adds one subscription's annual equivalent, converted
-// into primary, to total. noRate is true when the bill's currency has no
-// rate -- nothing is added, and List counts it in ExcludedNoRate. A one-off
-// is not a recurring cost: total comes back unchanged and noRate false. Any
-// Converter.TryConvert error is returned.
-func (s *BillService) addSubscriptionAnnual(ctx context.Context, conv *Converter, total domain.Money, b domain.Bill) (sum domain.Money, noRate bool, err error) {
-	annual, ok := domain.AnnualEquivalentMinor(b.Cadence, b.Amount.Amount)
+// annualInPrimary is what one bill costs in a year, converted into primary.
+// repeats is false for a one-off, which is not a recurring cost and belongs
+// in neither the recurring nor the subscriptions total. noRate is true when
+// the bill's currency has no rate: nothing can be added, and List counts it
+// in ExcludedNoRate. Any Converter.TryConvert error is returned.
+func annualInPrimary(ctx context.Context, conv *Converter, b domain.Bill) (annual domain.Money, repeats, noRate bool, err error) {
+	minor, ok := domain.AnnualEquivalentMinor(b.Cadence, b.Amount.Amount)
 	if !ok {
-		return total, false, nil
+		return domain.Money{}, false, false, nil
 	}
-	converted, hasRate, convErr := conv.TryConvert(ctx, domain.Money{Amount: annual, Currency: b.Amount.Currency})
-	if convErr != nil {
-		return domain.Money{}, false, convErr
+	converted, hasRate, err := conv.TryConvert(ctx, domain.Money{Amount: minor, Currency: b.Amount.Currency})
+	if err != nil {
+		return domain.Money{}, false, false, err
 	}
 	if !hasRate {
-		return total, true, nil
+		return domain.Money{}, true, true, nil
 	}
-	sum, err = total.Add(converted)
-	if err != nil {
-		return domain.Money{}, false, err
-	}
-	return sum, false, nil
+	return converted, true, false, nil
 }
 
 // countExcludedPayments counts this month's payments whose currency has no

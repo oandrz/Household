@@ -69,9 +69,19 @@ type nextDueBillDTO struct {
 	Autopay     bool   `json:"autopay"`
 }
 
-// billsSummaryDTO is the page header and the three stat cards. Currency,
-// DueThisMonthMinor, PaidSoFarMinor, SubscriptionsMonthlyMinor and
-// SubscriptionsAnnualMinor are all in the household's primary currency --
+// recurringCategoryDTO is one row of the Recurring bills breakdown.
+// CategoryID is "" for the row holding bills with no category; the
+// frontend names that row.
+type recurringCategoryDTO struct {
+	CategoryID     string `json:"categoryId"`
+	CategoryName   string `json:"categoryName"`
+	AnnualMinor    int64  `json:"annualMinor"`
+	MonthlyMinor   int64  `json:"monthlyMinor"`
+	ExcludedNoRate int    `json:"excludedNoRate"`
+}
+
+// billsSummaryDTO is the page header, the three stat cards and the Recurring
+// bills card. Every amount in it is in the household's primary currency --
 // BillsSummary's own comment -- unlike nextDueBillDTO's own figures above.
 type billsSummaryDTO struct {
 	Currency                  string          `json:"currency"`
@@ -82,7 +92,12 @@ type billsSummaryDTO struct {
 	BillCount                 int             `json:"billCount"`
 	SubscriptionsMonthlyMinor int64           `json:"subscriptionsMonthlyMinor"`
 	SubscriptionsAnnualMinor  int64           `json:"subscriptionsAnnualMinor"`
-	ExcludedNoRate            int             `json:"excludedNoRate"`
+	RecurringMonthlyMinor     int64           `json:"recurringMonthlyMinor"`
+	RecurringAnnualMinor      int64           `json:"recurringAnnualMinor"`
+	// Never nil: a household with no repeating bills gets [], which the
+	// frontend's schema requires.
+	RecurringByCategory []recurringCategoryDTO `json:"recurringByCategory"`
+	ExcludedNoRate      int                    `json:"excludedNoRate"`
 }
 
 // billPaymentDTO is one row of "Paid this month" -- BillPaymentView
@@ -623,7 +638,19 @@ func toBillsSummaryDTO(s usecase.BillsSummary) billsSummaryDTO {
 		BillCount:                 s.BillCount,
 		SubscriptionsMonthlyMinor: s.SubscriptionsMonthly.Amount,
 		SubscriptionsAnnualMinor:  s.SubscriptionsAnnual.Amount,
+		RecurringMonthlyMinor:     s.RecurringMonthly.Amount,
+		RecurringAnnualMinor:      s.RecurringAnnual.Amount,
+		RecurringByCategory:       make([]recurringCategoryDTO, 0, len(s.RecurringByCategory)),
 		ExcludedNoRate:            s.ExcludedNoRate,
+	}
+	for _, row := range s.RecurringByCategory {
+		dto.RecurringByCategory = append(dto.RecurringByCategory, recurringCategoryDTO{
+			CategoryID:     row.CategoryID,
+			CategoryName:   row.CategoryName,
+			AnnualMinor:    row.Annual.Amount,
+			MonthlyMinor:   row.Monthly.Amount,
+			ExcludedNoRate: row.ExcludedNoRate,
+		})
 	}
 	// NextDueOn == nil is the field to gate on -- BillsSummary's own comment
 	// -- not any field inside nextDueBillDTO, several of which (Overdue,

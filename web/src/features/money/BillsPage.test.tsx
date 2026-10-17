@@ -99,6 +99,9 @@ function summaryFixture(overrides: Partial<BillsSummary> = {}): BillsSummary {
     billCount: 0,
     subscriptionsMonthlyMinor: 0,
     subscriptionsAnnualMinor: 0,
+    recurringMonthlyMinor: 0,
+    recurringAnnualMinor: 0,
+    recurringByCategory: [],
     excludedNoRate: 0,
     ...overrides,
   };
@@ -237,6 +240,30 @@ describe("BillsPage", () => {
 
     const laterSection = screen.getByTestId("bills-later");
     expect(within(laterSection).getByText("Home insurance")).toBeInTheDocument();
+  });
+
+  it("shows the recurring bills total and its categories, and puts that card before the lists", async () => {
+    renderPage(
+      billsFixture([billFixture({ id: "b1", name: "Netflix", amountMinor: 1998 })], [], {
+        billCount: 1,
+        subscriptionsMonthlyMinor: 1998,
+        subscriptionsAnnualMinor: 23976,
+        recurringMonthlyMinor: 19998,
+        recurringAnnualMinor: 239976,
+        recurringByCategory: [
+          { categoryId: "cat-housing", categoryName: "Housing", annualMinor: 216000, monthlyMinor: 18000, excludedNoRate: 0 },
+          { categoryId: "cat-streaming", categoryName: "Streaming", annualMinor: 23976, monthlyMinor: 1998, excludedNoRate: 0 },
+        ],
+      }),
+    );
+
+    const card = await screen.findByTestId("recurring-bills-card");
+    expect(within(card).getByTestId("recurring-heading")).toHaveTextContent("Recurring bills · S$199.98/mo");
+    expect(within(card).getAllByTestId("recurring-row")).toHaveLength(2);
+    // Source order is phone order: a phone shows one column, and the total
+    // must not sit under every bill.
+    const lists = screen.getByTestId("bills-due-soon");
+    expect(card.compareDocumentPosition(lists) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it("ordinary: splits Due soon from Later on the server's dueSoon flag", async () => {
@@ -378,8 +405,8 @@ describe("BillsPage", () => {
       }),
     );
 
-    // Waits on the section itself, not the bill's own name -- SubscriptionsCard
-    // (Task 15) renders every isSubscription bill's name too (billFixture's
+    // Waits on the section itself, not the bill's own name -- the subscriptions
+    // section can render every isSubscription bill's name too (billFixture's
     // own default is `isSubscription: true`), so a bare findByText("Property
     // tax") is now ambiguous between the row here and that panel's own row
     // for the identical bill.
@@ -523,7 +550,7 @@ describe("BillsPage", () => {
       },
     });
 
-    // SubscriptionsCard (Task 15) renders this same bill's name a second
+    // The subscriptions section can render this same bill's name a second
     // time (billFixture's own default is `isSubscription: true`), so this
     // waits on the row's own Archive control -- unambiguous, since that
     // panel has no buttons at all -- rather than the bill's bare name.
@@ -559,7 +586,7 @@ describe("BillsPage", () => {
       },
     );
 
-    // Scoped to Due soon -- SubscriptionsCard (Task 15) renders this same
+    // Scoped to Due soon -- the subscriptions section can render this same
     // bill's name a second time (billFixture's own default is
     // `isSubscription: true`), so a bare findByText("Car insurance") is
     // ambiguous between the two panels.
@@ -609,7 +636,7 @@ describe("BillsPage", () => {
       },
     });
 
-    // SubscriptionsCard (Task 15) renders this same bill's name a second
+    // The subscriptions section can render this same bill's name a second
     // time (billFixture's own default is `isSubscription: true`), so this
     // waits on the section rather than the bill's bare name.
     await screen.findByTestId("bills-due-soon");
@@ -697,7 +724,7 @@ describe("BillsPage", () => {
       },
     });
 
-    // SubscriptionsCard (Task 15) renders this same bill's name a second
+    // The subscriptions section can render this same bill's name a second
     // time (billFixture's own default is `isSubscription: true`), so this
     // waits on the section rather than the bill's bare name.
     await screen.findByTestId("bills-due-soon");

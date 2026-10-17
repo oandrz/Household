@@ -53,6 +53,9 @@ const billsResponse = {
     billCount: 1,
     subscriptionsMonthlyMinor: 1999,
     subscriptionsAnnualMinor: 0,
+    recurringMonthlyMinor: 0,
+    recurringAnnualMinor: 0,
+    recurringByCategory: [],
     excludedNoRate: 0,
   },
 };

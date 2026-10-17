@@ -137,3 +137,40 @@ func TestAnnualEquivalentMultipliesAndNeverDivides(t *testing.T) {
 		}
 	}
 }
+
+// Three rows of 1206/yr each floor to 100/mo, which adds to 300; the total
+// 3618/12 is 301. One row takes the missing minor unit so the rows on the
+// screen add up to the headline above them.
+func TestMonthlySharesAddUpToTheCombinedMonthlyFigure(t *testing.T) {
+	got := domain.MonthlySharesMinor([]int64{1206, 1206, 1206})
+	want := []int64{101, 100, 100}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("MonthlySharesMinor = %v, want %v", got, want)
+		}
+	}
+}
+
+// The leftover minor units go to the rows that lost the most to rounding,
+// not simply to the first rows.
+func TestMonthlySharesGiveTheLeftoverToTheLargestRemainders(t *testing.T) {
+	// 1201/12 = 100 r1, 1211/12 = 100 r11, 1210/12 = 100 r10. Total 3622/12
+	// = 301, one unit over 300, which belongs to the r11 row.
+	got := domain.MonthlySharesMinor([]int64{1201, 1211, 1210})
+	want := []int64{100, 101, 100}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("MonthlySharesMinor = %v, want %v", got, want)
+		}
+	}
+}
+
+func TestMonthlySharesOfEvenFiguresAreAPlainDivision(t *testing.T) {
+	got := domain.MonthlySharesMinor([]int64{24000, 1200, 0})
+	want := []int64{2000, 100, 0}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("MonthlySharesMinor = %v, want %v", got, want)
+		}
+	}
+}
