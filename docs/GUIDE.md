@@ -217,6 +217,29 @@ Send `/nudges off` in the chat to stop it for that phone, and `/nudges on`
 to start again. It reaches only owners with Money, because it carries
 money.
 
+## How much a household can store
+
+Hearth keeps a generous ceiling on what one household stores, so one family
+can never crowd out another on the shared server. No real family is near
+any of these; they are there so the service stays quick for everyone.
+
+- **Transactions** — 3,000 in any one month, 100,000 in all.
+- **Accounts, categories, goals, bills, holdings, spaces, agreement
+  sections** — 200 of each. **Archived ones count**, since these are
+  archived rather than deleted.
+- **Records** — 20,000 each of goal contributions, bill payments, holding
+  buys and sells, valuations, income and retro actions, and of agreement
+  proposals.
+- **People** — 30 members, 20 invites waiting at once, 20 API tokens in use.
+- **Text** — names up to 80 characters, a transaction description up to 200,
+  notes up to 500. The boxes stop you typing past the limit.
+- **Budgets** — any month from January 2000 to two years ahead.
+
+At a limit the form says which one, for example "This household has reached
+Hearth's limit of 200 accounts. Archived accounts count towards it." The
+Telegram bot says the same instead of "try again". Remove something to make
+room.
+
 ## What is not built yet
 
 The sidebar shows where these will go. Clicking through tells you which stage

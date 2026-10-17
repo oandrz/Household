@@ -17,3 +17,8 @@ PATH=/usr/local/bin:/usr/bin:/bin
 # 03:17 locally. Any timezone that DOES observe DST would drift by an hour
 # twice a year and would need a different approach.
 17 19 * * * set -a; . /home/deploy/hearth-backup.env; set +a; /home/deploy/Household/deploy/backup.sh >> /home/deploy/hearth-backup.log 2>&1
+
+# Disk alarm, every 15 minutes. The same env file supplies HC_DISK_PING_URL,
+# a second healthchecks.io check (period 15 minutes, grace 30). Its schedule
+# is not a local time, so the CRON_TZ caveat above does not apply.
+*/15 * * * * set -a; . /home/deploy/hearth-backup.env; set +a; /home/deploy/Household/deploy/disk-check.sh >> /home/deploy/hearth-disk.log 2>&1

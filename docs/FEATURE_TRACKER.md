@@ -13,7 +13,13 @@ needed them to exist (see "Where things stand" below).
 | ⬜ | Not started |
 | 🚫 | Out of scope — three different reasons, and **the row always says which**: marked "· not built" by the design itself; cut outright by the product owner (the audit screen, §9 — the code was deleted); or **deferred past the current release** by the product owner, meaning it is expected back later (the Family calendar, §7). A 🚫 is not a promise that something will never exist — it is a statement that it is not this release's work, and the row says what would bring it back |
 
-**Where things stand:** 143 of 162 features built or partly built — and **five of the 162 are 🚫**, so the honest denominator for this release is 157.
+**Where things stand:** 144 of 163 features built or partly built — and **five of the 163 are 🚫**, so the honest denominator for this release is 158.
+
+> **Recounted 2026-10-16 (per-household limits)**. One row the design does
+> not draw is added to §3, ✅: "Per-household limits on stored data".
+> Household settings goes 16 → 17 built. §3's "Retention pruning" row, already
+> ✅, now says spent API tokens and sessions are pruned too. Totals
+> **123/21/14/5 = 163**, Built + Partial **144**, denominator **158**.
 
 > **Recounted 2026-10-14 (the API prunes itself)**. No row is added and no
 > row changes state, so every count is unchanged. §1's "Retention pruning"
@@ -1174,7 +1180,7 @@ above now states Built + Partial **113** of **134**, denominator **129**.
 |---|---|---|---|---|
 | Entry & authentication | 19 | 2 | 1 | 0 |
 | Navigation shell | 7 | 1 | 1 | 0 |
-| Household settings | 16 | 8 | 2 | 0 |
+| Household settings | 17 | 8 | 2 | 0 |
 | Overview (home) | 9 | 2 | 1 | 0 |
 | Money | 37 | 5 | 7 | 0 |
 | Marriage | 17 | 2 | 2 | 0 |
@@ -1182,7 +1188,7 @@ above now states Built + Partial **113** of **134**, denominator **129**.
 | Household extras | 0 | 0 | 0 | 1 |
 | Platform administration | 7 | 1 | 0 | 1 |
 | Automation | 10 | 0 | 0 | 0 |
-| **Total** | **122** | **21** | **14** | **5** |
+| **Total** | **123** | **21** | **14** | **5** |
 
 ---
 
@@ -1311,7 +1317,8 @@ The full checklist is at the end of `docs/LEARNING.md`.
 | Notifications — overspend alerts | 🟡 | Same gap as the row above: stored and editable, never sent |
 | Notifications — monthly retro reminder | 🟡 | Same gap as the two rows above: stored and editable, never sent. Retros itself is built now (section 6), so this row has something real to remind a household of — the gap is only that nothing in this codebase runs on a clock |
 | Notifications — weekly family digest | 🟡 | Same gap: stored and editable, never sent |
-| Retention pruning (scheduled, and `adminctl prune` by hand) | ✅ | No UI. Since 2026-10-14 the API prunes itself once a day on every box, Telegram or not: `RetentionService` deletes `signups`, `telegram_link_requests` and `magic_links` that were used or lapsed more than 30 days ago, `login_attempts` older than 30 days, and invites nobody accepted that lapsed more than 30 days ago. Accepted invites, sessions, API tokens and `admin_audit_log` are kept. `cmd/adminctl prune --older-than=<days>` is the same service by hand, and anything under seven days is refused so a prune can never clear a live lockout. The unknown-address failure count is indexed (`login_attempts_email_at_idx`), and every failure list reads at most the newest ten. Checked on a built image with Telegram off: the start-up prune removed each old row and kept the recent, live, pending and accepted ones |
+| Retention pruning (scheduled, and `adminctl prune` by hand) | ✅ | No UI. Since 2026-10-14 the API prunes itself once a day on every box, Telegram or not: `RetentionService` deletes `signups`, `telegram_link_requests` and `magic_links` that were used or lapsed more than 30 days ago, `login_attempts` older than 30 days, and invites nobody accepted that lapsed more than 30 days ago. Since 2026-10-16 it also deletes API tokens and sessions revoked or expired more than 30 days ago, except each person's most recently used session in a household, which the admin directory's "last active" reads. Accepted invites and `admin_audit_log` are kept. `cmd/adminctl prune --older-than=<days>` is the same service by hand, and anything under seven days is refused so a prune can never clear a live lockout. The unknown-address failure count is indexed (`login_attempts_email_at_idx`), and every failure list reads at most the newest ten. Checked on a built image with Telegram off: the start-up prune removed each old row and kept the recent, live, pending and accepted ones |
+| Per-household limits on stored data (no mockup) | ✅ | 2026-10-16, [ADR 13](adr/0013-per-household-limits-on-stored-data.md). What one household can store is capped: 3,000 transactions in a month and 100,000 in total; 200 each of accounts, categories, goals, bills, holdings, spaces and agreement sections, archived ones included; 20,000 each of goal contributions, bill payments, holding buys and sells, valuations, income, retro actions and agreement proposals; 30 members, 20 pending invites, 20 active API tokens. Names are limited to 80 characters, a transaction description to 200, notes to 500, a holding unit to 20, each also held by a database `CHECK`. Budgets can be saved from January 2000 to two years ahead. A reached cap answers `409 LIMIT_REACHED` naming the thing and the number (the month, for the monthly cap), which every create form already shows; text inputs stop at their limit; the Telegram bot explains both instead of saying "try again". A keyed retry whose first attempt landed is still answered "already saved" at the cap. The checks run in the services, after every route guard, through the `HouseholdUsage` port. Tests: the domain numbers, each count against Postgres, each service at and one below its cap, `TestEveryCappedTextFieldAnswers422NotA500` over 23 write routes, `TestTheCapNeverAnswersBeforeTheGuards`, and the bot replies. **Not covered:** many households each within their own caps; the disk alarm in `deploy/PROVISION.md` §12 watches for that |
 | Connected accounts | ⬜ | Belongs with Money. Note that automatic bank sync is not available to an app like this — see Money below |
 
 ## 4 · Overview (home)

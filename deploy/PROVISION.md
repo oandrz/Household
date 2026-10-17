@@ -147,7 +147,7 @@ su - deploy
 git clone --depth=1 --filter=blob:none --sparse https://github.com/oandrz/Household.git
 cd Household && git sparse-checkout set deploy && cd deploy
 ls -A     # .env.example Caddyfile PROVISION.md README.md backup.sh
-          # crontab.example deploy.sh docker-compose.prod.yml
+          # crontab.example deploy.sh disk-check.sh docker-compose.prod.yml
           # hearth-backup.env.example readonly-role.sql restore.sh
           # sshd-hardening.conf
 ```
@@ -359,10 +359,11 @@ Then the environment file and the schedule:
 ```bash
 cp hearth-backup.env.example ~/hearth-backup.env
 chmod 600 ~/hearth-backup.env
-# fill in AGE_RECIPIENT and HC_PING_URL
+# fill in AGE_RECIPIENT, HC_PING_URL and HC_DISK_PING_URL
 
 crontab crontab.example         # read it first; the PATH and CRON_TZ lines matter
 touch ~/hearth-backup.log && chmod 600 ~/hearth-backup.log
+touch ~/hearth-disk.log && chmod 600 ~/hearth-disk.log
 ```
 
 Prove it as *cron* will run it, not as you will:
@@ -376,11 +377,25 @@ env -i PATH=/usr/local/bin:/usr/bin:/bin HOME=/home/deploy SHELL=/bin/sh \
 
 - **healthchecks.io** — period 1 day, grace 3 hours. Answers *did the backup
   run*. Its URL goes in `hearth-backup.env`.
+- **healthchecks.io, a second check** — period 15 minutes, grace 30 minutes.
+  Answers *is the disk filling up*. `disk-check.sh` pings it as healthy while
+  the disk is under `DISK_ALARM_PERCENT` (80) and fails it once it is over,
+  so the owner is mailed while there is still room to act; a full disk stops
+  Postgres. Hearth caps what one household can store (ADR 13), but many new
+  households together are bounded only by the sign-up limits, which is what
+  this alarm watches for. Prove it as cron runs it, then once with
+  `DISK_ALARM_PERCENT=1` to see the failure mail arrive:
+
+  ```bash
+  env -i PATH=/usr/local/bin:/usr/bin:/bin HOME=/home/deploy SHELL=/bin/sh \
+    /bin/sh -c 'set -a; . /home/deploy/hearth-backup.env; set +a; DISK_ALARM_PERCENT=1 /home/deploy/Household/deploy/disk-check.sh'
+  ```
+
 - **UptimeRobot** — **Keyword** monitor on `https://<hostname>/readyz`, keyword
   `ready`, 5-minute interval. Answers *is the site up*. Keyword rather than
   plain HTTP so a `200` carrying an error body still trips it.
 
-**Both, not one.** Only having the first is a gap that survived an entire
+**All three, not one.** Only having the backup heartbeat is a gap that survived an entire
 twelve-criterion walk.
 
 ## 13 · Prove it, do not assume it
