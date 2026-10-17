@@ -14,13 +14,17 @@ type DB struct {
 	pool *pgxpool.Pool
 }
 
+// RequestPoolMaxConns is how many connections the request pool holds.
+// ProductionHouseholdLimits.InFlight is sized against it.
+const RequestPoolMaxConns = 10
+
 // Open builds a connection pool and verifies it is usable before returning.
 func Open(ctx context.Context, databaseURL string) (*DB, error) {
 	cfg, err := pgxpool.ParseConfig(databaseURL)
 	if err != nil {
 		return nil, fmt.Errorf("parse database url: %w", err)
 	}
-	cfg.MaxConns = 10
+	cfg.MaxConns = RequestPoolMaxConns
 	cfg.MaxConnLifetime = time.Hour
 
 	pool, err := pgxpool.NewWithConfig(ctx, cfg)

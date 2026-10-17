@@ -2,10 +2,14 @@ package httpadapter
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/andreasoentoro/hearth/api/internal/adapter/postgres"
 )
 
 // fakeNow is a settable clock for the bucket. The wait line uses real
@@ -329,5 +333,54 @@ func TestConcurrentRequestsNeverExceedTheInFlightCap(t *testing.T) {
 	wg.Wait()
 	if got := most.Load(); got > 4 || got < 2 {
 		t.Fatalf("most running at once = %d, want between 2 and 4 (the cap, and proof they overlapped)", got)
+	}
+}
+
+// homeScreenParallelCalls is how many API calls the home screen fires at
+// once, counted in the running app on 2026-10-17. Other pages fire 3 to 9.
+const homeScreenParallelCalls = 11
+
+// TestProductionHouseholdLimitsFitWhatTheyProtect checks the live numbers
+// against what they must fit around (LEARNING pattern 11): a page load must
+// pass in one go, and two busy households must still leave connections for
+// everyone else.
+func TestProductionHouseholdLimitsFitWhatTheyProtect(t *testing.T) {
+	p := ProductionHouseholdLimits
+	if p.Burst <= homeScreenParallelCalls {
+		t.Errorf("Burst = %d, want more than the home screen's %d parallel calls", p.Burst, homeScreenParallelCalls)
+	}
+	if p.InFlight*2 >= postgres.RequestPoolMaxConns {
+		t.Errorf("InFlight = %d: two busy households would hold %d of %d pool connections, leaving none",
+			p.InFlight, p.InFlight*2, postgres.RequestPoolMaxConns)
+	}
+	if p.InFlight+p.MaxWaiting < homeScreenParallelCalls {
+		t.Errorf("InFlight + MaxWaiting = %d, want at least %d so a page load waits instead of being refused",
+			p.InFlight+p.MaxWaiting, homeScreenParallelCalls)
+	}
+}
+
+func withScope(r *http.Request, householdID string) *http.Request {
+	return r.WithContext(context.WithValue(r.Context(), scopeKey{}, Scope{HouseholdID: householdID}))
+}
+
+func TestASlotIsReturnedWhenTheHandlerPanics(t *testing.T) {
+	l := NewHouseholdLimiter(smallLimits(), newFakeNow().now)
+	h := recoverer(limitHousehold(l)(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		panic("boom")
+	})))
+	h.ServeHTTP(httptest.NewRecorder(), withScope(httptest.NewRequest(http.MethodGet, "/", nil), "h1"))
+	if n := runningIn(l, "h1"); n != 0 {
+		t.Fatalf("running = %d after a panicking handler, want 0", n)
+	}
+}
+
+func TestAMissingLimiterFailsClosed(t *testing.T) {
+	h := limitHousehold(nil)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, withScope(httptest.NewRequest(http.MethodGet, "/", nil), "h1"))
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500: a router built without a limiter must not serve unlimited", rec.Code)
 	}
 }

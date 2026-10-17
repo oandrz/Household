@@ -165,31 +165,34 @@ func TestSignOutRevokesTheSession(t *testing.T) {
 	assertErrorResponse(t, rec, http.StatusUnauthorized, "UNAUTHENTICATED")
 }
 
+// publicRoutes are reached before any session exists. Two walks skip them:
+// the unauthenticated walk (no 401 expected) and the household-limit walk
+// (no limiter in front of them).
+var publicRoutes = map[string]bool{
+	"POST /api/v1/auth/sign-in":            true,
+	"POST /api/v1/auth/magic-link":         true,
+	"POST /api/v1/auth/magic-link/consume": true,
+	// Sign-up: reached before any session exists, exactly like the
+	// three routes above -- see middleware_ratelimit.go for the one
+	// thing standing between this and an open relay.
+	"POST /api/v1/auth/sign-up":                  true,
+	"GET /api/v1/auth/sign-up/{token}":           true,
+	"POST /api/v1/auth/sign-up/{token}/complete": true,
+	// Public: the sign-up form reads this before any session exists.
+	"GET /api/v1/currencies": true,
+	// Telegram sign-in: reached before any session exists, same as sign-up
+	// above. It answers 404, not 401, when no bot is configured
+	// (telegram_handlers.go's doc comment) -- the same answer any unrouted
+	// path gets, which this walk would otherwise flag as a missing 401 guard.
+	"POST /api/v1/auth/telegram/start": true,
+}
+
 // TestEveryProtectedRouteRejectsAnUnauthenticatedCaller walks the real,
 // fully wired router rather than a hand-maintained list, so a route
 // registered without its session guard cannot hide by simply not being
 // mentioned here.
 func TestEveryProtectedRouteRejectsAnUnauthenticatedCaller(t *testing.T) {
 	env := newTestEnv(t)
-
-	public := map[string]bool{
-		"POST /api/v1/auth/sign-in":            true,
-		"POST /api/v1/auth/magic-link":         true,
-		"POST /api/v1/auth/magic-link/consume": true,
-		// Sign-up: reached before any session exists, exactly like the
-		// three routes above -- see middleware_ratelimit.go for the one
-		// thing standing between this and an open relay.
-		"POST /api/v1/auth/sign-up":                  true,
-		"GET /api/v1/auth/sign-up/{token}":           true,
-		"POST /api/v1/auth/sign-up/{token}/complete": true,
-		// Public: the sign-up form reads this before any session exists.
-		"GET /api/v1/currencies": true,
-		// Telegram sign-in: reached before any session exists, same as sign-up
-		// above. It answers 404, not 401, when no bot is configured
-		// (telegram_handlers.go's doc comment) -- the same answer any unrouted
-		// path gets, which this walk would otherwise flag as a missing 401 guard.
-		"POST /api/v1/auth/telegram/start": true,
-	}
 
 	routes, ok := env.router.(chi.Routes)
 	if !ok {
@@ -209,7 +212,7 @@ func TestEveryProtectedRouteRejectsAnUnauthenticatedCaller(t *testing.T) {
 		if invitePreAuthRoutes[method+" "+route] {
 			return nil // pre-auth by design -- see invitePreAuthRoutes' doc comment
 		}
-		if public[method+" "+route] {
+		if publicRoutes[method+" "+route] {
 			return nil
 		}
 

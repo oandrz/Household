@@ -2,9 +2,15 @@ package httpadapter
 
 import (
 	"context"
+	"errors"
+	"log/slog"
 	"math"
+	"net/http"
+	"strconv"
 	"sync"
 	"time"
+
+	"github.com/go-chi/chi/v5/middleware"
 )
 
 // HouseholdLimits are the two per-household request limits. The bucket
@@ -199,4 +205,38 @@ func (l *HouseholdLimiter) refusalWorthLogging(householdID string) bool {
 // rounded up, never 0 (0 would invite an immediate retry).
 func retryAfterSeconds(d time.Duration) int {
 	return max(1, int(math.Ceil(d.Seconds())))
+}
+
+const householdRateLimitedMessage = "This household is sending too many requests. Wait a few seconds and try again."
+
+// limitHousehold applies the household limits. It sits immediately after
+// requireSession in every signed-in group: after it, so a caller with no
+// session gets 401 and never learns a route exists from a 429; before every
+// other guard, because a request that will be refused still cost
+// requireSession's reads.
+//
+// A nil limiter fails closed. Routers built for tests that are not about
+// limits pass limits that never bind instead.
+func limitHousehold(l *HouseholdLimiter) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			scope, ok := RequestScope(r)
+			if l == nil || !ok {
+				logAndWriteInternal(w, r, errors.New("household limit: no limiter in Deps, or not placed after requireSession"))
+				return
+			}
+			release, retryAfter := l.admit(r.Context(), scope.HouseholdID)
+			if release == nil {
+				if l.refusalWorthLogging(scope.HouseholdID) {
+					slog.Warn("household request limit reached",
+						"household_id", scope.HouseholdID, "request_id", middleware.GetReqID(r.Context()))
+				}
+				w.Header().Set("Retry-After", strconv.Itoa(retryAfterSeconds(retryAfter)))
+				WriteError(w, http.StatusTooManyRequests, "RATE_LIMITED", householdRateLimitedMessage, nil)
+				return
+			}
+			defer release()
+			next.ServeHTTP(w, r)
+		})
+	}
 }
