@@ -35,6 +35,8 @@ type RetentionDeps struct {
 	TelegramLinks Pruner
 	MagicLinks    Pruner
 	Invites       Pruner
+	APITokens     Pruner
+	Sessions      Pruner
 	Clock         Clock
 }
 
@@ -54,6 +56,8 @@ type PruneCounts struct {
 	TelegramLinks int64
 	MagicLinks    int64
 	Invites       int64
+	APITokens     int64
+	Sessions      int64
 }
 
 // Prune deletes, from every table it knows, the rows older than olderThan
@@ -83,6 +87,8 @@ func (s *RetentionService) Prune(ctx context.Context, olderThan time.Duration) (
 		{"telegram link requests", s.d.TelegramLinks, &counts.TelegramLinks},
 		{"magic links", s.d.MagicLinks, &counts.MagicLinks},
 		{"invites", s.d.Invites, &counts.Invites},
+		{"api tokens", s.d.APITokens, &counts.APITokens},
+		{"sessions", s.d.Sessions, &counts.Sessions},
 	} {
 		n, err := table.rows.Prune(ctx, before)
 		if err != nil {

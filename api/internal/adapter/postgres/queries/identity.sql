@@ -364,3 +364,8 @@ RETURNING household_id, bill_reminders, overspend_alerts, retro_reminder, weekly
 -- regression dressed as cleanup.
 -- name: PruneLoginAttempts :execrows
 DELETE FROM login_attempts WHERE at < $1;
+
+-- name: PruneSpentSessions :execrows
+-- A session revoked or expired before the cutoff can never be used again.
+-- The admin audit trail lives in admin_audit_log, not here.
+DELETE FROM sessions WHERE expires_at < $1 OR revoked_at < $1;

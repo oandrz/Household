@@ -162,6 +162,8 @@ func run(args []string) error {
 			TelegramLinks: postgres.NewTelegramLinkRepo(db),
 			MagicLinks:    postgres.NewMagicLinkRepo(db),
 			Invites:       postgres.NewInviteRepo(db),
+			APITokens:     postgres.NewAPITokenRepo(db),
+			Sessions:      sessions,
 			Clock:         clock.System{},
 		})
 		return runPrune(ctx, retention, time.Duration(*days)*24*time.Hour)
@@ -532,10 +534,10 @@ func runUnlockAdmin(ctx context.Context, users usecase.UserRepository,
 // by the service before anything is deleted.
 func runPrune(ctx context.Context, retention *usecase.RetentionService, olderThan time.Duration) error {
 	counts, err := retention.Prune(ctx, olderThan)
-	fmt.Printf("Pruned %d signups, %d login attempts, %d Telegram link requests, %d magic links "+
-		"and %d expired invites older than %d days.\n",
+	fmt.Printf("Pruned %d signups, %d login attempts, %d Telegram link requests, %d magic links, "+
+		"%d expired invites, %d spent API tokens and %d spent sessions older than %d days.\n",
 		counts.Signups, counts.LoginAttempts, counts.TelegramLinks, counts.MagicLinks, counts.Invites,
-		int(olderThan.Hours()/24))
+		counts.APITokens, counts.Sessions, int(olderThan.Hours()/24))
 	return err
 }
 

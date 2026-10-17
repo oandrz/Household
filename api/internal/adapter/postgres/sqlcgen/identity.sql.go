@@ -1149,6 +1149,20 @@ func (q *Queries) PruneMagicLinks(ctx context.Context, expiresAt pgtype.Timestam
 	return result.RowsAffected(), nil
 }
 
+const pruneSpentSessions = `-- name: PruneSpentSessions :execrows
+DELETE FROM sessions WHERE expires_at < $1 OR revoked_at < $1
+`
+
+// A session revoked or expired before the cutoff can never be used again.
+// The admin audit trail lives in admin_audit_log, not here.
+func (q *Queries) PruneSpentSessions(ctx context.Context, expiresAt pgtype.Timestamptz) (int64, error) {
+	result, err := q.db.Exec(ctx, pruneSpentSessions, expiresAt)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const recordInviteKnock = `-- name: RecordInviteKnock :one
 UPDATE invites
 SET knock_chat_id = $2, knock_chat_username = $3, knock_code = $4, knocked_at = $5

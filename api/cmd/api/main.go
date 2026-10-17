@@ -478,7 +478,7 @@ func run() error {
 	// same context, and it starts on every box: see schedule.
 	retention := usecase.NewRetentionService(usecase.RetentionDeps{
 		Signups: signups, LoginAttempts: loginAttempts, TelegramLinks: telegramLinks,
-		MagicLinks: magicLinks, Invites: invites, Clock: sysClock,
+		MagicLinks: magicLinks, Invites: invites, APITokens: apiTokens, Sessions: sessions, Clock: sysClock,
 	})
 	go (&schedule{now: time.Now, prune: pruneRetention(retention), digest: digest}).run(ctx)
 

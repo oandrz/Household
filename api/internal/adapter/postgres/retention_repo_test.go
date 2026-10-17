@@ -200,3 +200,60 @@ func TestEarlierFailureListsKeepOnlyTheNewest(t *testing.T) {
 	r, err = admin.ReserveFailure(ctx, operator.ID, now, since)
 	check("ReserveFailure for an operator", r.Earlier, err)
 }
+
+// A token or session that was revoked, or expired, before the cutoff goes;
+// a live one stays, and so does one revoked or expired after the cutoff.
+func TestPruneTokensAndSessionsDeletesOnlyThoseSpentBeforeTheCutoff(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+	household := insertTestHousehold(t, db)
+	u, err := postgres.NewUserRepo(db).Create(ctx, "a@example.com", "", "A")
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	cutoff := now.Add(-usecase.RetentionWindow)
+	old := cutoff.Add(-time.Hour)
+	recent := cutoff.Add(time.Hour)
+	future := now.Add(24 * time.Hour)
+
+	rows := []struct {
+		name    string
+		expires time.Time
+		revoked *time.Time
+	}{
+		{"live", future, nil},
+		{"expired before the cutoff", old, nil},
+		{"revoked before the cutoff", future, &old},
+		{"expired after the cutoff", recent, nil},
+		{"revoked after the cutoff", future, &recent},
+	}
+	for i, r := range rows {
+		if _, err := db.Pool().Exec(ctx,
+			`INSERT INTO api_tokens (user_id, household_id, name, token_hash, prefix, expires_at, revoked_at)
+			 VALUES ($1, $2, $3, $4, 'p', $5, $6)`, u.ID, household, r.name, []byte{byte(i)}, r.expires, r.revoked); err != nil {
+			t.Fatalf("token %s: %v", r.name, err)
+		}
+		if _, err := db.Pool().Exec(ctx,
+			`INSERT INTO sessions (token_hash, user_id, household_id, expires_at, revoked_at)
+			 VALUES ($1, $2, $3, $4, $5)`, []byte{byte(100 + i)}, u.ID, household, r.expires, r.revoked); err != nil {
+			t.Fatalf("session %s: %v", r.name, err)
+		}
+	}
+	if n, err := postgres.NewAPITokenRepo(db).Prune(ctx, cutoff); err != nil || n != 2 {
+		t.Fatalf("tokens pruned = %d, %v; want 2", n, err)
+	}
+	if n, err := postgres.NewSessionRepo(db).Prune(ctx, cutoff); err != nil || n != 2 {
+		t.Fatalf("sessions pruned = %d, %v; want 2", n, err)
+	}
+	var tokens, sessions int
+	if err := db.Pool().QueryRow(ctx, `SELECT count(*) FROM api_tokens`).Scan(&tokens); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Pool().QueryRow(ctx, `SELECT count(*) FROM sessions`).Scan(&sessions); err != nil {
+		t.Fatal(err)
+	}
+	if tokens != 3 || sessions != 3 {
+		t.Fatalf("left %d tokens and %d sessions, want 3 of each", tokens, sessions)
+	}
+}

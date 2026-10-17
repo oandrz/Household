@@ -40,3 +40,7 @@ UPDATE api_tokens SET last_used_at = $2 WHERE id = $1;
 SELECT * FROM api_tokens
 WHERE household_id = $1 AND revoked_at IS NULL AND expires_at > now()
 ORDER BY created_at DESC;
+
+-- name: PruneSpentAPITokens :execrows
+-- A token revoked or expired before the cutoff can never be used again.
+DELETE FROM api_tokens WHERE expires_at < $1 OR revoked_at < $1;

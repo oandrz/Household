@@ -99,3 +99,11 @@ func toAPIToken(row sqlcgen.ApiToken) domain.APIToken {
 		RevokedAt:   timePtrOf(row.RevokedAt),
 	}
 }
+
+func (r *APITokenRepo) Prune(ctx context.Context, before time.Time) (int64, error) {
+	n, err := r.q.PruneSpentAPITokens(ctx, timestamptz(before))
+	if err != nil {
+		return 0, translate(err, "prune api tokens")
+	}
+	return n, nil
+}

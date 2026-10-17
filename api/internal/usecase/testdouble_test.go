@@ -473,6 +473,8 @@ func (d *sessionDouble) failNextRevokeAllForUser(err error) {
 	d.failNextRevoke = err
 }
 
+func (d *sessionDouble) Prune(context.Context, time.Time) (int64, error) { return 0, nil }
+
 func (d *sessionDouble) RevokeAllForUser(_ context.Context, userID string) error {
 	if d.failNextRevoke != nil {
 		err := d.failNextRevoke
@@ -4999,6 +5001,8 @@ func (d *apiTokenDouble) Revoke(_ context.Context, userID, tokenID string) error
 	}
 	return domain.ErrNotFound
 }
+
+func (d *apiTokenDouble) Prune(context.Context, time.Time) (int64, error) { return 0, nil }
 
 func (d *apiTokenDouble) RevokeAllForUser(_ context.Context, userID string) error {
 	for _, t := range d.rows {

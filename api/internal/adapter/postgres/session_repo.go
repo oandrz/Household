@@ -78,3 +78,11 @@ func (r *SessionRepo) Touch(ctx context.Context, tokenHash []byte, at time.Time)
 		LastSeenAt: timestamptz(at),
 	}), "touch session")
 }
+
+func (r *SessionRepo) Prune(ctx context.Context, before time.Time) (int64, error) {
+	n, err := r.q.PruneSpentSessions(ctx, timestamptz(before))
+	if err != nil {
+		return 0, translate(err, "prune sessions")
+	}
+	return n, nil
+}
