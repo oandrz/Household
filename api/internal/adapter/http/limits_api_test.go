@@ -2,9 +2,12 @@ package httpadapter_test
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"strings"
 	"testing"
+
+	"github.com/andreasoentoro/hearth/api/internal/domain"
 )
 
 // accountBody is the body mustCreateAccountID sends.
@@ -117,4 +120,110 @@ func TestABudgetOutsideTheWindowAnswers422(t *testing.T) {
 	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
 	rec := env.authed(t, http.MethodPut, "/api/v1/budgets/1999-12", map[string]any{"lines": []any{}}, session, csrf)
 	assertErrorResponse(t, rec, http.StatusUnprocessableEntity, "BUDGET_MONTH_OUT_OF_RANGE")
+}
+
+// Every capped text field, on every signed-in route that writes it, answers
+// 422 TEXT_TOO_LONG. A route whose service forgot the domain rule would
+// reach the database CHECK instead and answer 500, which this sweep catches.
+// The public sign-up and invite-accept routes are covered by their service
+// tests.
+func TestEveryCappedTextFieldAnswers422NotA500(t *testing.T) {
+	env := newTestEnv(t)
+	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
+	name81 := strings.Repeat("a", 81)
+	unit21 := strings.Repeat("g", 21)
+	desc201 := strings.Repeat("a", 201)
+	note501 := strings.Repeat("a", 501)
+
+	category, _ := env.firstExpenseCategory(t, session)
+	account := env.mustCreateAccountID(t, session, csrf)
+	goal := env.mustCreateGoal(t, session, csrf, map[string]any{
+		"name": "Emergency fund", "targetMinor": 100_000, "currency": "SGD", "plannedMonthlyMinor": 10_000,
+	}).Goal
+	bill := env.mustCreateBill(t, session, csrf, map[string]any{
+		"name": "Internet", "amountMinor": 45_000, "cadence": "monthly",
+		"nextDue": "2026-12-20", "payFromAccountId": account,
+	}).Bill
+	txRec := env.authed(t, http.MethodPost, "/api/v1/transactions", map[string]any{
+		"kind": "expense", "occurredOn": "2026-01-05", "description": "Weekly shop",
+		"categoryId": category, "fromAccountId": account, "amountMinor": 1_250,
+	}, session, csrf)
+	if txRec.Code != http.StatusCreated {
+		t.Fatalf("create transaction: %d %s", txRec.Code, txRec.Body)
+	}
+	var created struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(txRec.Body.Bytes(), &created); err != nil || created.ID == "" {
+		t.Fatalf("decode transaction: %v (body %s)", err, txRec.Body)
+	}
+	transaction := created.ID
+	brokerage := newHoldingAccount(t, env, session, csrf, "Brokerage", "investment")
+	holding := newHolding(t, env, session, csrf, brokerage, "D05")
+	retroRec := env.authed(t, http.MethodPost, "/api/v1/retros", nil, session, csrf)
+	if retroRec.Code != http.StatusCreated {
+		t.Fatalf("start retro: %d %s", retroRec.Code, retroRec.Body)
+	}
+	var retro retroDetailBody
+	if err := json.Unmarshal(retroRec.Body.Bytes(), &retro); err != nil {
+		t.Fatal(err)
+	}
+
+	// The email invite channel sits behind a flag; turn it on so the invite
+	// row reaches the name rule.
+	if err := env.featureFlags.SetGlobal(context.Background(), string(domain.FlagEmailInvites), true, ""); err != nil {
+		t.Fatalf("enable email invites: %v", err)
+	}
+
+	rows := []struct {
+		name, method, path string
+		body               map[string]any
+	}{
+		{"account nickname on create", http.MethodPost, "/api/v1/accounts", func() map[string]any {
+			b := accountBody()
+			b["nickname"] = name81
+			return b
+		}()},
+		{"account nickname on edit", http.MethodPatch, "/api/v1/accounts/" + account, map[string]any{"nickname": name81}},
+		{"category name on create", http.MethodPost, "/api/v1/categories", map[string]any{"name": name81}},
+		{"category name on rename", http.MethodPatch, "/api/v1/categories/" + category, map[string]any{"name": name81}},
+		{"goal name on create", http.MethodPost, "/api/v1/goals", map[string]any{
+			"name": name81, "targetMinor": 100_000, "currency": "SGD", "plannedMonthlyMinor": 10_000}},
+		{"goal name on edit", http.MethodPatch, "/api/v1/goals/" + goal.ID, map[string]any{"name": name81}},
+		{"goal contribution note", http.MethodPost, "/api/v1/goals/" + goal.ID + "/contributions", map[string]any{
+			"amountMinor": 2_500, "occurredOn": "2026-01-05", "note": note501}},
+		{"bill name on create", http.MethodPost, "/api/v1/bills", map[string]any{
+			"name": name81, "amountMinor": 45_000, "cadence": "monthly", "nextDue": "2026-12-20", "payFromAccountId": account}},
+		{"bill name on edit", http.MethodPatch, "/api/v1/bills/" + bill.ID, map[string]any{"name": name81}},
+		{"transaction description on create", http.MethodPost, "/api/v1/transactions", map[string]any{
+			"kind": "expense", "occurredOn": "2026-01-05", "description": desc201,
+			"categoryId": category, "fromAccountId": account, "amountMinor": 1_250}},
+		{"transaction description on edit", http.MethodPatch, "/api/v1/transactions/" + transaction, map[string]any{"description": desc201}},
+		{"holding name on create", http.MethodPost, "/api/v1/holdings", map[string]any{
+			"accountId": brokerage, "name": name81, "instrument": "stock", "unit": "share"}},
+		{"holding unit on create", http.MethodPost, "/api/v1/holdings", map[string]any{
+			"accountId": brokerage, "name": "Gold", "instrument": "stock", "unit": unit21}},
+		{"holding name on edit", http.MethodPatch, "/api/v1/holdings/" + holding, map[string]any{
+			"name": name81, "instrument": "stock", "unit": "share"}},
+		{"holding unit on edit", http.MethodPatch, "/api/v1/holdings/" + holding, map[string]any{
+			"name": "D05", "instrument": "stock", "unit": unit21}},
+		{"holding buy note", http.MethodPost, "/api/v1/holdings/" + holding + "/events", map[string]any{
+			"kind": "acquisition", "quantity": "10", "amountMinor": 1_000, "occurredOn": "2026-01-05", "note": note501}},
+		{"holding valuation note", http.MethodPost, "/api/v1/holdings/" + holding + "/valuations", map[string]any{
+			"unitPriceMinor": 120, "asOf": "2026-01-05", "note": note501}},
+		{"holding income note", http.MethodPost, "/api/v1/holdings/" + holding + "/income", map[string]any{
+			"kind": "income", "amountMinor": 500, "receivedOn": "2026-01-05", "note": note501}},
+		{"space name", http.MethodPost, "/api/v1/spaces", map[string]any{"name": name81, "visibility": "everyone"}},
+		{"invitee name", http.MethodPost, "/api/v1/household/members/invite", map[string]any{
+			"name": name81, "email": "kid@example.com", "role": "limited", "capabilities": []string{"calendar"}, "channel": "email"}},
+		{"household name", http.MethodPatch, "/api/v1/household", map[string]any{"name": name81}},
+		{"family name", http.MethodPatch, "/api/v1/household", map[string]any{"familyName": name81}},
+		{"retro action", http.MethodPost, "/api/v1/retros/" + retro.Retro.Month + "/actions", map[string]any{"body": note501}},
+	}
+	for _, r := range rows {
+		t.Run(r.name, func(t *testing.T) {
+			rec := env.authed(t, r.method, r.path, r.body, session, csrf)
+			assertErrorResponse(t, rec, http.StatusUnprocessableEntity, "TEXT_TOO_LONG")
+		})
+	}
 }
