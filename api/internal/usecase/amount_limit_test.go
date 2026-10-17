@@ -165,7 +165,7 @@ func TestBudgetSaveRefusesACapOrAnExpectedIncomePastTheCeiling(t *testing.T) {
 
 	_, err := f.svc.Save(ctx, "house-1", julyMonth(), nil, []usecase.BudgetLineInput{
 		{CategoryID: "cat-groceries", CapMinor: onePastTheCeiling},
-	})
+	}, budgetSaveToday)
 	if !errors.Is(err, domain.ErrAmountTooLarge) {
 		t.Fatalf("cap past the ceiling = %v, want ErrAmountTooLarge", err)
 	}
@@ -173,7 +173,7 @@ func TestBudgetSaveRefusesACapOrAnExpectedIncomePastTheCeiling(t *testing.T) {
 	tooLarge := onePastTheCeiling
 	_, err = f.svc.Save(ctx, "house-1", julyMonth(), &tooLarge, []usecase.BudgetLineInput{
 		{CategoryID: "cat-groceries", CapMinor: 1000},
-	})
+	}, budgetSaveToday)
 	if !errors.Is(err, domain.ErrAmountTooLarge) {
 		t.Fatalf("expected income past the ceiling = %v, want ErrAmountTooLarge", err)
 	}

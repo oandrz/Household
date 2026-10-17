@@ -143,7 +143,7 @@ func TestBudgetMonthComposesTheDesignsFigures(t *testing.T) {
 	if _, err := f.svc.Save(ctx, "house-1", july, nil, []usecase.BudgetLineInput{
 		{CategoryID: "cat-groceries", CapMinor: 80000}, // S$800.00
 		{CategoryID: "cat-dining", CapMinor: 45000},    // S$450.00
-	}); err != nil {
+	}, budgetSaveToday); err != nil {
 		t.Fatalf("save: %v", err)
 	}
 
@@ -261,7 +261,7 @@ func TestBudgetMonthHidesDailyPaceForAFutureMonth(t *testing.T) {
 
 	if _, err := f.svc.Save(ctx, "house-1", august, nil, []usecase.BudgetLineInput{
 		{CategoryID: "cat-groceries", CapMinor: 80000},
-	}); err != nil {
+	}, budgetSaveToday); err != nil {
 		t.Fatalf("save: %v", err)
 	}
 
@@ -329,7 +329,7 @@ func TestBudgetMonthArchivedCategoryWithCapStillRenders(t *testing.T) {
 
 	if _, err := f.svc.Save(ctx, "house-1", july, nil, []usecase.BudgetLineInput{
 		{CategoryID: "cat-dining", CapMinor: 45000},
-	}); err != nil {
+	}, budgetSaveToday); err != nil {
 		t.Fatalf("save: %v", err)
 	}
 	if _, err := f.categories.SetArchived(ctx, "house-1", "cat-dining", true); err != nil {
@@ -478,14 +478,14 @@ func TestBudgetSaveValidates(t *testing.T) {
 	_, err := f.svc.Save(ctx, "house-1", july, nil, []usecase.BudgetLineInput{
 		{CategoryID: "cat-groceries", CapMinor: 1000},
 		{CategoryID: "cat-groceries", CapMinor: 2000},
-	})
+	}, budgetSaveToday)
 	if !errors.Is(err, domain.ErrBudgetLineDuplicate) {
 		t.Fatalf("duplicate category err = %v, want domain.ErrBudgetLineDuplicate", err)
 	}
 
 	_, err = f.svc.Save(ctx, "house-1", july, nil, []usecase.BudgetLineInput{
 		{CategoryID: "cat-groceries", CapMinor: -1},
-	})
+	}, budgetSaveToday)
 	if !errors.Is(err, domain.ErrBudgetCapNegative) {
 		t.Fatalf("negative cap err = %v, want domain.ErrBudgetCapNegative", err)
 	}
@@ -493,7 +493,7 @@ func TestBudgetSaveValidates(t *testing.T) {
 	negativeIncome := int64(-500000)
 	_, err = f.svc.Save(ctx, "house-1", july, &negativeIncome, []usecase.BudgetLineInput{
 		{CategoryID: "cat-groceries", CapMinor: 1000},
-	})
+	}, budgetSaveToday)
 	if !errors.Is(err, domain.ErrBudgetIncomeNegative) {
 		t.Fatalf("negative income err = %v, want domain.ErrBudgetIncomeNegative", err)
 	}
@@ -504,7 +504,7 @@ func TestBudgetSaveValidates(t *testing.T) {
 
 	_, err = f.svc.Save(ctx, "house-1", july, nil, []usecase.BudgetLineInput{
 		{CategoryID: "cat-nope", CapMinor: 1000},
-	})
+	}, budgetSaveToday)
 	if err == nil {
 		t.Fatal("unknown category err = nil, want the repository's own error to pass through")
 	}
@@ -514,7 +514,7 @@ func TestBudgetSaveValidates(t *testing.T) {
 
 	saved, err := f.svc.Save(ctx, "house-1", july, nil, []usecase.BudgetLineInput{
 		{CategoryID: "cat-groceries", CapMinor: 80000},
-	})
+	}, budgetSaveToday)
 	if err != nil {
 		t.Fatalf("save with nil expected income: %v", err)
 	}
@@ -538,7 +538,7 @@ func TestBudgetHistoryMarksOnlyTheCurrentMonthOpen(t *testing.T) {
 	for _, m := range []time.Time{may, june, july} {
 		if _, err := f.svc.Save(ctx, "house-1", m, nil, []usecase.BudgetLineInput{
 			{CategoryID: "cat-groceries", CapMinor: 10000},
-		}); err != nil {
+		}, budgetSaveToday); err != nil {
 			t.Fatalf("save %v: %v", m, err)
 		}
 	}
@@ -580,7 +580,7 @@ func TestBudgetHistoryClosedFollowsTodayNotTheAnchorMonth(t *testing.T) {
 	for _, m := range []time.Time{may, june} {
 		if _, err := f.svc.Save(ctx, "house-1", m, nil, []usecase.BudgetLineInput{
 			{CategoryID: "cat-groceries", CapMinor: 10000},
-		}); err != nil {
+		}, budgetSaveToday); err != nil {
 			t.Fatalf("save %v: %v", m, err)
 		}
 	}
@@ -619,7 +619,7 @@ func TestBudgetRollOverWritesTheMonthsRemainingIntoTheGoal(t *testing.T) {
 
 	if _, err := f.svc.Save(ctx, "house-1", july, nil, []usecase.BudgetLineInput{
 		{CategoryID: "cat-groceries", CapMinor: 520000}, // S$5,200.00
-	}); err != nil {
+	}, budgetSaveToday); err != nil {
 		t.Fatalf("save: %v", err)
 	}
 	f.addExpense("tx-groceries", "cat-groceries", "", july.AddDate(0, 0, 5), 342000, "SGD") // S$3,420.00
@@ -671,7 +671,7 @@ func TestBudgetMonthRolloverAmountSurvivesALaterTransaction(t *testing.T) {
 
 	if _, err := f.svc.Save(ctx, "house-1", july, nil, []usecase.BudgetLineInput{
 		{CategoryID: "cat-groceries", CapMinor: 520000}, // S$5,200.00
-	}); err != nil {
+	}, budgetSaveToday); err != nil {
 		t.Fatalf("save: %v", err)
 	}
 	f.addExpense("tx-groceries", "cat-groceries", "", july.AddDate(0, 0, 5), 342000, "SGD") // S$3,420.00
@@ -780,7 +780,7 @@ func TestBudgetRollOverRefusesNothingUnspent(t *testing.T) {
 
 	if _, err := f.svc.Save(ctx, "house-1", july, nil, []usecase.BudgetLineInput{
 		{CategoryID: "cat-groceries", CapMinor: 50000},
-	}); err != nil {
+	}, budgetSaveToday); err != nil {
 		t.Fatalf("save: %v", err)
 	}
 	f.addExpense("tx-groceries", "cat-groceries", "", july.AddDate(0, 0, 5), 60000, "SGD") // over budget
@@ -810,7 +810,7 @@ func TestBudgetRollOverRefusesANonPrimaryCurrencyGoal(t *testing.T) {
 
 	if _, err := f.svc.Save(ctx, "house-1", july, nil, []usecase.BudgetLineInput{
 		{CategoryID: "cat-groceries", CapMinor: 50000},
-	}); err != nil {
+	}, budgetSaveToday); err != nil {
 		t.Fatalf("save: %v", err)
 	}
 	f.addExpense("tx-groceries", "cat-groceries", "", july.AddDate(0, 0, 5), 20000, "SGD")
@@ -836,7 +836,7 @@ func TestBudgetRollOverRefusesAnArchivedGoal(t *testing.T) {
 
 	if _, err := f.svc.Save(ctx, "house-1", july, nil, []usecase.BudgetLineInput{
 		{CategoryID: "cat-groceries", CapMinor: 50000},
-	}); err != nil {
+	}, budgetSaveToday); err != nil {
 		t.Fatalf("save: %v", err)
 	}
 	f.addExpense("tx-groceries", "cat-groceries", "", july.AddDate(0, 0, 5), 20000, "SGD")
@@ -864,7 +864,7 @@ func TestBudgetRollOverTwiceIsRefused(t *testing.T) {
 
 	if _, err := f.svc.Save(ctx, "house-1", july, nil, []usecase.BudgetLineInput{
 		{CategoryID: "cat-groceries", CapMinor: 520000},
-	}); err != nil {
+	}, budgetSaveToday); err != nil {
 		t.Fatalf("save: %v", err)
 	}
 	f.addExpense("tx-groceries", "cat-groceries", "", july.AddDate(0, 0, 5), 342000, "SGD")
@@ -903,7 +903,7 @@ func TestBudgetRollOverRefusesAGoalFromAnotherHousehold(t *testing.T) {
 
 	if _, err := f.svc.Save(ctx, "house-1", july, nil, []usecase.BudgetLineInput{
 		{CategoryID: "cat-groceries", CapMinor: 520000},
-	}); err != nil {
+	}, budgetSaveToday); err != nil {
 		t.Fatalf("save: %v", err)
 	}
 	f.addExpense("tx-groceries", "cat-groceries", "", july.AddDate(0, 0, 5), 342000, "SGD")
@@ -936,5 +936,44 @@ func TestBudgetMonthFailsWhenTheRateLookupItselfFails(t *testing.T) {
 	_, err := f.svc.Month(ctx, "house-1", july, july.AddDate(0, 0, 17))
 	if !errors.Is(err, errProviderDown) {
 		t.Fatalf("Month error = %v, want the provider's error", err)
+	}
+}
+
+// budgetSaveToday is the household's day the Save calls in these tests are
+// made on: after every month they budget, so the window plays no part
+// unless a test is about it.
+var budgetSaveToday = time.Date(2026, 8, 5, 0, 0, 0, 0, time.UTC)
+
+func TestBudgetsAreSavedOnlyInsideTheMonthWindow(t *testing.T) {
+	f := newBudgetFixture(t)
+	today := time.Date(2026, 10, 16, 0, 0, 0, 0, time.UTC)
+	lines := []usecase.BudgetLineInput{{CategoryID: "cat-groceries", CapMinor: 1000}}
+	cases := []struct {
+		month time.Time
+		ok    bool
+	}{
+		{time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC), true},
+		{time.Date(1999, 12, 1, 0, 0, 0, 0, time.UTC), false},
+		{time.Date(2028, 10, 1, 0, 0, 0, 0, time.UTC), true},
+		{time.Date(2028, 11, 1, 0, 0, 0, 0, time.UTC), false},
+	}
+	for _, c := range cases {
+		_, err := f.svc.Save(context.Background(), "house-1", c.month, nil, lines, today)
+		if c.ok && err != nil {
+			t.Errorf("%s: %v", c.month.Format("2006-01"), err)
+		}
+		if !c.ok && !errors.Is(err, domain.ErrBudgetMonthOutOfRange) {
+			t.Errorf("%s: err = %v, want ErrBudgetMonthOutOfRange", c.month.Format("2006-01"), err)
+		}
+	}
+}
+
+func TestRollOverRefusesAMonthBeforeTheWindow(t *testing.T) {
+	f := newBudgetFixture(t)
+	today := time.Date(2026, 10, 16, 0, 0, 0, 0, time.UTC)
+	_, err := f.svc.RollOver(context.Background(), "house-1",
+		time.Date(1999, 12, 1, 0, 0, 0, 0, time.UTC), "goal-1", today)
+	if !errors.Is(err, domain.ErrBudgetMonthOutOfRange) {
+		t.Fatalf("err = %v, want ErrBudgetMonthOutOfRange", err)
 	}
 }

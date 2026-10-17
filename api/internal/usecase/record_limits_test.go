@@ -88,7 +88,7 @@ func recordCases() map[string]recordCase {
 			july := julyMonth()
 			if _, err := f.svc.Save(ctx, "house-1", july, nil, []usecase.BudgetLineInput{
 				{CategoryID: "cat-groceries", CapMinor: 520000},
-			}); err != nil {
+			}, budgetSaveToday); err != nil {
 				t.Fatalf("save: %v", err)
 			}
 			f.addExpense("tx-groceries", "cat-groceries", "", july.AddDate(0, 0, 5), 342000, "SGD")
