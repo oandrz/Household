@@ -11,6 +11,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/andreasoentoro/hearth/api/internal/adapter/crypto"
 )
 
 // captureLog sends slog's default logger to a buffer for one test.
@@ -86,5 +88,20 @@ func TestTheRequestDeadlineMiddlewareSetsRequestDeadline(t *testing.T) {
 	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/", nil))
 	if got := deadline.Sub(start); !ok || got > RequestDeadline+time.Second || got < RequestDeadline-time.Second {
 		t.Fatalf("deadline = %v from start (set %v), want about %v", got, ok, RequestDeadline)
+	}
+}
+
+// TestTheRequestDeadlineLeavesRoomForTheSlowestNormalRequests: a sign-in
+// waiting in the hasher's queue (about WaitersPerSlot derivations of up to
+// 0.5 s on the production box, plus its own), and a signed-in request that
+// waited its full turn in the household's line.
+func TestTheRequestDeadlineLeavesRoomForTheSlowestNormalRequests(t *testing.T) {
+	const slowDerivation = 500 * time.Millisecond
+	signIn := time.Duration(crypto.WaitersPerSlot+1) * slowDerivation
+	if RequestDeadline < 2*signIn {
+		t.Errorf("RequestDeadline (%v) must be at least twice the slowest sign-in (%v)", RequestDeadline, signIn)
+	}
+	if wait := ProductionHouseholdLimits.MaxWait; RequestDeadline < 2*wait {
+		t.Errorf("RequestDeadline (%v) must be at least twice the household line's MaxWait (%v)", RequestDeadline, wait)
 	}
 }
