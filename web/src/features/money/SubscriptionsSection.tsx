@@ -49,7 +49,7 @@ export function SubscriptionsSection({
     return (
       <section data-testid="subscriptions-section" className="mt-5 border-t border-hairline pt-4">
         <h3 data-testid="subscriptions-heading" className="text-[13px] font-semibold text-ink">
-          {BILL_COPY.subscriptionsEmptyHeading}
+          {BILL_COPY.subscriptionsTitle}
         </h3>
         <p data-testid="subscriptions-empty" className="mt-2 text-[12.5px] leading-relaxed text-muted">
           {anyTicked ? BILL_COPY.subscriptionsEmptyExcludedBody : BILL_COPY.subscriptionsEmptyBody}
@@ -75,7 +75,7 @@ export function SubscriptionsSection({
       <div className="mt-3 flex flex-col gap-3">
         {subscriptions.map((bill) => (
           <div key={bill.id} data-testid="subscription-row" className="flex items-center justify-between gap-3">
-            <div>
+            <div className="min-w-0">
               <div className="text-[13px] text-ink">{bill.name}</div>
               {/* Only a cadence that is not monthly is labelled: the
                   heading's "/mo" already says monthly. */}
@@ -83,7 +83,7 @@ export function SubscriptionsSection({
                 <div className="text-[11px] text-muted">{CADENCE_LABELS[bill.cadence]}</div>
               )}
             </div>
-            <span className="tabular text-[13px] font-semibold text-ink">
+            <span className="tabular shrink-0 whitespace-nowrap text-[13px] font-semibold text-ink">
               {formatMoney(bill.amountMinor, bill.currency, symbolFor(bill.currency))}
             </span>
           </div>

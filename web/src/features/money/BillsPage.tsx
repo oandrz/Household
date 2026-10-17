@@ -14,16 +14,15 @@
 // RecurringBillsCard sits in the right column of the two-column grid below,
 // beside the lists, and above them on a phone. Its subscriptions section
 // does its own isSubscription/archived filtering, so this file passes it
-// `data.bills` unfiltered. BillModal is
-// wired at all three of its entry points
-// below: the header's "+ Add bill", the empty state's own call to action,
+// `data.bills` unfiltered. BillModal is wired at all three of its entry
+// points below: the header's "+ Add bill", the empty state's own call to action,
 // and BillRow's `onEdit` for a live row -- Goals shipped its own modal with
 // no screen that ever mounted it, and a whole task's review missed the gap
 // (docs/LEARNING.md pattern 15), so this task's own tests (BillModal.test.tsx)
 // assert each entry point separately rather than trusting that wiring one
 // proves the other two.
 //
-// MarkPaidModal (Task 14) is wired the identical way, on every live bill's
+// MarkPaidModal is wired the identical way, on every live bill's
 // own `onMarkPaid` (MarkPaidModal.test.tsx asserts it opens from a real
 // BillsPage render, the same reason above). Undo lives entirely as page-level
 // state in usePendingBillActions.ts -- its useConfirmAction, keyed by payment
@@ -306,8 +305,8 @@ export function BillsPage() {
                 // `bg-callout` rather than becoming `bg-card`: this is the one
                 // panel on the page that is good news, and both halves of its line
                 // are `text-accent`/`text-accent-dark`, which the app only ever
-                // puts on the callout tint (InviteScreen.tsx:155,
-                // TransactionsPage.tsx:480) and never on a card. So the border
+                // puts on the callout tint (InviteScreen.tsx, TransactionsPage.tsx)
+                // and never on a card. So the border
                 // is `border-callout-border`, the tint's own edge, not the
                 // `border-hairline` a `bg-card` panel gets.
                 <div

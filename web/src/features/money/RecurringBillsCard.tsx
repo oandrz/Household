@@ -67,15 +67,15 @@ export function RecurringBillsCard({
             <div className="min-w-0">
               <div className="text-[13px] text-ink">{row.categoryId ? row.categoryName : BILL_COPY.recurringNoCategory}</div>
               {row.excludedNoRate > 0 && (
-                <div className="text-[11px] text-muted">{BILL_COPY.recurringRowExcluded(row.excludedNoRate)}</div>
+                <div className="text-[12px] text-muted">{BILL_COPY.recurringRowExcluded(row.excludedNoRate)}</div>
               )}
             </div>
             {/* A category whose every bill has no rate has no figure at all;
-                "S$0.00" would read as "costs nothing". */}
+                "S$0.00" would read as "costs nothing". The dash is hidden from
+                screen readers because the note beside it already says why. */}
             {row.annualMinor === 0 && row.excludedNoRate > 0 ? (
-              <span className="text-[13px] text-muted">
-                <span aria-hidden="true">—</span>
-                <span className="sr-only">{BILL_COPY.recurringRowNoFigure}</span>
+              <span aria-hidden="true" className="text-[13px] text-muted">
+                —
               </span>
             ) : (
               <span className="tabular text-[13px] font-semibold text-ink">{money(row.monthlyMinor)}</span>

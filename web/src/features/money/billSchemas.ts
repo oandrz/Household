@@ -88,10 +88,11 @@ const recurringCategorySchema = z.object({
 export type RecurringCategory = z.infer<typeof recurringCategorySchema>;
 
 // billsSummarySchema mirrors billsSummaryDTO -- the page header, the
-// three stat cards and the Recurring bills card. Currency, dueThisMonthMinor, paidSoFarMinor,
-// subscriptionsMonthlyMinor and subscriptionsAnnualMinor are all in the
+// three stat cards and the Recurring bills card. Every amount here is in the
 // household's primary currency (billsSummaryDTO's own comment) -- unlike
-// nextDue's own figures above. nextDue is nullable, not optional -- a
+// nextDue's own figures above. The three recurring fields default to empty
+// so a server older than this page still parses: failing the whole response
+// would also blank Overview's next-bill card, which needs none of them. nextDue is nullable, not optional -- a
 // household with no live bill carrying a next_due still gets a
 // `"nextDue": null` key, never an absent one (nextDueBillDTO's own comment:
 // nil is the field BillsSummary.NextDueOn itself gates on).
@@ -104,9 +105,9 @@ export const billsSummarySchema = z.object({
   billCount: z.number(),
   subscriptionsMonthlyMinor: z.number(),
   subscriptionsAnnualMinor: z.number(),
-  recurringMonthlyMinor: z.number(),
-  recurringAnnualMinor: z.number(),
-  recurringByCategory: z.array(recurringCategorySchema),
+  recurringMonthlyMinor: z.number().default(0),
+  recurringAnnualMinor: z.number().default(0),
+  recurringByCategory: z.array(recurringCategorySchema).default([]),
   excludedNoRate: z.number(),
 });
 export type BillsSummary = z.infer<typeof billsSummarySchema>;

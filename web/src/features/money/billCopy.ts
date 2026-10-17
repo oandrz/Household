@@ -81,6 +81,11 @@ export const CADENCE_LABELS: Record<string, string> = Object.fromEntries(
 // checkbox's own words cannot silently leave that sentence quoting stale text.
 const IS_SUBSCRIPTION_LABEL = "Counts as a subscription";
 
+// The subscriptions section's title and the per-month suffix each appear in
+// more than one string below; one constant each keeps them from drifting.
+const SUBSCRIPTIONS_SECTION_TITLE = "Of which subscriptions";
+const PER_MONTH = "/mo";
+
 export const BILL_COPY = {
   title: "Bills & subscriptions",
   // M = 0 hides the line rather than rendering "0 of 0" -- the formulas
@@ -330,12 +335,11 @@ export const BILL_COPY = {
   // equivalents worked out by the server, not this month's charges, which is
   // why the card sits apart from "Due this month".
   recurringTitle: "Recurring bills",
-  perMonthSuffix: "/mo",
+  perMonthSuffix: PER_MONTH,
   recurringAnnualLine: (annualLabel: string) => `${annualLabel}/year`,
   recurringNoCategory: "No category",
   recurringRowExcluded: (count: number) =>
     `${count} ${count === 1 ? "bill" : "bills"} not counted: no exchange rate`,
-  recurringRowNoFigure: "Not counted",
   recurringEquivalentNote: "Monthly equivalents: a yearly bill counts as 1/12 of its amount each month.",
   // Never a bare S$0: a household with only one-off bills would otherwise
   // read it as "Hearth lost my bills".
@@ -344,18 +348,18 @@ export const BILL_COPY = {
   // SubscriptionsSection, the foot of RecurringBillsCard. Every figure is
   // the server's own rollup, formatted here, never re-summed from the bills
   // array.
-  subscriptionsEmptyHeading: "Of which subscriptions",
+  subscriptionsTitle: SUBSCRIPTIONS_SECTION_TITLE,
   // One composed string, not two sibling elements read as one line only by
   // CSS spacing -- the design draws "Subscriptions" and "S$70.90/mo" as
   // separate divs, but a screen reader (and a test asserting text content)
   // needs the "· " connector to actually be text.
-  subscriptionsHeading: (monthlyLabel: string) => `Of which subscriptions · ${monthlyLabel}/mo`,
+  subscriptionsHeading: (monthlyLabel: string) => `${SUBSCRIPTIONS_SECTION_TITLE} · ${monthlyLabel}${PER_MONTH}`,
   subscriptionsAnnualLine: (annualLabel: string) => `${annualLabel}/year`,
   // A subscription row shows what is actually charged (a quarterly bill's
   // S$120) while the totals are monthly equivalents; this sentence is how
   // the two kinds of figure are told apart.
   subscriptionsEquivalentNote: "Each subscription row shows what's actually charged.",
-  // The empty state (point 4): explains how a bill becomes a subscription --
+  // The empty state: explains how a bill becomes a subscription --
   // the checkbox in the Add/Edit-bill modal -- rather than leaving a
   // household with bills and a blank panel and no way to know what it is
   // for. Only true when NOTHING is ticked -- SubscriptionsSection picks between
@@ -363,14 +367,9 @@ export const BILL_COPY = {
   // actually the case, so this one never has to cover the ticked-but-
   // excluded state by accident.
   subscriptionsEmptyBody: `No bills are marked as subscriptions yet. Tick "${IS_SUBSCRIPTION_LABEL}" when adding or editing a bill to see it listed here.`,
-  // A second empty state a review round found this panel's first cut did
-  // not have: a household CAN tick "Counts as a subscription" on a bill and
-  // still see this same blank panel, because a one-off or an archived bill
-  // is excluded regardless of the flag (SubscriptionsSection.tsx's own filter
-  // comment). subscriptionsEmptyBody's "not marked yet" would be false in
-  // that state -- the household marked one, and Hearth is not showing it --
-  // so this names the actual reason instead of repeating a sentence that
-  // contradicts what the household just did.
+  // A ticked one-off or archived bill is filtered out of the section, so
+  // subscriptionsEmptyBody's "not marked yet" would be false for a household
+  // that did tick one; this names the actual reason instead.
   subscriptionsEmptyExcludedBody:
     "A bill marked as a subscription isn't always counted here: a one-off isn't a recurring cost, and an archived bill isn't a live one.",
 } as const;

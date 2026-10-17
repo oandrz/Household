@@ -171,8 +171,8 @@ func NewBillService(deps BillDeps) *BillService {
 // figure is deterministic in tests. In production it is the household's
 // calendar day, so "this month" is the household's month.
 //
-// ExcludedNoRate counts once per BILL, even one that would otherwise touch
-// two totals, plus once per PAYMENT not already counted that way -- a
+// ExcludedNoRate counts once per BILL, however many totals it would
+// otherwise touch, plus once per PAYMENT not already counted that way -- a
 // payment can be a distinct no-rate fact from its bill's current state.
 //
 // DueThisMonth and PaidSoFar sum from Bills.MonthTotals' own
@@ -210,7 +210,7 @@ func (s *BillService) List(ctx context.Context, householdID string, includeArchi
 	excludedNoRate := 0
 	// excludedBillIDs stops the per-bill and per-payment passes below from
 	// counting the same bill twice -- a bill that is both due this month and
-	// a ticked subscription is one no-rate fact, not two.
+	// repeating is one no-rate fact, not two.
 	excludedBillIDs := map[string]bool{}
 
 	// views is built with make(..., 0, ...), never left nil: a household
@@ -236,7 +236,7 @@ func (s *BillService) List(ctx context.Context, householdID string, includeArchi
 		}
 		next.consider(b, view.Overdue)
 
-		// excludedThisBill covers both totals this bill might touch below.
+		// excludedThisBill covers every total this bill might touch below.
 		// The due-this-month probe only recovers per-bill identity for the
 		// count -- dueMinor further down already excludes a no-rate currency.
 		excludedThisBill := false
@@ -297,8 +297,9 @@ func (s *BillService) List(ctx context.Context, householdID string, includeArchi
 	}
 
 	// Integer-first, one division: subscriptionsAnnual is already the sum of
-	// every bill's own annual equivalent, converted then added -- the only
-	// division in the whole rollup happens here, exactly once.
+	// every bill's own annual equivalent, converted then added, and is
+	// divided once, here. The recurring total does the same in
+	// recurringRollup.totals.
 	subscriptionsMonthly := domain.Money{Amount: subscriptionsAnnual.Amount / 12, Currency: primary}
 	recurringAnnual, recurringMonthly, recurringRows := recurring.totals()
 
