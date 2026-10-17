@@ -3,9 +3,11 @@ package httpadapter
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"mime"
 	"net/http"
+	"strconv"
 
 	"github.com/go-chi/chi/v5/middleware"
 
@@ -151,6 +153,21 @@ func MapDomainError(w http.ResponseWriter, r *http.Request, err error) {
 		}
 		WriteError(w, http.StatusUnauthorized, "INVALID_CREDENTIALS", "That email or password is incorrect.",
 			map[string]any{"attemptsRemaining": signInErr.AttemptsRemaining})
+		return
+	}
+
+	// The two errors below carry the number that was reached, so their
+	// message is built from the error rather than read from the table.
+	var limitErr *domain.LimitReachedError
+	if errors.As(err, &limitErr) {
+		WriteError(w, http.StatusConflict, "LIMIT_REACHED", limitReachedMessage(limitErr),
+			map[string]any{"kind": string(limitErr.Kind), "limit": limitErr.Limit})
+		return
+	}
+	var tooLong *domain.TextTooLongError
+	if errors.As(err, &tooLong) {
+		WriteError(w, http.StatusUnprocessableEntity, "TEXT_TOO_LONG", textTooLongMessage(tooLong),
+			map[string]any{"field": string(tooLong.Field), "max": tooLong.Max})
 		return
 	}
 
@@ -536,6 +553,12 @@ var domainErrorResponses = []domainErrorResponse{
 		status:    http.StatusUnprocessableEntity,
 		code:      "INVALID_DATE",
 		message:   "That date is in the future.",
+	},
+	{
+		sentinels: []error{domain.ErrBudgetMonthOutOfRange},
+		status:    http.StatusUnprocessableEntity,
+		code:      "BUDGET_MONTH_OUT_OF_RANGE",
+		message:   "Budgets can be set from January 2000 up to two years ahead.",
 	},
 	{
 		sentinels: []error{domain.ErrAccountOwnerNotInHousehold},
@@ -1217,3 +1240,74 @@ func logAndWriteInternal(w http.ResponseWriter, r *http.Request, err error) {
 // given only the error, has no way to know what that body should contain.
 const sessionRevocationWarning = "The change was saved, but we couldn't sign the member out of their other sessions. " +
 	"They may still be able to use an old session until it expires."
+
+// limitThings names each capped kind in the words a member sees. A kind
+// missing here gets the generic sentence rather than an empty name.
+var limitThings = map[domain.LimitKind]string{
+	domain.LimitTransactions:       "transactions",
+	domain.LimitAccounts:           "accounts",
+	domain.LimitCategories:         "categories",
+	domain.LimitGoals:              "goals",
+	domain.LimitBills:              "bills",
+	domain.LimitHoldings:           "holdings",
+	domain.LimitSpaces:             "spaces",
+	domain.LimitAgreementSections:  "agreement sections",
+	domain.LimitGoalContributions:  "goal contributions",
+	domain.LimitBillPayments:       "bill payments",
+	domain.LimitHoldingEvents:      "holding buys and sells",
+	domain.LimitHoldingValuations:  "holding valuations",
+	domain.LimitHoldingIncome:      "holding income records",
+	domain.LimitRetroActions:       "retro actions",
+	domain.LimitAgreementProposals: "agreement proposals",
+	domain.LimitMembers:            "members",
+	domain.LimitPendingInvites:     "pending invites",
+	domain.LimitActiveAPITokens:    "active API tokens",
+}
+
+// archivedCounts is the kinds that are archived rather than deleted. Their
+// message says archived ones count, or the refusal looks wrong to a
+// household that sees fewer on screen.
+var archivedCounts = map[domain.LimitKind]bool{
+	domain.LimitAccounts: true, domain.LimitCategories: true, domain.LimitGoals: true,
+	domain.LimitBills: true, domain.LimitHoldings: true,
+}
+
+func limitReachedMessage(e *domain.LimitReachedError) string {
+	if e.Kind == domain.LimitTransactionsInMonth {
+		return fmt.Sprintf("%s already has %s transactions, the most Hearth keeps for one month.",
+			e.Month.Format("January 2006"), thousands(e.Limit))
+	}
+	thing, ok := limitThings[e.Kind]
+	if !ok {
+		return "This household has reached one of Hearth's limits."
+	}
+	msg := fmt.Sprintf("This household has reached Hearth's limit of %s %s.", thousands(e.Limit), thing)
+	if archivedCounts[e.Kind] {
+		msg += " Archived " + thing + " count towards it."
+	}
+	return msg
+}
+
+var textFieldNames = map[domain.TextField]string{
+	domain.TextName:        "A name",
+	domain.TextDescription: "A description",
+	domain.TextNote:        "A note",
+	domain.TextUnit:        "A unit",
+}
+
+func textTooLongMessage(e *domain.TextTooLongError) string {
+	what, ok := textFieldNames[e.Field]
+	if !ok {
+		what = "That text"
+	}
+	return fmt.Sprintf("%s can be at most %d characters.", what, e.Max)
+}
+
+// thousands writes n with comma separators: 3000 -> "3,000".
+func thousands(n int) string {
+	s := strconv.Itoa(n)
+	for i := len(s) - 3; i > 0; i -= 3 {
+		s = s[:i] + "," + s[i:]
+	}
+	return s
+}
