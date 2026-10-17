@@ -98,6 +98,7 @@ type GoalDeps struct {
 	Goals      GoalRepository
 	Households HouseholdRepository
 	FX         FXRateProvider
+	Usage      HouseholdUsage
 }
 
 // GoalService composes the Goals screen and every write against it. Like
@@ -313,6 +314,9 @@ func (s *GoalService) Create(ctx context.Context, in NewGoal, createdOn time.Tim
 	if name == "" {
 		return domain.Goal{}, domain.ErrGoalNameRequired
 	}
+	if err := domain.CheckTextLength(domain.TextName, name, domain.MaxNameLen); err != nil {
+		return domain.Goal{}, err
+	}
 	if in.TargetMinor <= 0 {
 		return domain.Goal{}, domain.ErrGoalTargetNotPositive
 	}
@@ -360,6 +364,9 @@ func (s *GoalService) Create(ctx context.Context, in NewGoal, createdOn time.Tim
 	// A negative StartingBalanceMinor passes through unchanged: a goal may
 	// start in deficit if the household says so. GoalRepository.Create
 	// writes no contribution row at all when the figure is exactly zero.
+	if err := refuseAtCap(ctx, s.d.Usage, in.HouseholdID, domain.LimitGoals); err != nil {
+		return domain.Goal{}, err
+	}
 	return s.d.Goals.Create(ctx, goal, in.StartingBalanceMinor, createdOn)
 }
 
@@ -380,6 +387,9 @@ func (s *GoalService) Update(ctx context.Context, householdID, goalID string, pa
 		name := strings.TrimSpace(*patch.Name)
 		if name == "" {
 			return domain.Goal{}, domain.ErrGoalNameRequired
+		}
+		if err := domain.CheckTextLength(domain.TextName, name, domain.MaxNameLen); err != nil {
+			return domain.Goal{}, err
 		}
 		g.Name = name
 	}
@@ -466,6 +476,13 @@ func (s *GoalService) AddContribution(ctx context.Context, in NewContribution, t
 	}
 	if rec.Goal.IsArchived() {
 		return domain.GoalContribution{}, domain.ErrGoalArchived
+	}
+
+	if err := domain.CheckTextLength(domain.TextNote, in.Note, domain.MaxNoteLen); err != nil {
+		return domain.GoalContribution{}, err
+	}
+	if err := refuseAtCap(ctx, s.d.Usage, in.HouseholdID, domain.LimitGoalContributions); err != nil {
+		return domain.GoalContribution{}, err
 	}
 
 	c := domain.GoalContribution{

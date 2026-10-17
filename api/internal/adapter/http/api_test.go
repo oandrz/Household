@@ -234,6 +234,7 @@ func newTestEnvWith(t *testing.T, clk usecase.Clock, outbox usecase.MailOutbox) 
 
 	users := postgres.NewUserRepo(db)
 	households := postgres.NewHouseholdRepo(db)
+	usage := postgres.NewHouseholdUsageRepo(db)
 	memberships := postgres.NewMembershipRepo(db)
 	sessions := postgres.NewSessionRepo(db)
 	magicLinks := postgres.NewMagicLinkRepo(db)
@@ -267,6 +268,7 @@ func newTestEnvWith(t *testing.T, clk usecase.Clock, outbox usecase.MailOutbox) 
 		BaseURL:    "http://localhost:5173",
 	})
 	inviteSvc := usecase.NewInviteService(usecase.InviteDeps{
+		Usage:             usage,
 		Invites:           invites,
 		Users:             users,
 		Sessions:          sessions,
@@ -284,11 +286,12 @@ func newTestEnvWith(t *testing.T, clk usecase.Clock, outbox usecase.MailOutbox) 
 	})
 	apiTokens := postgres.NewAPITokenRepo(db)
 	memberSvc := usecase.NewMemberService(usecase.MemberDeps{Members: memberships, Sessions: sessions, APITokens: apiTokens})
-	apiTokenSvc := usecase.NewAPITokenService(usecase.APITokenDeps{Tokens: apiTokens, Gen: tokens, Clock: clk})
+	apiTokenSvc := usecase.NewAPITokenService(usecase.APITokenDeps{Tokens: apiTokens, Gen: tokens, Clock: clk, Usage: usage})
 	accessSvc := usecase.NewAccessListService(usecase.AccessListDeps{
 		Tokens: apiTokens, Chats: telegramAccounts, Members: memberships,
 	})
 	householdSvc := usecase.NewHouseholdService(usecase.HouseholdDeps{
+		Usage:         usage,
 		Households:    households,
 		Spaces:        spaces,
 		Notifications: notifications,
@@ -312,13 +315,14 @@ func newTestEnvWith(t *testing.T, clk usecase.Clock, outbox usecase.MailOutbox) 
 	categoryRepo := postgres.NewCategoryRepo(db)
 	fxProvider := fx.NewStaticProvider()
 	accountSvc := usecase.NewAccountService(usecase.AccountDeps{
+		Usage:      usage,
 		Accounts:   accountRepo,
 		Households: households,
 		FX:         fxProvider,
 		Clock:      clk,
 		Holdings:   postgres.NewHoldingRepo(db),
 	})
-	categorySvc := usecase.NewCategoryService(categoryRepo)
+	categorySvc := usecase.NewCategoryService(categoryRepo, usage)
 	transactionRepo := postgres.NewTransactionRepo(db)
 	transactionSvc := usecase.NewTransactionService(usecase.TransactionDeps{
 		Transactions: transactionRepo,
@@ -326,9 +330,11 @@ func newTestEnvWith(t *testing.T, clk usecase.Clock, outbox usecase.MailOutbox) 
 		Accounts:     accountRepo,
 		Households:   households,
 		FX:           fxProvider,
+		Usage:        usage,
 	})
 	goalRepo := postgres.NewGoalRepo(db)
 	holdingSvc := usecase.NewHoldingService(usecase.HoldingDeps{
+		Usage:      usage,
 		Holdings:   postgres.NewHoldingRepo(db),
 		Events:     postgres.NewHoldingEventRepo(db),
 		Valuations: postgres.NewHoldingValuationRepo(db),
@@ -337,11 +343,13 @@ func newTestEnvWith(t *testing.T, clk usecase.Clock, outbox usecase.MailOutbox) 
 		Households: households,
 	})
 	goalSvc := usecase.NewGoalService(usecase.GoalDeps{
+		Usage:      usage,
 		Goals:      goalRepo,
 		Households: households,
 		FX:         fxProvider,
 	})
 	budgetSvc := usecase.NewBudgetService(usecase.BudgetDeps{
+		Usage:        usage,
 		Budgets:      postgres.NewBudgetRepo(db),
 		Transactions: transactionRepo,
 		Categories:   categoryRepo,
@@ -355,19 +363,20 @@ func newTestEnvWith(t *testing.T, clk usecase.Clock, outbox usecase.MailOutbox) 
 		Goals: goalRepo,
 	})
 	billSvc := usecase.NewBillService(usecase.BillDeps{
+		Usage:      usage,
 		Bills:      postgres.NewBillRepo(db),
 		Households: households,
 		FX:         fxProvider,
 		Accounts:   accountRepo,
 		Categories: categoryRepo,
 	})
-	retroSvc := usecase.NewRetroService(postgres.NewRetroRepo(db), postgres.NewRetroActionRepo(db), households)
+	retroSvc := usecase.NewRetroService(postgres.NewRetroRepo(db), postgres.NewRetroActionRepo(db), households, usage)
 	// goalRepo doubles as the GoalProgressReader, the same reasoning
 	// cmd/api/main.go's own wiring comment gives: Vision needs one
 	// percentage from Goals and the narrow port is what keeps it from
 	// depending on GoalRepository's whole surface.
 	visionSvc := usecase.NewVisionService(postgres.NewVisionRepo(db), goalRepo)
-	agreementSvc := usecase.NewAgreementService(postgres.NewAgreementRepo(db), memberships)
+	agreementSvc := usecase.NewAgreementService(postgres.NewAgreementRepo(db), memberships, usage)
 
 	platformAdminRepo := postgres.NewPlatformAdminRepo(db)
 	featureFlagRepo := postgres.NewFeatureFlagRepo(db)

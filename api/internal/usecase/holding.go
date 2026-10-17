@@ -61,6 +61,7 @@ type HoldingDeps struct {
 	Income     HoldingIncomeRepository
 	Accounts   AccountLookup
 	Households HouseholdRepository
+	Usage      HouseholdUsage
 }
 
 // HoldingService composes the portfolio screen and every write against it.
@@ -95,10 +96,24 @@ func (s *HoldingService) Create(ctx context.Context, h domain.Holding) (domain.H
 	if h.Unit == "" {
 		h.Unit = "unit"
 	}
+	if err := checkHoldingText(h); err != nil {
+		return domain.Holding{}, err
+	}
 	if err := s.requireInvestmentAccount(ctx, h.HouseholdID, h.AccountID); err != nil {
 		return domain.Holding{}, err
 	}
+	if err := refuseAtCap(ctx, s.d.Usage, h.HouseholdID, domain.LimitHoldings); err != nil {
+		return domain.Holding{}, err
+	}
 	return s.d.Holdings.Create(ctx, h)
+}
+
+// checkHoldingText is the name and unit length rule Create and Update share.
+func checkHoldingText(h domain.Holding) error {
+	if err := domain.CheckTextLength(domain.TextName, h.Name, domain.MaxNameLen); err != nil {
+		return err
+	}
+	return domain.CheckTextLength(domain.TextUnit, h.Unit, domain.MaxHoldingUnitLen)
 }
 
 // requireInvestmentAccount fails closed on the account's type. An account in
@@ -135,6 +150,9 @@ func (s *HoldingService) Update(ctx context.Context, h domain.Holding) (domain.H
 	if _, err := domain.ParseInstrumentKind(string(h.Instrument)); err != nil {
 		return domain.Holding{}, err
 	}
+	if err := checkHoldingText(h); err != nil {
+		return domain.Holding{}, err
+	}
 	return s.d.Holdings.Update(ctx, h)
 }
 
@@ -169,6 +187,13 @@ func (s *HoldingService) RecordEvent(ctx context.Context, e domain.HoldingEvent,
 		return domain.HoldingEvent{}, err
 	}
 	if err := e.Validate(holding.Currency, primaryCurrency); err != nil {
+		return domain.HoldingEvent{}, err
+	}
+
+	if err := domain.CheckTextLength(domain.TextNote, e.Note, domain.MaxNoteLen); err != nil {
+		return domain.HoldingEvent{}, err
+	}
+	if err := refuseAtCap(ctx, s.d.Usage, e.HouseholdID, domain.LimitHoldingEvents); err != nil {
 		return domain.HoldingEvent{}, err
 	}
 
@@ -248,10 +273,39 @@ func (s *HoldingService) RecordValuation(ctx context.Context, v domain.Valuation
 	if err := v.Validate(holding.Currency, primaryCurrency); err != nil {
 		return domain.Valuation{}, err
 	}
+	if err := domain.CheckTextLength(domain.TextNote, v.Note, domain.MaxNoteLen); err != nil {
+		return domain.Valuation{}, err
+	}
+	if err := refuseAtCap(ctx, s.d.Usage, v.HouseholdID, domain.LimitHoldingValuations); err != nil {
+		replaces, lookupErr := s.replacesAValuation(ctx, v)
+		if lookupErr != nil {
+			return domain.Valuation{}, lookupErr
+		}
+		if !replaces {
+			return domain.Valuation{}, err
+		}
+	}
 	// Refused BEFORE it is stored, under the same lock an event write takes.
 	// Don't check after writing: a stored price the reads cannot multiply
 	// fails every portfolio read, including the response to this write.
 	return s.d.Valuations.UpsertWithFold(ctx, v, holdingRule(holding, primaryCurrency))
+}
+
+// replacesAValuation reports whether v's holding already has a valuation
+// on v's day. Recording it then overwrites a row rather than adding one, so
+// it is allowed at the cap. Only called at the cap, so the list it reads is
+// rarely loaded.
+func (s *HoldingService) replacesAValuation(ctx context.Context, v domain.Valuation) (bool, error) {
+	existing, err := s.d.Valuations.ListByHolding(ctx, v.HouseholdID, v.HoldingID)
+	if err != nil {
+		return false, err
+	}
+	for _, e := range existing {
+		if sameDay(e.AsOf, v.AsOf) {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func (s *HoldingService) ListEvents(ctx context.Context, householdID, holdingID string) ([]domain.HoldingEvent, error) {
@@ -392,6 +446,12 @@ func (s *HoldingService) RecordIncome(ctx context.Context, i domain.HoldingIncom
 		return domain.HoldingIncome{}, err
 	}
 	if err := i.Validate(holding.Currency, primaryCurrency); err != nil {
+		return domain.HoldingIncome{}, err
+	}
+	if err := domain.CheckTextLength(domain.TextNote, i.Note, domain.MaxNoteLen); err != nil {
+		return domain.HoldingIncome{}, err
+	}
+	if err := refuseAtCap(ctx, s.d.Usage, i.HouseholdID, domain.LimitHoldingIncome); err != nil {
 		return domain.HoldingIncome{}, err
 	}
 	// No fold, no lock, no transaction: income enters no pool, so nothing

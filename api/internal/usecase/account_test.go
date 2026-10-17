@@ -21,6 +21,13 @@ var accountToday = time.Date(2026, 7, 28, 0, 0, 0, 0, time.UTC)
 
 func newAccountService(t *testing.T) (*usecase.AccountService, *fakeAccountRepo) {
 	t.Helper()
+	return newAccountServiceWithUsage(t, newUsageDouble())
+}
+
+// newAccountServiceWithUsage is newAccountService with the usage double
+// chosen by the test, for one that puts the household at a cap.
+func newAccountServiceWithUsage(t *testing.T, usage usecase.HouseholdUsage) (*usecase.AccountService, *fakeAccountRepo) {
+	t.Helper()
 	repo := newFakeAccountRepo()
 	repo.memberships["m-1"] = "h-1"
 
@@ -38,6 +45,7 @@ func newAccountService(t *testing.T) (*usecase.AccountService, *fakeAccountRepo)
 		FX:         newFXDouble(),
 		Clock:      &fixedClock{now: fixedNow},
 		Holdings:   holdingCounterDouble{},
+		Usage:      usage,
 	})
 	return svc, repo
 }
@@ -59,6 +67,7 @@ func newAccountServiceWithHoldings(t *testing.T, count int64) (*usecase.AccountS
 		FX:         newFXDouble(),
 		Clock:      &fixedClock{now: fixedNow},
 		Holdings:   holdingCounterDouble{n: count},
+		Usage:      newUsageDouble(),
 	}), repo
 }
 

@@ -43,6 +43,7 @@ import { useGoals, type CreateGoalBody, type UpdateGoalBody } from "./useGoals";
 import type { Goal } from "./goalSchemas";
 import { useHouseholdZone } from "../auth/useHouseholdZone";
 import { monthIn } from "../../lib/householdDate";
+import { MAX_NAME_LENGTH } from "../../api/textLimits";
 
 // targetMonthLabel mirrors GoalCard.tsx's own private helper of the same
 // name ("2026-12" -> "Dec 2026"), duplicated rather than imported because
@@ -323,6 +324,7 @@ export function GoalModal(props: GoalModalProps) {
             type="text"
             required
             value={name}
+            maxLength={MAX_NAME_LENGTH}
             onChange={(event) => setName(event.target.value)}
             placeholder="e.g. Japan 2027, new sofa, rainy-day fund"
             className={FIELD_CONTROL_CLASS}

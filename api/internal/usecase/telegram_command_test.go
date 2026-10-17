@@ -23,7 +23,18 @@ func telegramCommandFixture(t *testing.T, accounts ...domain.Account) (*usecase.
 // arrives, and the zone the household keeps its calendar in.
 func telegramCommandFixtureAt(t *testing.T, now time.Time, timezone string, accounts ...domain.Account) (*usecase.TelegramCommandService, *fakeTransactionRepo) {
 	t.Helper()
-	txnSvc, txnRepo := transactionFixtureWithAccount(t, "jpy", "JPY")
+	svc, repo, _ := telegramCommandFixtureWithUsage(t, now, timezone, accounts...)
+	return svc, repo
+}
+
+// telegramCommandFixtureWithUsage is telegramCommandFixtureAt plus a handle
+// on the transaction service's usage double.
+func telegramCommandFixtureWithUsage(t *testing.T, now time.Time, timezone string, accounts ...domain.Account) (*usecase.TelegramCommandService, *fakeTransactionRepo, *usageDouble) {
+	t.Helper()
+	usage := newUsageDouble()
+	txnSvc, txnRepo := buildTransactionFixture(t, map[string]fakeAccountRecord{
+		"jpy": {householdID: "house-1", currency: "JPY"},
+	}, newFXDouble(), usage)
 
 	accountRepo := newFakeAccountRepo()
 	if len(accounts) == 0 {
@@ -36,17 +47,17 @@ func telegramCommandFixtureAt(t *testing.T, now time.Time, timezone string, acco
 	households.put(domain.Household{ID: "house-1", PrimaryCurrency: "SGD", Timezone: timezone})
 	accountSvc := usecase.NewAccountService(usecase.AccountDeps{
 		Accounts: accountRepo, Households: households, FX: newFXDouble(), Clock: &fixedClock{now: now},
-		Holdings: holdingCounterDouble{},
+		Holdings: holdingCounterDouble{}, Usage: newUsageDouble(),
 	})
 	categorySvc := usecase.NewCategoryService(&fakeCategoryRepo{categories: []domain.Category{
 		{ID: "cat-groceries", HouseholdID: "house-1", Name: "Groceries", Kind: domain.CategoryExpense},
 		{ID: "cat-income", HouseholdID: "house-1", Name: "Salary", Kind: domain.CategoryIncome},
-	}})
+	}}, newUsageDouble())
 	svc := usecase.NewTelegramCommandService(usecase.TelegramCommandDeps{
 		Accounts: accountSvc, Categories: categorySvc, Transactions: txnSvc,
 		Households: households, Clock: &fixedClock{now: now},
 	})
-	return svc, txnRepo
+	return svc, txnRepo, usage
 }
 
 func spend(update int64) usecase.TelegramSpend {
@@ -202,5 +213,19 @@ func TestLogSpendWritesNothingWhenTheHouseholdsZoneCannotBeLoaded(t *testing.T) 
 	}
 	if len(repo.transactions) != 0 {
 		t.Fatalf("%d rows were stored, want none", len(repo.transactions))
+	}
+}
+
+// /spend goes through TransactionService.CreateOrReplay, so the bot meets
+// the same cap as the browser.
+func TestLogSpendMeetsTheTransactionCap(t *testing.T) {
+	svc, repo, usage := telegramCommandFixtureWithUsage(t, time.Date(2026, 9, 8, 9, 30, 0, 0, time.UTC), "Asia/Singapore")
+	usage.set(domain.LimitTransactions, domain.MaxTransactions)
+	_, err := svc.LogSpend(context.Background(), spend(77))
+	if !errors.Is(err, domain.ErrLimitReached) {
+		t.Fatalf("err = %v, want ErrLimitReached", err)
+	}
+	if len(repo.transactions) != 0 {
+		t.Fatal("a refusal must write nothing")
 	}
 }

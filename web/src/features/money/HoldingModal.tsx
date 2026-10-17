@@ -15,6 +15,7 @@ import { useAccounts } from "./useAccounts";
 import type { CreateHoldingBody, UpdateHoldingBody } from "./useHoldings";
 import { parseEnum } from "../../lib/parseEnum";
 import { instrumentKindSchema, type Holding, type InstrumentKind } from "./holdingSchemas";
+import { MAX_HOLDING_UNIT_LENGTH, MAX_NAME_LENGTH } from "../../api/textLimits";
 
 type Mutation<TBody> = {
   mutateAsync: (input: TBody) => Promise<unknown>;
@@ -112,6 +113,7 @@ export function HoldingModal({
           <input
             className={FIELD_CONTROL_CLASS}
             value={name}
+            maxLength={MAX_NAME_LENGTH}
             onChange={(e) => setName(e.target.value)}
             placeholder="D05, Gold bar, …"
             required
@@ -138,6 +140,7 @@ export function HoldingModal({
           <input
             className={FIELD_CONTROL_CLASS}
             value={unit}
+            maxLength={MAX_HOLDING_UNIT_LENGTH}
             onChange={(e) => setUnit(e.target.value)}
             placeholder="share, gram, unit"
             required

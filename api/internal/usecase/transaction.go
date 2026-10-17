@@ -65,6 +65,7 @@ type TransactionDeps struct {
 	Accounts     AccountLookup
 	Households   HouseholdRepository
 	FX           FXRateProvider
+	Usage        HouseholdUsage
 }
 
 // TransactionService covers the ledger: the transactions themselves and the
@@ -111,6 +112,11 @@ func (s *TransactionService) Create(ctx context.Context, in NewTransaction, toda
 // existing key is refused (ErrIdempotencyKeyReused), not silently reported
 // "done" for the wrong transaction.
 //
+// The one exception is at a cap (replayAtCap): there the lookup runs
+// first, because the insert would be refused anyway. The race that opens is
+// harmless -- at worst a retry racing its own first attempt is refused once
+// and its next retry replays.
+//
 // The date is checked before the insert, so a replay is checked too. A
 // request that was accepted once is refused on a retry only if its date has
 // since become the future, which takes the household moving its zone west
@@ -143,6 +149,9 @@ func (s *TransactionService) CreateOrReplay(ctx context.Context, in NewTransacti
 	if err := refuseFutureDate(t.OccurredOn, today); err != nil {
 		return domain.Transaction{}, false, err
 	}
+	if err := refuseFullLedger(ctx, s.d.Usage, t.HouseholdID, t.OccurredOn); err != nil {
+		return s.replayAtCap(ctx, t, err)
+	}
 	created, err := s.d.Transactions.Create(ctx, t)
 	if err == nil {
 		return created, false, nil
@@ -157,6 +166,27 @@ func (s *TransactionService) CreateOrReplay(ctx context.Context, in NewTransacti
 		// refusal rather than inventing an answer; the caller's retry will
 		// simply create it.
 		return domain.Transaction{}, false, fmt.Errorf("replay lookup after %w: %v", err, lookupErr)
+	}
+	if !t.SameCreate(stored) {
+		return domain.Transaction{}, false, domain.ErrIdempotencyKeyReused
+	}
+	return stored, true, nil
+}
+
+// replayAtCap is CreateOrReplay's answer when the household is at a cap. A
+// keyed retry whose first attempt landed is still told "already saved":
+// the bot and hearthctl resend after a lost reply, and the first attempt
+// may have taken the last place. Anything else gets the cap's refusal.
+func (s *TransactionService) replayAtCap(ctx context.Context, t domain.Transaction, capErr error) (domain.Transaction, bool, error) {
+	if t.IdempotencyKey == "" || !errors.Is(capErr, domain.ErrLimitReached) {
+		return domain.Transaction{}, false, capErr
+	}
+	stored, err := s.d.Transactions.GetByIdempotencyKey(ctx, t.HouseholdID, t.IdempotencyKey)
+	if errors.Is(err, domain.ErrNotFound) {
+		return domain.Transaction{}, false, capErr
+	}
+	if err != nil {
+		return domain.Transaction{}, false, err
 	}
 	if !t.SameCreate(stored) {
 		return domain.Transaction{}, false, domain.ErrIdempotencyKeyReused
@@ -233,6 +263,11 @@ func (s *TransactionService) Update(ctx context.Context, householdID, id string,
 		if err := refuseFutureDate(t.OccurredOn, today); err != nil {
 			return domain.Transaction{}, err
 		}
+		if !startOfMonth(t.OccurredOn).Equal(startOfMonth(view.Transaction.OccurredOn)) {
+			if err := refuseFullMonth(ctx, s.d.Usage, householdID, t.OccurredOn); err != nil {
+				return domain.Transaction{}, err
+			}
+		}
 	}
 	return s.d.Transactions.Update(ctx, t)
 }
@@ -253,6 +288,9 @@ func (s *TransactionService) validate(ctx context.Context, t *domain.Transaction
 	t.Description = strings.TrimSpace(t.Description)
 	if t.Description == "" {
 		return domain.ErrTransactionDescriptionRequired
+	}
+	if err := domain.CheckTextLength(domain.TextDescription, t.Description, domain.MaxTransactionDescriptionLen); err != nil {
+		return err
 	}
 
 	if t.Amount.Amount <= 0 {

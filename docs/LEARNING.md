@@ -2555,6 +2555,15 @@ different component, after it was already written down here once.
   path and every command after it reports `command not found`. A whole
   header comparison printed "DIFFER" for eight routes that were identical.
   Use `route`.
+- **The dev API's live reload can silently stop reloading** (2026-10-17).
+  `make up` starts `api` under `air`, which rebuilds on file changes. Under
+  colima the file-change events did not arrive: the container built once at
+  start-up and ran that binary for an hour while seven commits landed. A
+  browser walk then "passed" a create that the branch refuses, because the
+  API serving it predated the rule. `docker compose logs api | grep
+  building` showed the single build. **Before a walk, restart `api` (or check
+  the last `building...` line is newer than your last change), and make the
+  walk include one request whose answer only the new code gives.**
 
 ### 4. Guards scoped to the wrong interval
 
@@ -4879,6 +4888,41 @@ route is allowed to redeem it. "This session confirmed" proved someone
 clicked, not that the someone was the person the click was supposed to
 protect. The fix is never to trust the check harder — it is to name the
 context the check was silently assuming, and require it explicitly.
+
+### 26. A number the design calls "busiest" is an assumption until something enforces it
+
+Found 2026-10-16, building per-household limits
+([ADR 13](adr/0013-per-household-limits-on-stored-data.md)).
+
+`TransactionRepository.MonthTotals` loads every transaction in a month so the
+service can convert each one before adding (pattern 12). Its doc comment
+justified that with "the design's busiest example is 247 rows for one
+household-month". Nothing enforced 247, or any number: a household could hold
+as many rows in one month as it liked, and every read that loads a month
+grows with it. The same was true of accounts, notes, name lengths, and which
+months a budget could be saved for. Each read was written correctly for the
+data its author imagined.
+
+**What would have caught it sooner:** treat every "at most", "typical" or
+"busiest" in a comment as a question, *what stops it being more?* If the
+answer is nothing, either cap the input where it is written or bound the
+read. The comment now names the cap (`domain.MaxTransactionsPerMonth`) instead
+of an example.
+
+Two smaller lessons from the same piece, both pattern 16 again (a claim about
+the code is not evidence until checked against it):
+
+- The spec named two frontend branches that read every `409` as their own
+  conflict, on routes gaining a cap. Read in full, one was the invite
+  *withdraw* route and the other the invite *preview* lookup; neither can
+  ever answer `LIMIT_REACHED`. A grep for `status === 409` found the lines;
+  only reading what each guarded settled whether they mattered.
+- The spec proposed pruning spent sessions. `docs/SYSTEM_DESIGN.md` §8
+  recorded, as a decision, that sessions are kept because the admin directory
+  reads "last active" from them. Pruning them all would have shown a quiet
+  household as never active. The prune now keeps each person's most recently
+  used session per household. **Search the design document for the table
+  before deciding what to delete from it.**
 
 ## Catalogue by area
 

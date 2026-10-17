@@ -50,6 +50,7 @@ import { useAccounts } from "./useAccounts";
 import { useCreateBill, useRestoreBill, useUpdateBill, type CreateBillBody, type UpdateBillBody } from "./useBills";
 import { parseEnum } from "../../lib/parseEnum";
 import { BILL_CADENCES, type Bill } from "./billSchemas";
+import { MAX_NAME_LENGTH } from "../../api/textLimits";
 
 // Create mode has no bill yet; edit mode always has the one being edited. A
 // union rather than a `mode` flag beside an optional `bill` prop, so "edit
@@ -324,6 +325,7 @@ function BillModalForm(
               type="text"
               required
               value={name}
+              maxLength={MAX_NAME_LENGTH}
               onChange={(event) => setName(event.target.value)}
               placeholder={BILL_COPY.billNamePlaceholder}
               className={FIELD_CONTROL_CLASS}

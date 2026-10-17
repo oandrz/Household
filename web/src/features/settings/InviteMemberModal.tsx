@@ -19,6 +19,7 @@ import { PendingInviteCard } from "./PendingInviteCard";
 import type { PendingInvite } from "./schemas";
 import { usePendingInvites } from "./usePendingInvites";
 import { ROLE_OPTIONS, type InviteChannel, type RoleOption, useInviteMember } from "./useInviteMember";
+import { MAX_NAME_LENGTH } from "../../api/textLimits";
 
 // Which channels this role can actually reach, given what `/me` says the
 // household's flags allow. "profile" -- a limited member with no sign-in --
@@ -201,6 +202,7 @@ export function InviteMemberModal({
               required
               placeholder="First name"
               value={name}
+              maxLength={MAX_NAME_LENGTH}
               onChange={(event) => setName(event.target.value)}
               className={FIELD_CONTROL_CLASS}
             />

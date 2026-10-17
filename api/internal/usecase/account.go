@@ -49,6 +49,7 @@ type AccountDeps struct {
 	// what blocks a type change out from under live holdings. Required, not
 	// optional: a nil here would silently disable that guard.
 	Holdings HoldingCounter
+	Usage    HouseholdUsage
 }
 
 // AccountService covers the Finances screen: accounts and the net worth
@@ -89,6 +90,9 @@ func (s *AccountService) Create(ctx context.Context, in NewAccount, today time.T
 		return domain.Account{}, err
 	}
 	if err := refuseFutureOpeningBalance(account.OpeningBalanceAsOf, today); err != nil {
+		return domain.Account{}, err
+	}
+	if err := refuseAtCap(ctx, s.d.Usage, account.HouseholdID, domain.LimitAccounts); err != nil {
 		return domain.Account{}, err
 	}
 	return s.d.Accounts.Create(ctx, account)
@@ -172,6 +176,9 @@ func (s *AccountService) validate(ctx context.Context, a *domain.Account) error 
 	a.Nickname = strings.TrimSpace(a.Nickname)
 	if a.Nickname == "" {
 		return domain.ErrAccountNicknameRequired
+	}
+	if err := domain.CheckTextLength(domain.TextName, a.Nickname, domain.MaxNameLen); err != nil {
+		return err
 	}
 
 	accountType, err := domain.ParseAccountType(string(a.Type))

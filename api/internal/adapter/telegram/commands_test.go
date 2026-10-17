@@ -197,6 +197,12 @@ func TestRefusalsAreExplainedAndInternalErrorsAreNot(t *testing.T) {
 		// badly typed amount.
 		domain.ErrInvalidMoney:  "That could not be saved",
 		errors.New("pgx: boom"): "That could not be saved",
+		// Retrying can never work at a limit, so the reply must not say "try
+		// again".
+		&domain.LimitReachedError{Kind: domain.LimitTransactions, Limit: domain.MaxTransactions}: "limit of 100000 transactions",
+		&domain.LimitReachedError{Kind: domain.LimitTransactionsInMonth, Limit: domain.MaxTransactionsPerMonth,
+			Month: time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)}: "March 2026",
+		&domain.TextTooLongError{Field: domain.TextDescription, Max: domain.MaxTransactionDescriptionLen}: "200 characters",
 	}
 	for err, want := range cases {
 		svc, sender := &serviceSpy{err: err}, &senderSpy{}
@@ -388,5 +394,22 @@ func TestNudgesOnAnInstallWithoutADigestSaysSo(t *testing.T) {
 		HandleCommand(context.Background(), Command{ChatID: 1, Name: "nudges", Description: "off"})
 	if len(sender.sent) != 1 || sender.sent[0] != replyNudgesUnavailable {
 		t.Fatalf("replies = %q, want the not-configured reply", sender.sent)
+	}
+}
+
+// A reached limit or a too-long description is explained, never answered
+// with "Try again": the same message is refused every time.
+func TestLimitRefusalsNeverSayTryAgain(t *testing.T) {
+	for _, err := range []error{
+		&domain.LimitReachedError{Kind: domain.LimitTransactions, Limit: domain.MaxTransactions},
+		&domain.LimitReachedError{Kind: domain.LimitTransactionsInMonth, Limit: domain.MaxTransactionsPerMonth,
+			Month: time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)},
+		&domain.TextTooLongError{Field: domain.TextDescription, Max: domain.MaxTransactionDescriptionLen},
+	} {
+		svc, sender := &serviceSpy{err: err}, &senderSpy{}
+		NewCommander(resolverStub{member: owner()}, svc, sender).HandleCommand(context.Background(), spendCmd())
+		if len(sender.sent) != 1 || strings.Contains(sender.sent[0], "Try again") {
+			t.Errorf("%v: reply %v tells the member to try again", err, sender.sent)
+		}
 	}
 }

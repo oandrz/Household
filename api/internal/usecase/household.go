@@ -47,6 +47,7 @@ type HouseholdDeps struct {
 	// Holdings is consulted for one question only: does this household hold
 	// anything. See PrimaryCurrencyLocked.
 	Holdings HoldingCounter
+	Usage    HouseholdUsage
 }
 
 // HouseholdService covers the household settings screen: the household
@@ -82,6 +83,12 @@ func (s *HouseholdService) Get(ctx context.Context, householdID string) (domain.
 // no stored date: it only changes which day counts as "today" from the next
 // request on.
 func (s *HouseholdService) Update(ctx context.Context, h domain.Household) (domain.Household, error) {
+	if err := domain.CheckTextLength(domain.TextName, h.Name, domain.MaxNameLen); err != nil {
+		return domain.Household{}, err
+	}
+	if err := domain.CheckTextLength(domain.TextName, h.FamilyName, domain.MaxNameLen); err != nil {
+		return domain.Household{}, err
+	}
 	primary, err := normalizeCurrency(h.PrimaryCurrency)
 	if err != nil {
 		return domain.Household{}, err
@@ -146,6 +153,12 @@ func (s *HouseholdService) CreateSpace(ctx context.Context, householdID, name st
 	trimmedName := strings.TrimSpace(name)
 	if trimmedName == "" {
 		return domain.Space{}, ErrSpaceNameRequired
+	}
+	if err := domain.CheckTextLength(domain.TextName, trimmedName, domain.MaxNameLen); err != nil {
+		return domain.Space{}, err
+	}
+	if err := refuseAtCap(ctx, s.d.Usage, householdID, domain.LimitSpaces); err != nil {
+		return domain.Space{}, err
 	}
 
 	key := spaceKey(name)

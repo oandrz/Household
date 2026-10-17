@@ -200,3 +200,106 @@ func TestEarlierFailureListsKeepOnlyTheNewest(t *testing.T) {
 	r, err = admin.ReserveFailure(ctx, operator.ID, now, since)
 	check("ReserveFailure for an operator", r.Earlier, err)
 }
+
+// A token that was revoked, or expired, before the cutoff goes; a live one
+// stays, and so does one revoked or expired after the cutoff.
+func TestPruneTokensDeletesOnlyThoseSpentBeforeTheCutoff(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+	household := insertTestHousehold(t, db)
+	u, err := postgres.NewUserRepo(db).Create(ctx, "a@example.com", "", "A")
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	cutoff := now.Add(-usecase.RetentionWindow)
+	old, recent, future := cutoff.Add(-time.Hour), cutoff.Add(time.Hour), now.Add(24*time.Hour)
+	rows := []struct {
+		name    string
+		expires time.Time
+		revoked *time.Time
+	}{
+		{"live", future, nil},
+		{"expired before the cutoff", old, nil},
+		{"revoked before the cutoff", future, &old},
+		{"expired after the cutoff", recent, nil},
+		{"revoked after the cutoff", future, &recent},
+	}
+	for i, r := range rows {
+		if _, err := db.Pool().Exec(ctx,
+			`INSERT INTO api_tokens (user_id, household_id, name, token_hash, prefix, expires_at, revoked_at)
+			 VALUES ($1, $2, $3, $4, 'p', $5, $6)`, u.ID, household, r.name, []byte{byte(i)}, r.expires, r.revoked); err != nil {
+			t.Fatalf("token %s: %v", r.name, err)
+		}
+	}
+	if n, err := postgres.NewAPITokenRepo(db).Prune(ctx, cutoff); err != nil || n != 2 {
+		t.Fatalf("tokens pruned = %d, %v; want 2", n, err)
+	}
+	var left int
+	if err := db.Pool().QueryRow(ctx, `SELECT count(*) FROM api_tokens`).Scan(&left); err != nil {
+		t.Fatal(err)
+	}
+	if left != 3 {
+		t.Fatalf("left %d tokens, want 3", left)
+	}
+}
+
+// A session revoked or expired before the cutoff goes, unless it is the
+// person's most recently used session in that household: the admin
+// directory reads "last active" from it, so pruning it would turn a quiet
+// household into one that was never active.
+func TestPruneSessionsKeepsEachPersonsMostRecentlyUsedSession(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+	household := insertTestHousehold(t, db)
+	users := postgres.NewUserRepo(db)
+	active, err := users.Create(ctx, "active@example.com", "", "Active")
+	if err != nil {
+		t.Fatal(err)
+	}
+	quiet, err := users.Create(ctx, "quiet@example.com", "", "Quiet")
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	cutoff := now.Add(-usecase.RetentionWindow)
+	old, recent, future := cutoff.Add(-time.Hour), cutoff.Add(time.Hour), now.Add(24*time.Hour)
+	longAgo := cutoff.Add(-90 * 24 * time.Hour)
+
+	rows := []struct {
+		name     string
+		userID   string
+		expires  time.Time
+		revoked  *time.Time
+		lastSeen time.Time
+		kept     bool
+	}{
+		{"active: live", active.ID, future, nil, now, true},
+		{"active: expired before the cutoff", active.ID, old, nil, longAgo, false},
+		{"active: revoked before the cutoff", active.ID, future, &old, longAgo, false},
+		{"active: expired after the cutoff", active.ID, recent, nil, longAgo, true},
+		{"active: revoked after the cutoff", active.ID, future, &recent, longAgo, true},
+		{"quiet: the only session, expired long ago", quiet.ID, old, nil, longAgo, true},
+		{"quiet: an older one, expired long ago", quiet.ID, old, nil, longAgo.Add(-time.Hour), false},
+	}
+	for i, r := range rows {
+		if _, err := db.Pool().Exec(ctx,
+			`INSERT INTO sessions (token_hash, user_id, household_id, expires_at, revoked_at, last_seen_at)
+			 VALUES ($1, $2, $3, $4, $5, $6)`, []byte{byte(100 + i)}, r.userID, household, r.expires, r.revoked, r.lastSeen); err != nil {
+			t.Fatalf("session %s: %v", r.name, err)
+		}
+	}
+	if n, err := postgres.NewSessionRepo(db).Prune(ctx, cutoff); err != nil || n != 3 {
+		t.Fatalf("sessions pruned = %d, %v; want 3", n, err)
+	}
+	for i, r := range rows {
+		var exists bool
+		if err := db.Pool().QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM sessions WHERE token_hash = $1)`,
+			[]byte{byte(100 + i)}).Scan(&exists); err != nil {
+			t.Fatal(err)
+		}
+		if exists != r.kept {
+			t.Errorf("%s: kept = %v, want %v", r.name, exists, r.kept)
+		}
+	}
+}

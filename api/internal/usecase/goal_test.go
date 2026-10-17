@@ -18,6 +18,7 @@ type goalFixture struct {
 	goals      *goalDouble
 	households *householdDouble
 	fx         *fxDouble
+	usage      *usageDouble
 }
 
 func newGoalFixture(t *testing.T) *goalFixture {
@@ -29,13 +30,15 @@ func newGoalFixture(t *testing.T) *goalFixture {
 	goals := newGoalDouble()
 	fx := newFXDouble()
 
+	usage := newUsageDouble()
 	svc := usecase.NewGoalService(usecase.GoalDeps{
 		Goals:      goals,
 		Households: households,
 		FX:         fx,
+		Usage:      usage,
 	})
 
-	return &goalFixture{svc: svc, goals: goals, households: households, fx: fx}
+	return &goalFixture{svc: svc, goals: goals, households: households, fx: fx, usage: usage}
 }
 
 // seedGoal writes a goal directly into the double, bypassing Create -- the

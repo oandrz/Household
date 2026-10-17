@@ -189,7 +189,7 @@ func handlePutBudgetMonth(deps Deps) http.HandlerFunc {
 			lines = append(lines, usecase.BudgetLineInput{CategoryID: l.CategoryID, CapMinor: l.CapMinor})
 		}
 
-		budget, err := deps.Budgets.Save(r.Context(), scope.HouseholdID, month, req.ExpectedIncomeMinor, lines)
+		budget, err := deps.Budgets.Save(r.Context(), scope.HouseholdID, month, req.ExpectedIncomeMinor, lines, scope.Today)
 		if err != nil {
 			MapDomainError(w, r, err)
 			return

@@ -364,3 +364,16 @@ RETURNING household_id, bill_reminders, overspend_alerts, retro_reminder, weekly
 -- regression dressed as cleanup.
 -- name: PruneLoginAttempts :execrows
 DELETE FROM login_attempts WHERE at < $1;
+
+-- name: PruneSpentSessions :execrows
+-- A session revoked or expired before the cutoff can never be used again.
+-- Each person's most recently used session in a household is kept anyway:
+-- the admin directory reads "last active" from it (admin_directory.sql), and
+-- pruning it would show a quiet household as never active. So rows are
+-- bounded at one per person per household, plus the recent ones.
+DELETE FROM sessions s
+WHERE (s.expires_at < $1 OR s.revoked_at < $1)
+  AND EXISTS (
+    SELECT 1 FROM sessions newer
+    WHERE newer.user_id = s.user_id AND newer.household_id = s.household_id
+      AND COALESCE(newer.last_seen_at, newer.created_at) > COALESCE(s.last_seen_at, s.created_at));

@@ -71,6 +71,13 @@ func NewSignupBlueprint(householdName, displayName, currency, timezone string) (
 	if owner == "" {
 		return HouseholdBlueprint{}, ErrDisplayNameRequired
 	}
+	// family_name mirrors name below, so this one check covers both.
+	if err := domain.CheckTextLength(domain.TextName, name, domain.MaxNameLen); err != nil {
+		return HouseholdBlueprint{}, err
+	}
+	if err := domain.CheckTextLength(domain.TextName, owner, domain.MaxNameLen); err != nil {
+		return HouseholdBlueprint{}, err
+	}
 	// ParseSelectableCurrency, not ParseCurrency: a currency chosen for the
 	// first time at sign-up must be one domain.Money can actually render,
 	// not merely one ISO 4217 recognises (see domain.SelectableCurrencies).

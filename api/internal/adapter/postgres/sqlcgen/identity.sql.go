@@ -1149,6 +1149,28 @@ func (q *Queries) PruneMagicLinks(ctx context.Context, expiresAt pgtype.Timestam
 	return result.RowsAffected(), nil
 }
 
+const pruneSpentSessions = `-- name: PruneSpentSessions :execrows
+DELETE FROM sessions s
+WHERE (s.expires_at < $1 OR s.revoked_at < $1)
+  AND EXISTS (
+    SELECT 1 FROM sessions newer
+    WHERE newer.user_id = s.user_id AND newer.household_id = s.household_id
+      AND COALESCE(newer.last_seen_at, newer.created_at) > COALESCE(s.last_seen_at, s.created_at))
+`
+
+// A session revoked or expired before the cutoff can never be used again.
+// Each person's most recently used session in a household is kept anyway:
+// the admin directory reads "last active" from it (admin_directory.sql), and
+// pruning it would show a quiet household as never active. So rows are
+// bounded at one per person per household, plus the recent ones.
+func (q *Queries) PruneSpentSessions(ctx context.Context, expiresAt pgtype.Timestamptz) (int64, error) {
+	result, err := q.db.Exec(ctx, pruneSpentSessions, expiresAt)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const recordInviteKnock = `-- name: RecordInviteKnock :one
 UPDATE invites
 SET knock_chat_id = $2, knock_chat_username = $3, knock_code = $4, knocked_at = $5

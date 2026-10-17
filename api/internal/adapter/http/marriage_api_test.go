@@ -805,7 +805,7 @@ func TestStartRetroRaceIs409RetroExists(t *testing.T) {
 	// same shape env.routerWithMemberships uses for Memberships, applied to
 	// the one other port a test in this file needs to substitute.
 	d := env.deps
-	d.Retros = usecase.NewRetroService(alwaysExistsRetroRepo{}, nil, postgres.NewHouseholdRepo(env.db))
+	d.Retros = usecase.NewRetroService(alwaysExistsRetroRepo{}, nil, postgres.NewHouseholdRepo(env.db), postgres.NewHouseholdUsageRepo(env.db))
 	router := httpadapter.NewRouter(d)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/retros", nil)

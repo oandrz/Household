@@ -27,7 +27,7 @@ func retroHouseholds(createdAt time.Time, zone string) *householdDouble {
 // test about something else.
 func newRetroService(retros usecase.RetroRepository, actions usecase.RetroActionRepository) *usecase.RetroService {
 	longAgo := time.Date(2020, 1, 15, 9, 0, 0, 0, time.UTC)
-	return usecase.NewRetroService(retros, actions, retroHouseholds(longAgo, "UTC"))
+	return usecase.NewRetroService(retros, actions, retroHouseholds(longAgo, "UTC"), newUsageDouble())
 }
 
 // A draft is not a data point: it shows on the page as its own in-progress
@@ -315,7 +315,7 @@ func TestRetroListOffersANewHouseholdItsCreationMonthNotTheOneBefore(t *testing.
 	october := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
 
 	svc := usecase.NewRetroService(newRetroRepoDouble(), newRetroActionRepoDouble(),
-		retroHouseholds(createdAt, "Asia/Singapore"))
+		retroHouseholds(createdAt, "Asia/Singapore"), newUsageDouble())
 	view, err := svc.List(context.Background(), "hh", today)
 	if err != nil {
 		t.Fatalf("List: %v", err)
@@ -337,7 +337,7 @@ func TestRetroStartNeverFilesAMonthBeforeTheHouseholdWasCreated(t *testing.T) {
 
 	retros := newRetroRepoDouble()
 	svc := usecase.NewRetroService(retros, newRetroActionRepoDouble(),
-		retroHouseholds(createdAt, "Asia/Singapore"))
+		retroHouseholds(createdAt, "Asia/Singapore"), newUsageDouble())
 
 	first, err := svc.Start(context.Background(), "hh", today)
 	if err != nil {
@@ -363,7 +363,7 @@ func TestRetroStartStillOffersLastMonthToAHouseholdCreatedInIt(t *testing.T) {
 	september := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
 
 	svc := usecase.NewRetroService(newRetroRepoDouble(), newRetroActionRepoDouble(),
-		retroHouseholds(createdAt, "Asia/Singapore"))
+		retroHouseholds(createdAt, "Asia/Singapore"), newUsageDouble())
 	got, err := svc.Start(context.Background(), "hh", today)
 	if err != nil {
 		t.Fatalf("Start: %v", err)
@@ -379,7 +379,7 @@ func TestRetroStartStillOffersLastMonthToAHouseholdCreatedInIt(t *testing.T) {
 func TestRetroStartRefusesAHouseholdWithAnUnloadableZone(t *testing.T) {
 	retros := newRetroRepoDouble()
 	svc := usecase.NewRetroService(retros, newRetroActionRepoDouble(),
-		retroHouseholds(time.Date(2026, 9, 12, 3, 0, 0, 0, time.UTC), "Not/AZone"))
+		retroHouseholds(time.Date(2026, 9, 12, 3, 0, 0, 0, time.UTC), "Not/AZone"), newUsageDouble())
 
 	today := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
 	if _, err := svc.Start(context.Background(), "hh", today); !errors.Is(err, domain.ErrInvalidTimezone) {

@@ -103,6 +103,7 @@ type BudgetLineInput struct {
 // There is no Clock: Month, Save and History all take the time they need as
 // parameters, so the days-left and history-window tests stay deterministic.
 type BudgetDeps struct {
+	Usage        HouseholdUsage
 	Budgets      BudgetRepository
 	Transactions TransactionRepository
 	Categories   CategoryRepository
@@ -447,7 +448,13 @@ func (s *BudgetService) memberNames(ctx context.Context, householdID string) (ma
 // would otherwise catch it. An unknown or foreign category id is NOT
 // checked here: that is BudgetRepository.Upsert's own household-ownership
 // check, and its error passes through unchanged.
-func (s *BudgetService) Save(ctx context.Context, householdID string, month time.Time, expectedIncomeMinor *int64, lines []BudgetLineInput) (domain.Budget, error) {
+//
+// A month outside domain.BudgetMonthAllowed's window is refused, because
+// each month is its own row.
+func (s *BudgetService) Save(ctx context.Context, householdID string, month time.Time, expectedIncomeMinor *int64, lines []BudgetLineInput, today time.Time) (domain.Budget, error) {
+	if !domain.BudgetMonthAllowed(month, today) {
+		return domain.Budget{}, domain.ErrBudgetMonthOutOfRange
+	}
 	if expectedIncomeMinor != nil && *expectedIncomeMinor < 0 {
 		return domain.Budget{}, domain.ErrBudgetIncomeNegative
 	}
@@ -550,8 +557,14 @@ func (s *BudgetService) Save(ctx context.Context, householdID string, month time
 // this method's own domain.ErrNotFound. Get is needed anyway, for the
 // goal's ArchivedAt and currency, so fetching it first costs nothing extra.
 func (s *BudgetService) RollOver(ctx context.Context, householdID string, month time.Time, goalID string, today time.Time) (domain.GoalContribution, error) {
+	if !domain.BudgetMonthAllowed(month, today) {
+		return domain.GoalContribution{}, domain.ErrBudgetMonthOutOfRange
+	}
 	if !startOfMonth(month).Before(startOfMonth(today)) {
 		return domain.GoalContribution{}, domain.ErrRolloverMonthOpen
+	}
+	if err := refuseAtCap(ctx, s.d.Usage, householdID, domain.LimitGoalContributions); err != nil {
+		return domain.GoalContribution{}, err
 	}
 
 	view, err := s.Month(ctx, householdID, month, today)

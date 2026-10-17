@@ -490,6 +490,21 @@ func explain(err error) string {
 	if errorsIs(err, domain.ErrCategoryKindMismatch) {
 		return "That category is for the other kind of transaction."
 	}
+	// A limit or a too-long description is refused every time, so these
+	// must not fall through to "Try again".
+	var limit *domain.LimitReachedError
+	if errors.As(err, &limit) {
+		if limit.Kind == domain.LimitTransactionsInMonth {
+			return fmt.Sprintf("%s already has %d transactions, the most Hearth keeps for one month.",
+				limit.Month.Format("January 2006"), limit.Limit)
+		}
+		return fmt.Sprintf("This household has reached Hearth's limit of %d %s. Delete some in the app to add more.",
+			limit.Limit, strings.ReplaceAll(string(limit.Kind), "_", " "))
+	}
+	var tooLong *domain.TextTooLongError
+	if errors.As(err, &tooLong) {
+		return fmt.Sprintf("That %s is too long: at most %d characters.", tooLong.Field, tooLong.Max)
+	}
 	slog.Error("telegram command failed", "error", err)
 	return "That could not be saved. Try again, or use the app."
 }

@@ -142,6 +142,7 @@ type BillDeps struct {
 	FX         FXRateProvider
 	Accounts   AccountLookup
 	Categories CategoryLookup
+	Usage      HouseholdUsage
 }
 
 // BillService composes the Bills screen and every write against it. Like
@@ -452,6 +453,9 @@ func (s *BillService) Create(ctx context.Context, in NewBill, today time.Time) (
 	if name == "" {
 		return BillView{}, domain.ErrBillNameRequired
 	}
+	if err := domain.CheckTextLength(domain.TextName, name, domain.MaxNameLen); err != nil {
+		return BillView{}, err
+	}
 	if in.AmountMinor <= 0 {
 		return BillView{}, domain.ErrBillAmountNotPositive
 	}
@@ -487,6 +491,9 @@ func (s *BillService) Create(ctx context.Context, in NewBill, today time.Time) (
 	}
 
 	if err := s.validateCategory(ctx, in.HouseholdID, in.CategoryID); err != nil {
+		return BillView{}, err
+	}
+	if err := refuseAtCap(ctx, s.deps.Usage, in.HouseholdID, domain.LimitBills); err != nil {
 		return BillView{}, err
 	}
 
@@ -547,6 +554,9 @@ func (s *BillService) Update(ctx context.Context, householdID, billID string, pa
 		name := strings.TrimSpace(*patch.Name)
 		if name == "" {
 			return BillView{}, domain.ErrBillNameRequired
+		}
+		if err := domain.CheckTextLength(domain.TextName, name, domain.MaxNameLen); err != nil {
+			return BillView{}, err
 		}
 		b.Name = name
 	}
@@ -733,6 +743,14 @@ func (s *BillService) MarkPaid(ctx context.Context, in MarkPayment, today time.T
 	// which settles with no next occurrence (PaymentWrite.NextDue stays nil).
 	if n, ok := domain.NextDue(rec.Bill.Cadence, dueOn, rec.Bill.DueAnchorDay); ok {
 		next = &n
+	}
+
+	if err := refuseAtCap(ctx, s.deps.Usage, in.HouseholdID, domain.LimitBillPayments); err != nil {
+		return BillPaymentView{}, err
+	}
+	// A payment writes a ledger row too, so it meets the transaction caps.
+	if err := refuseFullLedger(ctx, s.deps.Usage, in.HouseholdID, in.PaidOn); err != nil {
+		return BillPaymentView{}, err
 	}
 
 	pay, err := s.deps.Bills.RecordPayment(ctx, PaymentWrite{

@@ -14,7 +14,7 @@ import (
 // never be shown an empty dropdown.
 func TestListSeedsTheStarterSetForAHouseholdWithNone(t *testing.T) {
 	repo := &fakeCategoryRepo{}
-	svc := usecase.NewCategoryService(repo)
+	svc := usecase.NewCategoryService(repo, newUsageDouble())
 
 	got, err := svc.List(context.Background(), "house-1")
 	if err != nil {
@@ -31,7 +31,7 @@ func TestListSeedsTheStarterSetForAHouseholdWithNone(t *testing.T) {
 
 func TestListDoesNotReseedAHouseholdThatAlreadyHasCategories(t *testing.T) {
 	repo := &fakeCategoryRepo{}
-	svc := usecase.NewCategoryService(repo)
+	svc := usecase.NewCategoryService(repo, newUsageDouble())
 	ctx := context.Background()
 
 	if _, err := svc.List(ctx, "house-1"); err != nil {
@@ -50,7 +50,7 @@ func TestListDoesNotReseedAHouseholdThatAlreadyHasCategories(t *testing.T) {
 // both refused rather than saving a blank-named category.
 func TestCreateTrimsWhitespaceAndRefusesEmptyName(t *testing.T) {
 	repo := &fakeCategoryRepo{}
-	svc := usecase.NewCategoryService(repo)
+	svc := usecase.NewCategoryService(repo, newUsageDouble())
 	ctx := context.Background()
 
 	got, err := svc.Create(ctx, "house-1", "  Streaming  ")
@@ -73,7 +73,7 @@ func TestCreateTrimsWhitespaceAndRefusesEmptyName(t *testing.T) {
 // expense-only concept, so Create never takes a kind argument at all.
 func TestCreateCategoryIsAlwaysExpenseKind(t *testing.T) {
 	repo := &fakeCategoryRepo{}
-	svc := usecase.NewCategoryService(repo)
+	svc := usecase.NewCategoryService(repo, newUsageDouble())
 
 	got, err := svc.Create(context.Background(), "house-1", "Streaming")
 	if err != nil {
@@ -89,7 +89,7 @@ func TestCreateCategoryIsAlwaysExpenseKind(t *testing.T) {
 // domain.ErrCategoryNameTaken to a 409 by identity, so errors.Is must hold.
 func TestCreateCategoryCollisionPassesThroughUntranslated(t *testing.T) {
 	repo := &fakeCategoryRepo{}
-	svc := usecase.NewCategoryService(repo)
+	svc := usecase.NewCategoryService(repo, newUsageDouble())
 	ctx := context.Background()
 
 	if _, err := svc.Create(ctx, "house-1", "Groceries"); err != nil {
@@ -105,7 +105,7 @@ func TestCreateCategoryCollisionPassesThroughUntranslated(t *testing.T) {
 // comment gives for sharing one check between Create and Update.
 func TestRenameTrimsWhitespaceAndRefusesEmptyName(t *testing.T) {
 	repo := &fakeCategoryRepo{}
-	svc := usecase.NewCategoryService(repo)
+	svc := usecase.NewCategoryService(repo, newUsageDouble())
 	ctx := context.Background()
 
 	created, err := svc.Create(ctx, "house-1", "Streaming")
@@ -131,7 +131,7 @@ func TestRenameTrimsWhitespaceAndRefusesEmptyName(t *testing.T) {
 // domain.ErrNotFound with errors.Is still true, not a generic failure.
 func TestRenameNotFoundPassesThroughUntranslated(t *testing.T) {
 	repo := &fakeCategoryRepo{}
-	svc := usecase.NewCategoryService(repo)
+	svc := usecase.NewCategoryService(repo, newUsageDouble())
 
 	_, err := svc.Rename(context.Background(), "house-1", "does-not-exist", "New name")
 	if !errors.Is(err, domain.ErrNotFound) {
@@ -144,7 +144,7 @@ func TestRenameNotFoundPassesThroughUntranslated(t *testing.T) {
 // touches sort order, only the archived_at flip the repository already owns.
 func TestArchiveThenRestoreRoundTrips(t *testing.T) {
 	repo := &fakeCategoryRepo{}
-	svc := usecase.NewCategoryService(repo)
+	svc := usecase.NewCategoryService(repo, newUsageDouble())
 	ctx := context.Background()
 
 	created, err := svc.Create(ctx, "house-1", "Streaming")
@@ -183,7 +183,7 @@ func TestArchiveNotFoundPassesThroughUntranslated(t *testing.T) {
 		t.Fatalf("list other household: %v, %d rows", err, len(other))
 	}
 
-	svc := usecase.NewCategoryService(repo)
+	svc := usecase.NewCategoryService(repo, newUsageDouble())
 	if _, err := svc.Archive(ctx, "house-1", other[0].ID); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("archive across households: err = %v, want ErrNotFound", err)
 	}

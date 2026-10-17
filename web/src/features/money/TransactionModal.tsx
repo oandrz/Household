@@ -27,6 +27,7 @@ import { useCategories } from "./useTransactions";
 import type { Account } from "./schemas";
 import type { Transaction, TransactionKind } from "./transactionSchemas";
 import { useHouseholdDateInput } from "../auth/useHouseholdDateInput";
+import { MAX_TRANSACTION_DESCRIPTION_LENGTH } from "../../api/textLimits";
 
 // TransactionFormValues mirrors createTransactionRequest
 // (api/internal/adapter/http/transaction_handlers.go) field for field --
@@ -416,6 +417,7 @@ export function TransactionModal({
             type="text"
             required
             value={description}
+            maxLength={MAX_TRANSACTION_DESCRIPTION_LENGTH}
             onChange={(event) => setDescription(event.target.value)}
             className={FIELD_CONTROL_CLASS}
           />

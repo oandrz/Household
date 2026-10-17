@@ -47,6 +47,7 @@ var ErrInviteeAlreadyRegistered = errors.New("an account with that email address
 // MembershipRepository.Create call would reintroduce the orphaned-user
 // defect (see both ports' doc comments).
 type InviteDeps struct {
+	Usage      HouseholdUsage
 	Invites    InviteRepository
 	Users      UserRepository
 	Sessions   SessionRepository
@@ -123,6 +124,9 @@ func (s *InviteService) Create(ctx context.Context, householdID, invitedByUserID
 	if _, err := domain.NewMembership("", householdID, "", role, caps); err != nil {
 		return err
 	}
+	if err := domain.CheckTextLength(domain.TextName, name, domain.MaxNameLen); err != nil {
+		return err
+	}
 
 	if email == "" {
 		// Only a limited member can be created without an email -- the
@@ -142,6 +146,9 @@ func (s *InviteService) Create(ctx context.Context, householdID, invitedByUserID
 		if err != nil {
 			return err
 		}
+		if err := refuseAtCap(ctx, s.d.Usage, householdID, domain.LimitMembers); err != nil {
+			return err
+		}
 		_, _, err = s.d.Users.CreateWithMembership(ctx, "", "", name, membership)
 		return err
 	}
@@ -157,6 +164,9 @@ func (s *InviteService) Create(ctx context.Context, householdID, invitedByUserID
 		return err
 	}
 
+	if err := refuseAtCap(ctx, s.d.Usage, householdID, domain.LimitPendingInvites); err != nil {
+		return err
+	}
 	now := s.d.Clock.Now()
 	raw, hash, err := s.d.Tokens.NewToken()
 	if err != nil {
@@ -199,6 +209,12 @@ func (s *InviteService) CreateTelegram(ctx context.Context, householdID, invited
 		return TelegramInviteLink{}, domain.ErrTelegramInvitesUnavailable
 	}
 	if _, err := domain.NewMembership("", householdID, "", role, caps); err != nil {
+		return TelegramInviteLink{}, err
+	}
+	if err := domain.CheckTextLength(domain.TextName, name, domain.MaxNameLen); err != nil {
+		return TelegramInviteLink{}, err
+	}
+	if err := refuseAtCap(ctx, s.d.Usage, householdID, domain.LimitPendingInvites); err != nil {
 		return TelegramInviteLink{}, err
 	}
 
@@ -305,6 +321,9 @@ func (s *InviteService) Knock(ctx context.Context, rawToken string, chatID int64
 // leaked-token runbook). Reported the same way as a failed send, never a
 // panic: the member is not lost because nobody was left to tell.
 func (s *InviteService) Admit(ctx context.Context, householdID, inviteID string) (AdmittedMember, error) {
+	if err := refuseAtCap(ctx, s.d.Usage, householdID, domain.LimitMembers); err != nil {
+		return AdmittedMember{}, err
+	}
 	admitted, err := s.d.Invites.Admit(ctx, householdID, inviteID, s.d.Clock.Now())
 	if err != nil {
 		return AdmittedMember{}, err
@@ -419,6 +438,12 @@ func (s *InviteService) Accept(ctx context.Context, token, password, displayName
 	// catches an invite whose stored role/capabilities would otherwise fail
 	// inside the repository's transaction instead of here.
 	if _, err := domain.NewMembership("", details.HouseholdID, "", details.Role, details.Capabilities); err != nil {
+		return SignInResult{}, err
+	}
+	if err := domain.CheckTextLength(domain.TextName, displayName, domain.MaxNameLen); err != nil {
+		return SignInResult{}, err
+	}
+	if err := refuseAtCap(ctx, s.d.Usage, details.HouseholdID, domain.LimitMembers); err != nil {
 		return SignInResult{}, err
 	}
 

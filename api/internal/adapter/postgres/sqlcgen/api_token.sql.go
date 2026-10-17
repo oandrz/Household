@@ -158,6 +158,19 @@ func (q *Queries) ListLiveAPITokensForHousehold(ctx context.Context, householdID
 	return items, nil
 }
 
+const pruneSpentAPITokens = `-- name: PruneSpentAPITokens :execrows
+DELETE FROM api_tokens WHERE expires_at < $1 OR revoked_at < $1
+`
+
+// A token revoked or expired before the cutoff can never be used again.
+func (q *Queries) PruneSpentAPITokens(ctx context.Context, expiresAt pgtype.Timestamptz) (int64, error) {
+	result, err := q.db.Exec(ctx, pruneSpentAPITokens, expiresAt)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const revokeAPIToken = `-- name: RevokeAPIToken :execrows
 UPDATE api_tokens SET revoked_at = now()
 WHERE id = $1 AND user_id = $2 AND revoked_at IS NULL

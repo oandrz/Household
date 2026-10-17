@@ -33,6 +33,7 @@ type billServiceFixture struct {
 	accounts   *fakeAccountLookup
 	categories *fakeCategoryLookup
 	fx         usecase.FXRateProvider
+	usage      usecase.HouseholdUsage
 }
 
 type billServiceOption func(*billServiceFixture)
@@ -63,6 +64,12 @@ func withMembership(membershipID, householdID string) billServiceOption {
 	return func(f *billServiceFixture) {
 		f.accounts.memberships[membershipID] = householdID
 	}
+}
+
+// withUsage swaps the usage double, for a test that puts the household at a
+// cap.
+func withUsage(usage usecase.HouseholdUsage) billServiceOption {
+	return func(f *billServiceFixture) { f.usage = usage }
 }
 
 // withFX swaps the FX double -- newBillServiceWithFX's own reason to exist,
@@ -97,7 +104,8 @@ func newBillService(t *testing.T, repo *fakeBillRepo, opts ...billServiceOption)
 			"cat-utilities": domain.CategoryExpense,
 			"cat-salary":    domain.CategoryIncome,
 		}},
-		fx: newFXDouble(),
+		fx:    newFXDouble(),
+		usage: newUsageDouble(),
 	}
 	for _, opt := range opts {
 		opt(f)
@@ -109,6 +117,7 @@ func newBillService(t *testing.T, repo *fakeBillRepo, opts ...billServiceOption)
 		FX:         f.fx,
 		Accounts:   f.accounts,
 		Categories: f.categories,
+		Usage:      f.usage,
 	})
 }
 

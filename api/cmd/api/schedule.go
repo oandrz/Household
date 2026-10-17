@@ -82,7 +82,7 @@ func pruneRetention(retention *usecase.RetentionService) func(ctx context.Contex
 		slog.Info("retention prune",
 			"signups", counts.Signups, "login_attempts", counts.LoginAttempts,
 			"telegram_link_requests", counts.TelegramLinks, "magic_links", counts.MagicLinks,
-			"expired_invites", counts.Invites)
+			"expired_invites", counts.Invites, "api_tokens", counts.APITokens, "sessions", counts.Sessions)
 		return err
 	}
 }

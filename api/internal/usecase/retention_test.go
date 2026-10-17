@@ -26,27 +26,29 @@ func (p *recordingPruner) Prune(_ context.Context, before time.Time) (int64, err
 }
 
 type retentionFixture struct {
-	signups, attempts, links, magic, invites *recordingPruner
-	clock                                    *fixedClock
-	svc                                      *usecase.RetentionService
+	signups, attempts, links, magic, invites, tokens, sessions *recordingPruner
+	clock                                                      *fixedClock
+	svc                                                        *usecase.RetentionService
 }
 
 func newRetentionFixture() *retentionFixture {
 	f := &retentionFixture{
 		signups: &recordingPruner{rows: 1}, attempts: &recordingPruner{rows: 2},
 		links: &recordingPruner{rows: 3}, magic: &recordingPruner{rows: 4}, invites: &recordingPruner{rows: 5},
+		tokens: &recordingPruner{rows: 6}, sessions: &recordingPruner{rows: 7},
 		clock: &fixedClock{now: time.Date(2026, 10, 15, 3, 0, 0, 0, time.UTC)},
 	}
 	f.svc = usecase.NewRetentionService(usecase.RetentionDeps{
 		Signups: f.signups, LoginAttempts: f.attempts, TelegramLinks: f.links,
-		MagicLinks: f.magic, Invites: f.invites, Clock: f.clock,
+		MagicLinks: f.magic, Invites: f.invites, APITokens: f.tokens, Sessions: f.sessions, Clock: f.clock,
 	})
 	return f
 }
 
 func (f *retentionFixture) all() map[string]*recordingPruner {
 	return map[string]*recordingPruner{"signups": f.signups, "login attempts": f.attempts,
-		"telegram link requests": f.links, "magic links": f.magic, "invites": f.invites}
+		"telegram link requests": f.links, "magic links": f.magic, "invites": f.invites,
+		"api tokens": f.tokens, "sessions": f.sessions}
 }
 
 func TestPruneCleansEveryTableWithTheSameCutoff(t *testing.T) {
@@ -62,7 +64,8 @@ func TestPruneCleansEveryTableWithTheSameCutoff(t *testing.T) {
 			t.Errorf("%s: called %v with cutoff %v, want %v", name, p.called, p.before, want)
 		}
 	}
-	if counts != (usecase.PruneCounts{Signups: 1, LoginAttempts: 2, TelegramLinks: 3, MagicLinks: 4, Invites: 5}) {
+	if counts != (usecase.PruneCounts{Signups: 1, LoginAttempts: 2, TelegramLinks: 3, MagicLinks: 4, Invites: 5,
+		APITokens: 6, Sessions: 7}) {
 		t.Fatalf("counts = %+v, want each table's own count in its own field", counts)
 	}
 }

@@ -27,6 +27,7 @@ import {
 import { invitePreviewSchema, type InvitePreview } from "./schemas";
 import { useAcceptInvite, useMe } from "./useAuth";
 import { BrandMark } from "../../components/BrandMark";
+import { MAX_NAME_LENGTH } from "../../api/textLimits";
 
 async function fetchInvitePreview(token: string): Promise<InvitePreview> {
   const body = await apiFetch<unknown>(`/api/v1/invites/${encodeURIComponent(token)}`);
@@ -208,6 +209,7 @@ function AcceptInviteForm({
             autoComplete="name"
             required
             value={displayName}
+            maxLength={MAX_NAME_LENGTH}
             onChange={(event) => setDisplayName(event.target.value)}
             className="rounded-lg border border-hairline bg-card px-3.5 py-2.5 text-[13.5px]"
           />

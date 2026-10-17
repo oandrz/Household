@@ -46,6 +46,7 @@ type holdingFixture struct {
 	valuations  *valuationRepoDouble
 	income      *holdingIncomeRepoDouble
 	accounts    *accountLookupDouble
+	usage       *usageDouble
 	householdID string
 	accountID   string
 }
@@ -59,6 +60,7 @@ func newHoldingFixture(t *testing.T, primaryCurrency string) *holdingFixture {
 	accounts.put("acct", domain.AccountInvestment)
 
 	f := &holdingFixture{
+		usage:       newUsageDouble(),
 		holdings:    newHoldingRepoDouble(),
 		events:      newHoldingEventRepoDouble(),
 		valuations:  newValuationRepoDouble(),
@@ -78,6 +80,7 @@ func newHoldingFixture(t *testing.T, primaryCurrency string) *holdingFixture {
 		Income:     f.income,
 		Accounts:   accounts,
 		Households: households,
+		Usage:      f.usage,
 	})
 	return f
 }

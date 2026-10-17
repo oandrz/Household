@@ -81,6 +81,10 @@ type SessionRepository interface {
 	// another's. Callers throttle it (middleware_session.go); the
 	// repository does not.
 	Touch(ctx context.Context, tokenHash []byte, at time.Time) error
+	// Prune deletes sessions revoked or expired before `before`, except each
+	// person's most recently used session in a household, which the admin
+	// directory's "last active" reads. None of them can sign anyone in again.
+	Prune(ctx context.Context, before time.Time) (int64, error)
 }
 
 type MagicLinkRepository interface {
@@ -121,6 +125,10 @@ type APITokenRepository interface {
 	// Touch records the last use. Callers throttle it; the repository
 	// does not.
 	Touch(ctx context.Context, tokenID string, at time.Time) error
+	// Prune deletes tokens revoked or expired before `before`. Neither can
+	// be used again, and pruning them is what stops rotating tokens from
+	// piling up rows.
+	Prune(ctx context.Context, before time.Time) (int64, error)
 }
 
 // FailureReservation is a failed attempt written before its password is

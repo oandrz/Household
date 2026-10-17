@@ -16,8 +16,18 @@ func apiTokenFixture(t *testing.T) (*usecase.APITokenService, *apiTokenDouble, *
 	clock := &fixedClock{now: time.Date(2026, 9, 8, 9, 0, 0, 0, time.UTC)}
 	repo := newAPITokenDouble()
 	repo.clock = clock
-	svc := usecase.NewAPITokenService(usecase.APITokenDeps{Tokens: repo, Gen: &seqTokens{}, Clock: clock})
+	svc := usecase.NewAPITokenService(usecase.APITokenDeps{Tokens: repo, Gen: &seqTokens{}, Clock: clock, Usage: newUsageDouble()})
 	return svc, repo, clock
+}
+
+// apiTokenServiceWithUsage is apiTokenFixture's service with the usage
+// double chosen by the test.
+func apiTokenServiceWithUsage(t *testing.T, usage usecase.HouseholdUsage) *usecase.APITokenService {
+	t.Helper()
+	clock := &fixedClock{now: time.Date(2026, 9, 8, 9, 0, 0, 0, time.UTC)}
+	repo := newAPITokenDouble()
+	repo.clock = clock
+	return usecase.NewAPITokenService(usecase.APITokenDeps{Tokens: repo, Gen: &seqTokens{}, Clock: clock, Usage: usage})
 }
 
 func TestCreateTokenShowsTheRawSecretOnceAndStoresOnlyItsHash(t *testing.T) {

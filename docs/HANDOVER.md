@@ -10,6 +10,19 @@ in three months or someone new.
 
 ## 1. Where things stand
 
+> **Per-household limits on stored data are built, on branch
+> `feat/household-limits`, since 2026-10-16. Not yet merged or deployed.**
+> What one household can store is capped (transactions per month and in
+> total, named things, records, people, active tokens), text has length
+> limits held by the domain and a database `CHECK`, and budgets can be saved
+> only from January 2000 to two years ahead
+> ([ADR 13](adr/0013-per-household-limits-on-stored-data.md)). The daily prune
+> now also removes spent API tokens and sessions, keeping each person's most
+> recently used session. Before deploying, re-check that no stored name or
+> description is over its new limit, and install the disk alarm
+> (`deploy/disk-check.sh`, `deploy/PROVISION.md` §12). Per-household request
+> rate limits are the next piece of work.
+>
 > **One calendar per household is built, on branch `fix/qa-2026-10-01`, since
 > 2026-10-01. Not pushed, not merged, not deployed.** It fixes QA ISSUE-002 to
 > ISSUE-006: a household stores an IANA time zone and both the server and the

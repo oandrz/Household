@@ -95,6 +95,7 @@ func run() error {
 	// that needs it: one implementation per port, backed by this one pool.
 	users := postgres.NewUserRepo(db)
 	households := postgres.NewHouseholdRepo(db)
+	usage := postgres.NewHouseholdUsageRepo(db)
 	memberships := postgres.NewMembershipRepo(db)
 	sessions := postgres.NewSessionRepo(db)
 	magicLinks := postgres.NewMagicLinkRepo(db)
@@ -150,6 +151,7 @@ func run() error {
 		BaseURL:    cfg.AppBaseURL,
 	})
 	inviteSvc := usecase.NewInviteService(usecase.InviteDeps{
+		Usage:             usage,
 		Invites:           invites,
 		Users:             users,
 		Sessions:          sessions,
@@ -170,11 +172,12 @@ func run() error {
 		Sessions:  sessions,
 		APITokens: apiTokens,
 	})
-	apiTokenSvc := usecase.NewAPITokenService(usecase.APITokenDeps{Tokens: apiTokens, Gen: tokens, Clock: sysClock})
+	apiTokenSvc := usecase.NewAPITokenService(usecase.APITokenDeps{Tokens: apiTokens, Gen: tokens, Clock: sysClock, Usage: usage})
 	accessSvc := usecase.NewAccessListService(usecase.AccessListDeps{
 		Tokens: apiTokens, Chats: telegramAccounts, Members: memberships,
 	})
 	householdSvc := usecase.NewHouseholdService(usecase.HouseholdDeps{
+		Usage:         usage,
 		Holdings:      holdingRepo,
 		Households:    households,
 		Spaces:        spaces,
@@ -239,6 +242,7 @@ func run() error {
 	}
 
 	accountSvc := usecase.NewAccountService(usecase.AccountDeps{
+		Usage:      usage,
 		Accounts:   accountRepo,
 		Households: households,
 		FX:         fxProvider,
@@ -248,6 +252,7 @@ func run() error {
 		Holdings: holdingRepo,
 	})
 	holdingSvc := usecase.NewHoldingService(usecase.HoldingDeps{
+		Usage:      usage,
 		Holdings:   holdingRepo,
 		Events:     holdingEventRepo,
 		Valuations: holdingValuationRepo,
@@ -256,7 +261,7 @@ func run() error {
 		Households: households,
 	})
 
-	categorySvc := usecase.NewCategoryService(categoryRepo)
+	categorySvc := usecase.NewCategoryService(categoryRepo, usage)
 	transactionSvc := usecase.NewTransactionService(usecase.TransactionDeps{
 		Transactions: transactionRepo,
 		// CategoryRepo also satisfies the narrower CategoryLookup that
@@ -266,13 +271,16 @@ func run() error {
 		Accounts:   accountRepo,
 		Households: households,
 		FX:         fxProvider,
+		Usage:      usage,
 	})
 	goalSvc := usecase.NewGoalService(usecase.GoalDeps{
+		Usage:      usage,
 		Goals:      goalRepo,
 		Households: households,
 		FX:         fxProvider,
 	})
 	budgetSvc := usecase.NewBudgetService(usecase.BudgetDeps{
+		Usage:        usage,
 		Budgets:      budgetRepo,
 		Transactions: transactionRepo,
 		Categories:   categoryRepo,
@@ -286,6 +294,7 @@ func run() error {
 		Goals: goalRepo,
 	})
 	billSvc := usecase.NewBillService(usecase.BillDeps{
+		Usage:      usage,
 		Bills:      billRepo,
 		Households: households,
 		FX:         fxProvider,
@@ -298,12 +307,12 @@ func run() error {
 		// rule as a hand-entered one (see BillDeps).
 		Categories: categoryRepo,
 	})
-	retroSvc := usecase.NewRetroService(retroRepo, retroActionRepo, households)
+	retroSvc := usecase.NewRetroService(retroRepo, retroActionRepo, households, usage)
 	// goalRepo doubles as the GoalProgressReader: Vision needs one
 	// percentage from Goals and the narrow port is what keeps it from
 	// depending on GoalRepository's whole surface.
 	visionSvc := usecase.NewVisionService(visionRepo, goalRepo)
-	agreementSvc := usecase.NewAgreementService(agreementRepo, memberships)
+	agreementSvc := usecase.NewAgreementService(agreementRepo, memberships, usage)
 	adminSvc := usecase.NewAdminService(usecase.AdminDeps{
 		Admins: platformAdminRepo,
 		Flags:  featureFlagRepo,
@@ -469,7 +478,7 @@ func run() error {
 	// same context, and it starts on every box: see schedule.
 	retention := usecase.NewRetentionService(usecase.RetentionDeps{
 		Signups: signups, LoginAttempts: loginAttempts, TelegramLinks: telegramLinks,
-		MagicLinks: magicLinks, Invites: invites, Clock: sysClock,
+		MagicLinks: magicLinks, Invites: invites, APITokens: apiTokens, Sessions: sessions, Clock: sysClock,
 	})
 	go (&schedule{now: time.Now, prune: pruneRetention(retention), digest: digest}).run(ctx)
 

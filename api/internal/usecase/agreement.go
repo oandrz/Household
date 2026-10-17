@@ -79,10 +79,11 @@ type AgreementsView struct {
 type AgreementService struct {
 	agreements AgreementRepository
 	members    MembershipRepository
+	usage      HouseholdUsage
 }
 
-func NewAgreementService(agreements AgreementRepository, members MembershipRepository) *AgreementService {
-	return &AgreementService{agreements: agreements, members: members}
+func NewAgreementService(agreements AgreementRepository, members MembershipRepository, usage HouseholdUsage) *AgreementService {
+	return &AgreementService{agreements: agreements, members: members, usage: usage}
 }
 
 // ErrAgreementDocumentCorrupt refuses to render a row this layer never
@@ -346,6 +347,9 @@ func (s *AgreementService) CreateSection(ctx context.Context, householdID, name 
 	if err := domain.ValidateAgreementSectionName(name); err != nil {
 		return AgreementSectionView{}, AgreementsView{}, err
 	}
+	if err := refuseAtCap(ctx, s.usage, householdID, domain.LimitAgreementSections); err != nil {
+		return AgreementSectionView{}, AgreementsView{}, err
+	}
 	rec, err := s.agreements.CreateSection(ctx, householdID, name, at)
 	if err != nil {
 		return AgreementSectionView{}, AgreementsView{}, err
@@ -392,6 +396,9 @@ func (s *AgreementService) Propose(ctx context.Context, householdID, proposedByM
 	p.Body, p.PreviousBody = strings.TrimSpace(p.Body), strings.TrimSpace(p.PreviousBody)
 	p.Note = strings.TrimSpace(p.Note)
 	if err := p.Validate(); err != nil {
+		return AgreementProposalView{}, AgreementsView{}, err
+	}
+	if err := refuseAtCap(ctx, s.usage, householdID, domain.LimitAgreementProposals); err != nil {
 		return AgreementProposalView{}, AgreementsView{}, err
 	}
 	rec, err := s.agreements.CreateProposal(ctx, AgreementProposalWrite{HouseholdID: p.HouseholdID,
