@@ -2555,6 +2555,15 @@ different component, after it was already written down here once.
   path and every command after it reports `command not found`. A whole
   header comparison printed "DIFFER" for eight routes that were identical.
   Use `route`.
+- **The dev API's live reload can silently stop reloading** (2026-10-17).
+  `make up` starts `api` under `air`, which rebuilds on file changes. Under
+  colima the file-change events did not arrive: the container built once at
+  start-up and ran that binary for an hour while seven commits landed. A
+  browser walk then "passed" a create that the branch refuses, because the
+  API serving it predated the rule. `docker compose logs api | grep
+  building` showed the single build. **Before a walk, restart `api` (or check
+  the last `building...` line is newer than your last change), and make the
+  walk include one request whose answer only the new code gives.**
 
 ### 4. Guards scoped to the wrong interval
 
