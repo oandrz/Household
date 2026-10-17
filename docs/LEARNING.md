@@ -2567,7 +2567,12 @@ different component, after it was already written down here once.
   Seen again the same evening on the Recurring bills card: the API's last
   `building...` was four hours before the change. Restarting `api` and then
   reading the new card's figures before anything else is what showed the
-  walk was against the new code.
+  walk was against the new code. **The web container has the same gap.**
+  During the design review that followed, Vite served the edited copy file
+  but the old card component, and the page threw `recurringHeading is not
+  a function`: a crash no tree on disk could produce. Restarting `web` after
+  each edit cleared it. A console error that names code you just deleted
+  means a stale dev server, not a bug.
 
 ### 4. Guards scoped to the wrong interval
 
