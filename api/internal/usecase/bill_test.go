@@ -3,6 +3,7 @@ package usecase_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -30,6 +31,7 @@ func day(s string) time.Time {
 // billServiceFixture is what newBillService's opts mutate before the
 // service is built.
 type billServiceFixture struct {
+	primary    string
 	accounts   *fakeAccountLookup
 	categories *fakeCategoryLookup
 	fx         usecase.FXRateProvider
@@ -72,6 +74,12 @@ func withUsage(usage usecase.HouseholdUsage) billServiceOption {
 	return func(f *billServiceFixture) { f.usage = usage }
 }
 
+// withPrimaryCurrency sets household h1's primary currency, for a test about
+// converting into a currency other than the default SGD.
+func withPrimaryCurrency(currency string) billServiceOption {
+	return func(f *billServiceFixture) { f.primary = currency }
+}
+
 // withFX swaps the FX double -- newBillServiceWithFX's own reason to exist,
 // factored out as one more option rather than a second constructor with its
 // own household/account wiring to keep in sync with newBillService's.
@@ -85,10 +93,8 @@ func withFX(fx usecase.FXRateProvider) billServiceOption {
 // account every plain bill() fixture pays from; opts layer on anything else.
 func newBillService(t *testing.T, repo *fakeBillRepo, opts ...billServiceOption) *usecase.BillService {
 	t.Helper()
-	households := newHouseholdDouble()
-	households.put(domain.Household{ID: "h1", PrimaryCurrency: "SGD"})
-
 	f := &billServiceFixture{
+		primary: "SGD",
 		accounts: &fakeAccountLookup{
 			accounts: map[string]fakeAccountRecord{
 				"acct-1": {householdID: "h1", currency: "SGD"},
@@ -110,6 +116,8 @@ func newBillService(t *testing.T, repo *fakeBillRepo, opts ...billServiceOption)
 	for _, opt := range opts {
 		opt(f)
 	}
+	households := newHouseholdDouble()
+	households.put(domain.Household{ID: "h1", PrimaryCurrency: f.primary})
 
 	return usecase.NewBillService(usecase.BillDeps{
 		Bills:      repo,
@@ -657,6 +665,69 @@ func TestRecurringTotalConvertsAForeignCurrencyBillIntoPrimary(t *testing.T) {
 	}
 	if s.ExcludedNoRate != 0 {
 		t.Fatalf("ExcludedNoRate = %d, want 0 -- the IDR bill has a rate", s.ExcludedNoRate)
+	}
+}
+
+// One bill at the amount ceiling, monthly, in SGD, is S$12tn a year; in an
+// IDR household that is past what an int64 holds. The page must still load,
+// with that bill left out of the total and its row saying so, rather than
+// every read of the Bills page failing.
+func TestRecurringTotalFlagsABillTooLargeToConvertInsteadOfFailing(t *testing.T) {
+	repo := &fakeBillRepo{}
+	repo.add(inCategory(bill("Typo rent", "2026-08-20", domain.MaxAmountMinor), "cat-utilities", "Utilities"))
+	repo.add(inCategory(billOn("Arisan", "IDR", "2026-11-20", 500_000), "cat-family", "Family"))
+	svc := newBillService(t, repo, withPrimaryCurrency("IDR"))
+
+	view, err := svc.List(context.Background(), "h1", false, day("2026-08-09"))
+	if err != nil {
+		t.Fatalf("List: %v -- one oversized bill must not fail the whole page", err)
+	}
+	s := view.Summary
+	if s.RecurringMonthly.Amount != 500_000 || s.RecurringMonthly.Currency != "IDR" {
+		t.Fatalf("recurring monthly = %v, want IDR 500000 -- only the bill that fits", s.RecurringMonthly)
+	}
+	var utilities *usecase.RecurringCategory
+	for i := range s.RecurringByCategory {
+		if s.RecurringByCategory[i].CategoryID == "cat-utilities" {
+			utilities = &s.RecurringByCategory[i]
+		}
+	}
+	if utilities == nil || utilities.ExcludedTooLarge != 1 || utilities.Annual.Amount != 0 {
+		t.Fatalf("utilities row = %+v, want a zero row marked with 1 bill too large", utilities)
+	}
+	if s.ExcludedNoRate != 0 {
+		t.Fatalf("ExcludedNoRate = %d, want 0 -- the bill has a rate, it is just too large", s.ExcludedNoRate)
+	}
+}
+
+// Every bill below fits on its own, but the browser holds numbers exactly
+// only up to 2^53, so the total stops before that: the bill that would
+// cross it is left out and flagged, never a figure the page would round.
+func TestRecurringTotalStopsBeforeTheLargestExactFigure(t *testing.T) {
+	var records []usecase.BillRecord
+	for i := 0; i < 8; i++ {
+		rec := bill(fmt.Sprintf("Ceiling bill %d", i), "2026-08-20", domain.MaxAmountMinor)
+		rec.Bill.IsSubscription = true
+		records = append(records, rec)
+	}
+	svc := newBillServiceWith(t, records...)
+
+	view, err := svc.List(context.Background(), "h1", false, day("2026-08-09"))
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	s := view.Summary
+	// 1e14 a month is 1.2e15 a year; seven of them are 8.4e15, and an eighth
+	// would pass 2^53 (about 9.007e15).
+	want := 7 * 12 * domain.MaxAmountMinor
+	if s.RecurringAnnual.Amount != want || s.SubscriptionsAnnual.Amount != want {
+		t.Fatalf("recurring %d, subscriptions %d; want both %d", s.RecurringAnnual.Amount, s.SubscriptionsAnnual.Amount, want)
+	}
+	if s.RecurringAnnual.Amount > domain.MaxExactTotalMinor {
+		t.Fatalf("recurring annual %d is past the largest exact figure", s.RecurringAnnual.Amount)
+	}
+	if len(s.RecurringByCategory) != 1 || s.RecurringByCategory[0].ExcludedTooLarge != 1 {
+		t.Fatalf("rows = %+v, want one row with 1 bill too large", s.RecurringByCategory)
 	}
 }
 

@@ -16,6 +16,7 @@ function row(overrides: Partial<RecurringCategory> = {}): RecurringCategory {
     annualMinor: 216000,
     monthlyMinor: 18000,
     excludedNoRate: 0,
+    excludedTooLarge: 0,
     ...overrides,
   };
 }
@@ -141,6 +142,24 @@ describe("RecurringBillsCard", () => {
     expect(within(family).getByText("S$180.00")).toBeInTheDocument();
     expect(within(family).getByText("1 bill not counted: no exchange rate")).toBeInTheDocument();
     expect(within(family).queryByText("—")).not.toBeInTheDocument();
+  });
+
+  it("says when a bill is too large to add up, with no figure when nothing in the category counted", () => {
+    renderCard(
+      summary({
+        recurringMonthlyMinor: 18000,
+        recurringAnnualMinor: 216000,
+        recurringByCategory: [
+          row(),
+          row({ categoryId: "cat-rent", categoryName: "Rent", annualMinor: 0, monthlyMinor: 0, excludedTooLarge: 1 }),
+        ],
+      }),
+    );
+
+    const rent = screen.getAllByTestId("recurring-row")[1];
+    expect(within(rent).getByText("1 bill too large to add up")).toBeInTheDocument();
+    expect(within(rent).getByText("—")).toBeInTheDocument();
+    expect(within(rent).queryByText(/no exchange rate/)).not.toBeInTheDocument();
   });
 
   it("explains an empty total instead of showing S$0.00, and leaves the subscriptions section out", () => {

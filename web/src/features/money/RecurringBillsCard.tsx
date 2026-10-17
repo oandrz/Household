@@ -69,11 +69,14 @@ export function RecurringBillsCard({
               {row.excludedNoRate > 0 && (
                 <div className="text-[12px] text-muted">{BILL_COPY.recurringRowExcluded(row.excludedNoRate)}</div>
               )}
+              {row.excludedTooLarge > 0 && (
+                <div className="text-[12px] text-muted">{BILL_COPY.recurringRowTooLarge(row.excludedTooLarge)}</div>
+              )}
             </div>
-            {/* A category whose every bill has no rate has no figure at all;
+            {/* A category whose every bill was left out has no figure at all;
                 "S$0.00" would read as "costs nothing". The dash is hidden from
                 screen readers because the note beside it already says why. */}
-            {row.annualMinor === 0 && row.excludedNoRate > 0 ? (
+            {row.annualMinor === 0 && row.excludedNoRate + row.excludedTooLarge > 0 ? (
               <span aria-hidden="true" className="text-[13px] text-muted">
                 —
               </span>

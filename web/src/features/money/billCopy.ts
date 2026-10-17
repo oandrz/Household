@@ -340,6 +340,9 @@ export const BILL_COPY = {
   recurringNoCategory: "No category",
   recurringRowExcluded: (count: number) =>
     `${count} ${count === 1 ? "bill" : "bills"} not counted: no exchange rate`,
+  // Past about S$90 trillion a browser rounds the figure, so the server
+  // leaves the bill out rather than send a total that is quietly wrong.
+  recurringRowTooLarge: (count: number) => `${count} ${count === 1 ? "bill" : "bills"} too large to add up`,
   recurringEquivalentNote: "Monthly equivalents: a yearly bill counts as 1/12 of its amount each month.",
   // Never a bare S$0: a household with only one-off bills would otherwise
   // read it as "Hearth lost my bills".

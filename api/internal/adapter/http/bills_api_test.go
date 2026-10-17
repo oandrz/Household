@@ -2,11 +2,14 @@ package httpadapter_test
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/andreasoentoro/hearth/api/internal/domain"
 )
 
 // --- bill routes: DTOs and fixtures -------------------------------------
@@ -58,11 +61,12 @@ type billsSummaryBody struct {
 	RecurringMonthlyMinor     int64            `json:"recurringMonthlyMinor"`
 	RecurringAnnualMinor      int64            `json:"recurringAnnualMinor"`
 	RecurringByCategory       []struct {
-		CategoryID     string `json:"categoryId"`
-		CategoryName   string `json:"categoryName"`
-		AnnualMinor    int64  `json:"annualMinor"`
-		MonthlyMinor   int64  `json:"monthlyMinor"`
-		ExcludedNoRate int    `json:"excludedNoRate"`
+		CategoryID       string `json:"categoryId"`
+		CategoryName     string `json:"categoryName"`
+		AnnualMinor      int64  `json:"annualMinor"`
+		MonthlyMinor     int64  `json:"monthlyMinor"`
+		ExcludedNoRate   int    `json:"excludedNoRate"`
+		ExcludedTooLarge int    `json:"excludedTooLarge"`
 	} `json:"recurringByCategory"`
 	ExcludedNoRate int `json:"excludedNoRate"`
 }
@@ -404,6 +408,33 @@ func TestBillsSummaryMarksARecurringRowShortOnTheWire(t *testing.T) {
 	}
 	if s.RecurringAnnualMinor != 0 || s.ExcludedNoRate != 1 {
 		t.Fatalf("summary = %d/yr, excludedNoRate %d; want 0/yr and 1", s.RecurringAnnualMinor, s.ExcludedNoRate)
+	}
+}
+
+// Eight bills at the amount ceiling, monthly, would total past 2^53, the
+// largest figure the browser holds exactly. The page must still answer 200,
+// with the eighth bill left out and its row saying so on the wire.
+func TestBillsSummaryFlagsABillTooLargeToAddUpRatherThanFailing(t *testing.T) {
+	env := newTestEnv(t)
+	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
+	accountID := env.mustCreateAccountID(t, session, csrf)
+	for i := 0; i < 8; i++ {
+		env.mustCreateBill(t, session, csrf, map[string]any{
+			"name": fmt.Sprintf("Ceiling bill %d", i), "amountMinor": domain.MaxAmountMinor, "cadence": "monthly",
+			"nextDue": farFutureDate(), "payFromAccountId": accountID,
+		})
+	}
+
+	rec := env.authedGet(t, "/api/v1/bills", session)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 -- an oversized total must not fail the page; body = %s", rec.Code, rec.Body.String())
+	}
+	s := decodeBillsList(t, rec).Summary
+	if s.RecurringAnnualMinor != 7*12*domain.MaxAmountMinor {
+		t.Fatalf("recurring annual = %d, want seven bills' worth", s.RecurringAnnualMinor)
+	}
+	if len(s.RecurringByCategory) != 1 || s.RecurringByCategory[0].ExcludedTooLarge != 1 {
+		t.Fatalf("rows = %+v, want one row with 1 bill too large", s.RecurringByCategory)
 	}
 }
 

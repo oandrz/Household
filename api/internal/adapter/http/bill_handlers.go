@@ -71,13 +71,15 @@ type nextDueBillDTO struct {
 
 // recurringCategoryDTO is one row of the Recurring bills breakdown.
 // CategoryID is "" for the row holding bills with no category; the
-// frontend names that row.
+// frontend names that row. ExcludedNoRate and ExcludedTooLarge count the
+// bills left out of the row, by reason (usecase.RecurringCategory).
 type recurringCategoryDTO struct {
-	CategoryID     string `json:"categoryId"`
-	CategoryName   string `json:"categoryName"`
-	AnnualMinor    int64  `json:"annualMinor"`
-	MonthlyMinor   int64  `json:"monthlyMinor"`
-	ExcludedNoRate int    `json:"excludedNoRate"`
+	CategoryID       string `json:"categoryId"`
+	CategoryName     string `json:"categoryName"`
+	AnnualMinor      int64  `json:"annualMinor"`
+	MonthlyMinor     int64  `json:"monthlyMinor"`
+	ExcludedNoRate   int    `json:"excludedNoRate"`
+	ExcludedTooLarge int    `json:"excludedTooLarge"`
 }
 
 // billsSummaryDTO is the page header, the three stat cards and the Recurring
@@ -645,11 +647,12 @@ func toBillsSummaryDTO(s usecase.BillsSummary) billsSummaryDTO {
 	}
 	for _, row := range s.RecurringByCategory {
 		dto.RecurringByCategory = append(dto.RecurringByCategory, recurringCategoryDTO{
-			CategoryID:     row.CategoryID,
-			CategoryName:   row.CategoryName,
-			AnnualMinor:    row.Annual.Amount,
-			MonthlyMinor:   row.Monthly.Amount,
-			ExcludedNoRate: row.ExcludedNoRate,
+			CategoryID:       row.CategoryID,
+			CategoryName:     row.CategoryName,
+			AnnualMinor:      row.Annual.Amount,
+			MonthlyMinor:     row.Monthly.Amount,
+			ExcludedNoRate:   row.ExcludedNoRate,
+			ExcludedTooLarge: row.ExcludedTooLarge,
 		})
 	}
 	// NextDueOn == nil is the field to gate on -- BillsSummary's own comment

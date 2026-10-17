@@ -5165,9 +5165,14 @@ the code is not evidence until checked against it):
   `GET /bills` for that household fails. The subscriptions total had the same
   path before; widening it to every repeating bill widened the exposure. Found
   by the pre-landing Red Team review, not by any test, because every fixture
-  uses ordinary amounts. **When a figure is derived from a capped amount
-  (multiplied, summed, converted), check the derived figure against the cap's
-  promise, not just the input.**
+  uses ordinary amounts. Fixed by leaving such a bill out of the totals and
+  saying so on its row, checking every recurring sum against 2^53
+  (`domain.MaxExactTotalMinor`), the last figure a browser shows exactly.
+  That deliberately departs from "an overflowing sum fails the read" for this
+  one card, because failing takes down the page the bill is fixed from.
+  **When a figure is derived from a capped amount (multiplied, summed,
+  converted), check the derived figure against the cap's promise, not just
+  the input.**
 
 ### Database and repositories
 

@@ -2,6 +2,7 @@ package usecase
 
 import (
 	"context"
+	"errors"
 	"sort"
 	"strings"
 	"time"
@@ -250,17 +251,20 @@ func (s *BillService) List(ctx context.Context, householdID string, includeArchi
 			}
 		}
 
-		annual, repeats, noRate, err := annualInPrimary(ctx, conv, b)
+		annual, repeats, why, err := annualInPrimary(ctx, conv, b)
 		if err != nil {
 			return BillsView{}, err
 		}
 		if repeats {
-			if err := recurring.add(rec, annual, noRate); err != nil {
+			why, err = recurring.add(rec, annual, why)
+			if err != nil {
 				return BillsView{}, err
 			}
-			if noRate {
+			// A bill too large to add up is said on its own row, not in the
+			// page's "no exchange rate" count: it has a rate.
+			if why == excludeNoRate {
 				excludedThisBill = true
-			} else if b.IsSubscription {
+			} else if why == excludeNone && b.IsSubscription {
 				subscriptionsAnnual, err = subscriptionsAnnual.Add(annual)
 				if err != nil {
 					return BillsView{}, err
@@ -364,22 +368,37 @@ func dueInMonthOf(due, today time.Time) bool {
 
 // annualInPrimary is what one bill costs in a year, converted into primary.
 // repeats is false for a one-off, which is not a recurring cost and belongs
-// in neither the recurring nor the subscriptions total. noRate is true when
-// the bill's currency has no rate: nothing can be added, and List counts it
-// in ExcludedNoRate. Any Converter.TryConvert error is returned.
-func annualInPrimary(ctx context.Context, conv *Converter, b domain.Bill) (annual domain.Money, repeats, noRate bool, err error) {
-	minor, ok := domain.AnnualEquivalentMinor(b.Cadence, b.Amount.Amount)
-	if !ok {
-		return domain.Money{}, false, false, nil
+// in neither the recurring nor the subscriptions total. why is
+// excludeNoRate when the bill's currency has no rate, and excludeTooLarge
+// when its yearly figure, before or after conversion, is past
+// domain.MaxExactTotalMinor (see recurringRollup for why that is not an
+// error). Any other Converter.TryConvert error is returned: a provider
+// outage must fail the request, never show as a smaller total.
+func annualInPrimary(ctx context.Context, conv *Converter, b domain.Bill) (annual domain.Money, repeats bool, why exclusion, err error) {
+	periods := int64(b.Cadence.PeriodsPerYear())
+	if periods == 0 {
+		return domain.Money{}, false, excludeNone, nil
 	}
+	// Checked before multiplying: a row stored before the amount ceiling
+	// existed could otherwise wrap.
+	if b.Amount.Amount > domain.MaxExactTotalMinor/periods {
+		return domain.Money{}, true, excludeTooLarge, nil
+	}
+	minor, _ := domain.AnnualEquivalentMinor(b.Cadence, b.Amount.Amount)
 	converted, hasRate, err := conv.TryConvert(ctx, domain.Money{Amount: minor, Currency: b.Amount.Currency})
+	if errors.Is(err, domain.ErrAmountOverflow) {
+		return domain.Money{}, true, excludeTooLarge, nil
+	}
 	if err != nil {
-		return domain.Money{}, false, false, err
+		return domain.Money{}, false, excludeNone, err
 	}
 	if !hasRate {
-		return domain.Money{}, true, true, nil
+		return domain.Money{}, true, excludeNoRate, nil
 	}
-	return converted, true, false, nil
+	if converted.Amount > domain.MaxExactTotalMinor {
+		return domain.Money{}, true, excludeTooLarge, nil
+	}
+	return converted, true, excludeNone, nil
 }
 
 // countExcludedPayments counts this month's payments whose currency has no

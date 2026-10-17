@@ -3160,7 +3160,12 @@ silently dropping it, counted once per bill across every total. Each
 monthly figure is the yearly one divided by 12 once, at the end; the
 category rows' monthly figures come from `domain.MonthlySharesMinor`, which
 hands out the cents lost to rounding so the rows add up exactly to the
-headline the screen prints above them. `Settled` exists because a live bill can
+headline the screen prints above them. No recurring figure passes
+`domain.MaxExactTotalMinor` (2^53, the last integer a browser holds
+exactly): a bill whose yearly figure overflows when converted, or would push
+its row or the total past that, is left out and counted in its row's
+`ExcludedTooLarge`, so one absurd amount never fails the page it would be
+fixed from. Any other conversion error still fails the request. `Settled` exists because a live bill can
 have `NextDue == nil` — a paid one-off — which the design's own "Due soon"
 and "Later" formulas both define as requiring a non-null due date; without
 the flag there would be no way to tell "genuinely far out" from "done, and

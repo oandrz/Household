@@ -84,6 +84,8 @@ const recurringCategorySchema = z.object({
   annualMinor: z.number(),
   monthlyMinor: z.number(),
   excludedNoRate: z.number(),
+  // Defaults to 0 so a server older than this field still parses.
+  excludedTooLarge: z.number().default(0),
 });
 export type RecurringCategory = z.infer<typeof recurringCategorySchema>;
 

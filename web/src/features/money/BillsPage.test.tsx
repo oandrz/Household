@@ -251,8 +251,8 @@ describe("BillsPage", () => {
         recurringMonthlyMinor: 19998,
         recurringAnnualMinor: 239976,
         recurringByCategory: [
-          { categoryId: "cat-housing", categoryName: "Housing", annualMinor: 216000, monthlyMinor: 18000, excludedNoRate: 0 },
-          { categoryId: "cat-streaming", categoryName: "Streaming", annualMinor: 23976, monthlyMinor: 1998, excludedNoRate: 0 },
+          { categoryId: "cat-housing", categoryName: "Housing", annualMinor: 216000, monthlyMinor: 18000, excludedNoRate: 0, excludedTooLarge: 0 },
+          { categoryId: "cat-streaming", categoryName: "Streaming", annualMinor: 23976, monthlyMinor: 1998, excludedNoRate: 0, excludedTooLarge: 0 },
         ],
       }),
     );

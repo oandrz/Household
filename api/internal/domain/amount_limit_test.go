@@ -64,3 +64,15 @@ func TestMaxAmountMinorKeepsThePromisesItsCommentMakes(t *testing.T) {
 			math.MaxInt64/domain.MaxAmountMinor, fewestCeilingRowsBeforeASumOverflows)
 	}
 }
+
+// A monthly bill at the ceiling is twelve amounts a year; that figure must
+// still be one a browser shows exactly, or the largest typeable bill could
+// never appear in a total.
+func TestOneYearOfTheLargestAmountIsAnExactTotal(t *testing.T) {
+	if 12*domain.MaxAmountMinor > domain.MaxExactTotalMinor {
+		t.Fatalf("12 x %d is past MaxExactTotalMinor %d", domain.MaxAmountMinor, domain.MaxExactTotalMinor)
+	}
+	if domain.MaxExactTotalMinor != 9_007_199_254_740_991 {
+		t.Fatalf("MaxExactTotalMinor = %d, want 2^53 - 1", domain.MaxExactTotalMinor)
+	}
+}
