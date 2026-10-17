@@ -258,7 +258,7 @@ describe("BillsPage", () => {
     );
 
     const card = await screen.findByTestId("recurring-bills-card");
-    expect(within(card).getByTestId("recurring-heading")).toHaveTextContent("Recurring bills · S$199.98/mo");
+    expect(within(card).getByTestId("recurring-monthly")).toHaveTextContent("S$199.98/mo");
     expect(within(card).getAllByTestId("recurring-row")).toHaveLength(2);
     // Source order is phone order: a phone shows one column, and the total
     // must not sit under every bill.

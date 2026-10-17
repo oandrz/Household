@@ -45,9 +45,15 @@ export function RecurringBillsCard({
   return (
     <div data-testid="recurring-bills-card" className="rounded-xl border border-hairline bg-card p-[22px]">
       <h2 data-testid="recurring-heading" className="text-[14px] font-semibold text-ink">
-        {BILL_COPY.recurringHeading(money(summary.recurringMonthlyMinor))}
+        {BILL_COPY.recurringTitle}
       </h2>
-      <div data-testid="recurring-annual" className="mt-1 text-[12px] text-muted">
+      {/* The total is the figure this card exists for, so it takes the stat
+          cards' figure size rather than sitting inside the heading. */}
+      <div data-testid="recurring-monthly" className="mt-1.5 text-2xl font-semibold tracking-[-0.02em] text-ink">
+        {money(summary.recurringMonthlyMinor)}
+        <span className="ml-1 text-[13px] font-normal tracking-normal text-muted">{BILL_COPY.perMonthSuffix}</span>
+      </div>
+      <div data-testid="recurring-annual" className="mt-0.5 text-[12px] text-muted">
         {BILL_COPY.recurringAnnualLine(money(summary.recurringAnnualMinor))}
       </div>
 

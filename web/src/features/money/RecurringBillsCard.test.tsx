@@ -74,7 +74,8 @@ describe("RecurringBillsCard", () => {
       }),
     );
 
-    expect(screen.getByTestId("recurring-heading")).toHaveTextContent("Recurring bills · S$640.00/mo");
+    expect(screen.getByTestId("recurring-heading")).toHaveTextContent("Recurring bills");
+    expect(screen.getByTestId("recurring-monthly")).toHaveTextContent("S$640.00/mo");
     expect(screen.getByTestId("recurring-annual")).toHaveTextContent("S$7,680.00/year");
   });
 

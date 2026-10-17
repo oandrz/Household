@@ -330,7 +330,7 @@ export const BILL_COPY = {
   // equivalents worked out by the server, not this month's charges, which is
   // why the card sits apart from "Due this month".
   recurringTitle: "Recurring bills",
-  recurringHeading: (monthlyLabel: string) => `Recurring bills · ${monthlyLabel}/mo`,
+  perMonthSuffix: "/mo",
   recurringAnnualLine: (annualLabel: string) => `${annualLabel}/year`,
   recurringNoCategory: "No category",
   recurringRowExcluded: (count: number) =>
