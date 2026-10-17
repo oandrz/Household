@@ -647,6 +647,7 @@ func TestPendingListNeverCarriesAnInviteLink(t *testing.T) {
 func TestCreateTelegramRefusesWhenNoBotIsConfigured(t *testing.T) {
 	f := newFixture(t)
 	f.invites = usecase.NewInviteService(usecase.InviteDeps{
+		Usage:             newUsageDouble(),
 		Invites:           f.inviteRepo,
 		Users:             f.users,
 		Sessions:          f.sessions,
@@ -991,6 +992,7 @@ func TestAdmitWithNoChatSenderConfiguredReturnsTheMemberWithoutPanicking(t *test
 	// same process after BOT_TOKEN and BOT_USERNAME are removed: Knock's row
 	// is still there, but nothing was ever told to SetChats.
 	noChats := usecase.NewInviteService(usecase.InviteDeps{
+		Usage:             newUsageDouble(),
 		Invites:           f.inviteRepo,
 		Users:             f.users,
 		Sessions:          f.sessions,

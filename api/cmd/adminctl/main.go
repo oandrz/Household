@@ -109,6 +109,7 @@ func run(args []string) error {
 	notifications := postgres.NewNotificationRepo(db)
 	platformAdmins := postgres.NewPlatformAdminRepo(db)
 	adminAttempts := postgres.NewAdminReauthAttemptRepo(db)
+	householdUsage := postgres.NewHouseholdUsageRepo(db)
 
 	hasher := crypto.NewArgon2Hasher(cfg.Argon2Time, cfg.Argon2MemoryKiB, cfg.Argon2Threads)
 	tokens := crypto.NewTokenGenerator()
@@ -119,6 +120,7 @@ func run(args []string) error {
 	switch args[0] {
 	case "seed":
 		return runSeed(ctx, usecase.SeedDeps{
+			Usage:         householdUsage,
 			Households:    households,
 			Users:         users,
 			Memberships:   memberships,
@@ -137,6 +139,7 @@ func run(args []string) error {
 		return runUnlockHousehold(ctx, args[1:], users, memberships, loginAttempts)
 	case "create-invite":
 		return runCreateInvite(ctx, args[1:], usecase.InviteDeps{
+			Usage:   householdUsage,
 			Invites: invites,
 			Users:   users,
 			Mailer:  mailer,

@@ -151,6 +151,7 @@ func run() error {
 		BaseURL:    cfg.AppBaseURL,
 	})
 	inviteSvc := usecase.NewInviteService(usecase.InviteDeps{
+		Usage:             usage,
 		Invites:           invites,
 		Users:             users,
 		Sessions:          sessions,
@@ -171,7 +172,7 @@ func run() error {
 		Sessions:  sessions,
 		APITokens: apiTokens,
 	})
-	apiTokenSvc := usecase.NewAPITokenService(usecase.APITokenDeps{Tokens: apiTokens, Gen: tokens, Clock: sysClock})
+	apiTokenSvc := usecase.NewAPITokenService(usecase.APITokenDeps{Tokens: apiTokens, Gen: tokens, Clock: sysClock, Usage: usage})
 	accessSvc := usecase.NewAccessListService(usecase.AccessListDeps{
 		Tokens: apiTokens, Chats: telegramAccounts, Members: memberships,
 	})

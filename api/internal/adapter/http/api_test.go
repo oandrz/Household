@@ -268,6 +268,7 @@ func newTestEnvWith(t *testing.T, clk usecase.Clock, outbox usecase.MailOutbox) 
 		BaseURL:    "http://localhost:5173",
 	})
 	inviteSvc := usecase.NewInviteService(usecase.InviteDeps{
+		Usage:             usage,
 		Invites:           invites,
 		Users:             users,
 		Sessions:          sessions,
@@ -285,7 +286,7 @@ func newTestEnvWith(t *testing.T, clk usecase.Clock, outbox usecase.MailOutbox) 
 	})
 	apiTokens := postgres.NewAPITokenRepo(db)
 	memberSvc := usecase.NewMemberService(usecase.MemberDeps{Members: memberships, Sessions: sessions, APITokens: apiTokens})
-	apiTokenSvc := usecase.NewAPITokenService(usecase.APITokenDeps{Tokens: apiTokens, Gen: tokens, Clock: clk})
+	apiTokenSvc := usecase.NewAPITokenService(usecase.APITokenDeps{Tokens: apiTokens, Gen: tokens, Clock: clk, Usage: usage})
 	accessSvc := usecase.NewAccessListService(usecase.AccessListDeps{
 		Tokens: apiTokens, Chats: telegramAccounts, Members: memberships,
 	})

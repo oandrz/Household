@@ -1962,6 +1962,7 @@ type fixture struct {
 	memberSvc      *usecase.MemberService
 	householdSvc   *usecase.HouseholdService
 	householdUsage *usageDouble
+	inviteUsage    *usageDouble
 	clock          *fixedClock
 	sessions       *sessionDouble
 	apiTokens      *apiTokenDouble
@@ -2047,7 +2048,9 @@ func newFixture(t *testing.T) *fixture {
 	inviteRepo.setFamilyName(householdID, "Oentoro")
 	chats := newInviteChatsDouble()
 
+	inviteUsage := newUsageDouble()
 	invites := usecase.NewInviteService(usecase.InviteDeps{
+		Usage:             inviteUsage,
 		Invites:           inviteRepo,
 		Users:             users,
 		Sessions:          sessions,
@@ -2099,7 +2102,8 @@ func newFixture(t *testing.T) *fixture {
 
 	return &fixture{
 		auth: auth, invites: invites, memberSvc: memberSvc, householdSvc: householdSvc, householdUsage: householdUsage,
-		clock: clock, sessions: sessions, apiTokens: apiTokens, mailer: mailer, hasher: hasher,
+		inviteUsage: inviteUsage,
+		clock:       clock, sessions: sessions, apiTokens: apiTokens, mailer: mailer, hasher: hasher,
 		attempts: attempts,
 		users:    users, members: members, magicLinks: magicLinks, inviteRepo: inviteRepo,
 		chats:          chats,
@@ -4230,6 +4234,7 @@ func newTelegramAuthService(t *testing.T) (*usecase.TelegramAuthService, *telegr
 	invites.setFamilyName(defaultTestHouseholdID, "Oentoro")
 	codes := newPairingCodesDouble()
 	inviteSvc := usecase.NewInviteService(usecase.InviteDeps{
+		Usage:    newUsageDouble(),
 		Invites:  invites,
 		Codes:    codes,
 		Accounts: accounts,

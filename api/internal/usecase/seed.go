@@ -40,6 +40,7 @@ const (
 // reads a membership on its already-seeded path, to recover the household
 // ID and to check whether Christine has accepted.
 type SeedDeps struct {
+	Usage         HouseholdUsage
 	Households    HouseholdRepository
 	Users         UserRepository
 	Memberships   MembershipRepository
@@ -407,6 +408,7 @@ func issueChristineInviteAtNextRung(ctx context.Context, d SeedDeps, householdID
 		switch {
 		case errors.Is(err, domain.ErrNotFound):
 			inviteSvc := NewInviteService(InviteDeps{
+				Usage:   d.Usage,
 				Invites: d.Invites,
 				Users:   d.Users,
 				Mailer:  d.Mailer,
@@ -459,6 +461,7 @@ func christineOrphanedUserError(ctx context.Context, d SeedDeps) error {
 // children are invited with an empty one.
 func seedInviteService(d SeedDeps) *InviteService {
 	return NewInviteService(InviteDeps{
+		Usage:   d.Usage,
 		Invites: d.Invites,
 		Users:   d.Users,
 		Mailer:  d.Mailer,

@@ -11,6 +11,7 @@ type APITokenDeps struct {
 	Tokens APITokenRepository
 	Gen    TokenGenerator
 	Clock  Clock
+	Usage  HouseholdUsage
 }
 
 // APITokenService creates, lists and revokes a member's own tokens. It has
@@ -52,6 +53,9 @@ func (s *APITokenService) Create(ctx context.Context, in NewAPITokenInput) (Crea
 		lifetime = domain.DefaultAPITokenLifetime
 	}
 	if err := domain.ValidateAPITokenLifetime(lifetime); err != nil {
+		return CreatedAPIToken{}, err
+	}
+	if err := refuseAtCap(ctx, s.d.Usage, in.HouseholdID, domain.LimitActiveAPITokens); err != nil {
 		return CreatedAPIToken{}, err
 	}
 	secret, _, err := s.d.Gen.NewToken()

@@ -42,6 +42,7 @@ func newSeedFixture() *seedFixture {
 
 	return &seedFixture{
 		deps: usecase.SeedDeps{
+			Usage:         newUsageDouble(),
 			Households:    households,
 			Users:         users,
 			Memberships:   members,
