@@ -10,15 +10,14 @@ in three months or someone new.
 
 ## 1. Where things stand
 
-> **Per-household request limits and time limits are built, on branch
-> `feat/request-limits`, since 2026-10-17. Not yet merged or deployed.** Each
+> **Per-household request limits and time limits are merged (#82, `89edaf6`)
+> and, per the owner, deployed on 2026-10-18.** Each
 > household has a request allowance (60, refilling at 10 a second, at most 4
 > running at once), answered `429` with `Retry-After` beyond it; every
 > request has a 15-second deadline (`503 TIMEOUT`) and every query on the
 > request pool 5 seconds; nginx reuses its connections to the API, paired
 > with Go's idle timeout; the daily prune has its own pool; `hearthctl
 > import` paces itself ([ADR 14](adr/0014-per-household-request-limits-and-time-limits.md)).
-> No migration and nothing to configure: a normal `./deploy.sh <sha>`.
 >
 > **Per-household limits on stored data are merged (#81, `5abeb78`) and,
 > per the owner, deployed on 2026-10-17.**
