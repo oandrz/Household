@@ -41,6 +41,14 @@ var (
 	ErrInviteNotKnocked = errors.New("no one is waiting on this invite")
 	ErrTokenExpired     = errors.New("token has expired or been used")
 	ErrRateLimited      = errors.New("too many requests")
+	// ErrLimitReached is what *LimitReachedError unwraps to: a household
+	// already holds as many of something as Hearth keeps (ADR 13).
+	ErrLimitReached = errors.New("household limit reached")
+	// ErrTextTooLong is what *TextTooLongError unwraps to.
+	ErrTextTooLong = errors.New("text is too long")
+	// ErrBudgetMonthOutOfRange refuses a budget for a month outside
+	// BudgetMonthAllowed's window.
+	ErrBudgetMonthOutOfRange = errors.New("budget month is outside the allowed range")
 
 	// ErrAmountOverflow is Money arithmetic whose answer does not fit in an
 	// int64: a sum (Money.Add), a conversion (Rate.Apply), a priced or
