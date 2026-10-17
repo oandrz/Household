@@ -2,7 +2,6 @@ package domain
 
 import (
 	"fmt"
-	"strings"
 	"unicode/utf8"
 )
 
@@ -41,11 +40,14 @@ func (e *TextTooLongError) Error() string {
 
 func (e *TextTooLongError) Unwrap() error { return ErrTextTooLong }
 
-// CheckTextLength refuses value if it is longer than max characters once
-// surrounding spaces are trimmed -- the same trim every required-text rule
-// here already applies.
+// CheckTextLength refuses value if it is longer than max characters,
+// counted exactly as given. Callers pass the string they are about to store:
+// most trim first, a few store what they were sent. Counting the stored
+// string is what keeps this rule and the database CHECK from disagreeing --
+// a trimmed count would pass "78 characters and three spaces" that the
+// CHECK then refuses with a 500.
 func CheckTextLength(field TextField, value string, max int) error {
-	if utf8.RuneCountInString(strings.TrimSpace(value)) > max {
+	if utf8.RuneCountInString(value) > max {
 		return &TextTooLongError{Field: field, Max: max}
 	}
 	return nil

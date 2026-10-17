@@ -21,7 +21,9 @@ func TestCheckTextLengthCountsCharactersNotBytes(t *testing.T) {
 		{"one over in CJK", strings.Repeat("中", 81), false},
 		// 80 runes, 320 bytes.
 		{"exactly the limit in emoji", strings.Repeat("😀", 80), true},
-		{"surrounding spaces do not count", "   " + strings.Repeat("a", 80) + "   ", true},
+		// Counted as given: a service that stores the value untrimmed must
+		// not pass a value the database CHECK then refuses.
+		{"surrounding spaces count", strings.Repeat("a", 78) + "   ", false},
 	}
 	for _, c := range cases {
 		err := domain.CheckTextLength(domain.TextName, c.value, domain.MaxNameLen)

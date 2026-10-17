@@ -218,6 +218,13 @@ func TestEveryCappedTextFieldAnswers422NotA500(t *testing.T) {
 			"name": name81, "email": "kid@example.com", "role": "limited", "capabilities": []string{"calendar"}, "channel": "email"}},
 		{"household name", http.MethodPatch, "/api/v1/household", map[string]any{"name": name81}},
 		{"family name", http.MethodPatch, "/api/v1/household", map[string]any{"familyName": name81}},
+		// Padded to one over: a service that stores the value as given must
+		// count it as given, or the database CHECK answers 500 instead.
+		{"household name padded with spaces", http.MethodPatch, "/api/v1/household", map[string]any{
+			"name": strings.Repeat("a", 78) + "   "}},
+		{"holding buy note padded with a newline", http.MethodPost, "/api/v1/holdings/" + holding + "/events", map[string]any{
+			"kind": "acquisition", "quantity": "10", "amountMinor": 1_000, "occurredOn": "2026-01-05",
+			"note": strings.Repeat("a", 500) + "\n"}},
 		{"retro action", http.MethodPost, "/api/v1/retros/" + retro.Retro.Month + "/actions", map[string]any{"body": note501}},
 	}
 	for _, r := range rows {

@@ -43,7 +43,10 @@ is roughly four to five times what a very heavy real family would reach.
 | Holding unit | 20 |
 
 Characters are counted as a person sees them (`utf8.RuneCountInString`,
-Postgres `char_length`), after trimming surrounding spaces.
+Postgres `char_length`), on exactly the string that is stored: most fields
+are trimmed before they are counted and stored, and the few stored as sent
+are counted as sent, spaces included. Counting anything other than the stored
+string would let a value pass the rule and then fail the `CHECK`.
 
 **How it is enforced.**
 
@@ -66,6 +69,14 @@ Postgres `char_length`), after trimming surrounding spaces.
   saved" even at the cap, because the bot and `hearthctl` resend after a lost
   reply. Replacing a holding's valuation for a day that already has one adds
   no row, so it is allowed at the cap.
+
+**Spent tokens and sessions are pruned.** The daily retention prune deletes
+API tokens and sessions revoked or expired more than 30 days ago, so rotating
+tokens or signing in again and again does not pile up rows. **Each person's
+most recently used session in a household is kept**, however old: the admin
+directory reads "last active" from it, and deleting it would show a quiet
+household as never active. Do not "simplify" the prune to delete every spent
+session.
 
 ## Who can reach a limit, and who is affected
 

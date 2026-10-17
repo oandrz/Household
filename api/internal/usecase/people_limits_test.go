@@ -139,6 +139,15 @@ func TestPeopleAndHouseholdNamesOverEightyCharactersAreRefused(t *testing.T) {
 		_, err := f.invites.Accept(ctx, lastInviteToken(t, f), "supersecretpassword", long)
 		refused(t, err)
 	})
+	t.Run("a display name padded to one over when accepting", func(t *testing.T) {
+		f := newFixture(t)
+		if err := f.invites.Create(ctx, f.householdID, f.andreasID, "Kid", "kid@example.com",
+			domain.RoleLimited, domain.Capabilities{domain.CapCalendar}); err != nil {
+			t.Fatal(err)
+		}
+		_, err := f.invites.Accept(ctx, lastInviteToken(t, f), "supersecretpassword", strings.Repeat("a", 79)+"  ")
+		refused(t, err)
+	})
 	t.Run("the household name at sign-up", func(t *testing.T) {
 		_, err := usecase.NewSignupBlueprint(long, "Andreas", "SGD", "Asia/Singapore")
 		refused(t, err)
