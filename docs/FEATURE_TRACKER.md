@@ -13,7 +13,12 @@ needed them to exist (see "Where things stand" below).
 | ⬜ | Not started |
 | 🚫 | Out of scope — three different reasons, and **the row always says which**: marked "· not built" by the design itself; cut outright by the product owner (the audit screen, §9 — the code was deleted); or **deferred past the current release** by the product owner, meaning it is expected back later (the Family calendar, §7). A 🚫 is not a promise that something will never exist — it is a statement that it is not this release's work, and the row says what would bring it back |
 
-**Where things stand:** 144 of 163 features built or partly built — and **five of the 163 are 🚫**, so the honest denominator for this release is 158.
+**Where things stand:** 145 of 164 features built or partly built — and **five of the 164 are 🚫**, so the honest denominator for this release is 159.
+
+> **Recounted 2026-10-17 (per-household request limits)**. One row the design
+> does not draw is added to §3, ✅: "Per-household request limits and time
+> limits". Household settings goes 17 → 18 built. Totals
+> **124/21/14/5 = 164**, Built + Partial **145**, denominator **159**.
 
 > **Recounted 2026-10-16 (per-household limits)**. One row the design does
 > not draw is added to §3, ✅: "Per-household limits on stored data".
@@ -1180,7 +1185,7 @@ above now states Built + Partial **113** of **134**, denominator **129**.
 |---|---|---|---|---|
 | Entry & authentication | 19 | 2 | 1 | 0 |
 | Navigation shell | 7 | 1 | 1 | 0 |
-| Household settings | 17 | 8 | 2 | 0 |
+| Household settings | 18 | 8 | 2 | 0 |
 | Overview (home) | 9 | 2 | 1 | 0 |
 | Money | 37 | 5 | 7 | 0 |
 | Marriage | 17 | 2 | 2 | 0 |
@@ -1188,7 +1193,7 @@ above now states Built + Partial **113** of **134**, denominator **129**.
 | Household extras | 0 | 0 | 0 | 1 |
 | Platform administration | 7 | 1 | 0 | 1 |
 | Automation | 10 | 0 | 0 | 0 |
-| **Total** | **123** | **21** | **14** | **5** |
+| **Total** | **124** | **21** | **14** | **5** |
 
 ---
 
@@ -1319,6 +1324,7 @@ The full checklist is at the end of `docs/LEARNING.md`.
 | Notifications — weekly family digest | 🟡 | Same gap: stored and editable, never sent |
 | Retention pruning (scheduled, and `adminctl prune` by hand) | ✅ | No UI. Since 2026-10-14 the API prunes itself once a day on every box, Telegram or not: `RetentionService` deletes `signups`, `telegram_link_requests` and `magic_links` that were used or lapsed more than 30 days ago, `login_attempts` older than 30 days, and invites nobody accepted that lapsed more than 30 days ago. Since 2026-10-16 it also deletes API tokens and sessions revoked or expired more than 30 days ago, except each person's most recently used session in a household, which the admin directory's "last active" reads. Accepted invites and `admin_audit_log` are kept. `cmd/adminctl prune --older-than=<days>` is the same service by hand, and anything under seven days is refused so a prune can never clear a live lockout. The unknown-address failure count is indexed (`login_attempts_email_at_idx`), and every failure list reads at most the newest ten. Checked on a built image with Telegram off: the start-up prune removed each old row and kept the recent, live, pending and accepted ones |
 | Per-household limits on stored data (no mockup) | ✅ | 2026-10-16, [ADR 13](adr/0013-per-household-limits-on-stored-data.md). What one household can store is capped: 3,000 transactions in a month and 100,000 in total; 200 each of accounts, categories, goals, bills, holdings, spaces and agreement sections, archived ones included; 20,000 each of goal contributions, bill payments, holding buys and sells, valuations, income, retro actions and agreement proposals; 30 members, 20 pending invites, 20 active API tokens. Names are limited to 80 characters, a transaction description to 200, notes to 500, a holding unit to 20, each also held by a database `CHECK`. Budgets can be saved from January 2000 to two years ahead. A reached cap answers `409 LIMIT_REACHED` naming the thing and the number (the month, for the monthly cap), which every create form already shows; text inputs stop at their limit; the Telegram bot explains both instead of saying "try again". A keyed retry whose first attempt landed is still answered "already saved" at the cap. The checks run in the services, after every route guard, through the `HouseholdUsage` port. Tests: the domain numbers, each count against Postgres, each service at and one below its cap, `TestEveryCappedTextFieldAnswers422NotA500` over 23 write routes, `TestTheCapNeverAnswersBeforeTheGuards`, and the bot replies. Walked 2026-10-17 in a browser: at 200 accounts the account form shows "This household has reached Hearth's limit of 200 accounts. Archived accounts count towards it."; at 3,000 September transactions the transaction form shows "September 2026 already has 3,000 transactions, the most Hearth keeps for one month."; at 20 pending invites the invite form names that limit; the description box stops at 200 characters; and a normal session (every page, a transaction, a goal contribution, a bill payment) shows no limit message and no console error. **Not covered:** many households each within their own caps; the disk alarm in `deploy/PROVISION.md` §12 watches for that |
+| Per-household request limits and time limits (no mockup) | ✅ | 2026-10-17, [ADR 14](adr/0014-per-household-request-limits-and-time-limits.md). Each household has a request allowance of 60, refilling at 10 a second, with at most 4 requests running at once and 16 more waiting up to 5 s; beyond that the API answers `429 RATE_LIMITED`, "This household is sending too many requests. Wait a few seconds and try again.", with `Retry-After`. It runs right after the session check on every signed-in route, so `401` still comes first and `429` before every other guard. Every request has a 15-second deadline (`503 TIMEOUT`, "Hearth took too long to answer. Try again in a moment."), every query on the request pool 5 seconds, Go's write 20 s and nginx's wait 30 s, innermost first. nginx reuses up to 16 connections to the API, dropping idle ones at 60 s before Go's 90 s. The daily prune and `adminctl` run on their own 2-connection pool with 60 s per query. `hearthctl transaction import` sends 5 rows a second and waits out a `429`, resending the same keyed row. Tests: the limiter (refill, the line, a caller who leaves, the idle sweep, a clock stepping back, overlap under a barrier), `TestEverySignedInRouteIsHouseholdLimited` over 102 routes, `401` before `429` before `403`, the limits checked against the home screen's 11 calls and the pool, the timeout chain and the idle pairing read from `web/nginx.conf`, real-Postgres statement timeouts, and the import's pacing and retries. **Not covered:** many households at once, which the sign-up limits bound |
 | Connected accounts | ⬜ | Belongs with Money. Note that automatic bank sync is not available to an app like this — see Money below |
 
 ## 4 · Overview (home)

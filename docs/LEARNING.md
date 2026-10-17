@@ -2870,6 +2870,28 @@ to `@latest`.
   redaction test is that shape for a different rule, written for exactly this
   reason.
 
+- **A zero `http.Server.IdleTimeout` silently means `ReadTimeout` —
+  request limits, 2026-10-17.** Found while pairing nginx's upstream
+  keepalive with the API, before it shipped. `main.go` set `ReadTimeout` 15 s
+  and no `IdleTimeout`; `net/http` then closes idle connections after 15 s.
+  nginx keeps an upstream connection for 60 s by default. Turning keepalive on
+  without setting `IdleTimeout` would have had nginx reuse connections Go had
+  already closed, failing a request now and then, at random. Nothing in the
+  Go code mentions the 15 s; you have to know the fallback. What would
+  have caught it sooner: **when two processes must agree on a number, set it
+  explicitly on both sides and test the pair**. `cmd/api/server_test.go` now
+  reads `web/nginx.conf` and fails if nginx's idle time is not below Go's.
+
+- **A setting on the pool hides the same setting on the role — request
+  limits, 2026-10-17.** `postgres.Open` began setting `statement_timeout`
+  on every connection it makes. `TestReadOnlyRoleCanReadAndCannotWrite`
+  checked the read-only *role's* own 3 s default through a connection made
+  by `Open`, and started reading `5s`: a connection-level setting overrides
+  the role's, silently. The role was fine; the test could no longer see it.
+  It now checks through a bare `pgx.Connect`. What would have caught it
+  sooner: **a test that checks a default must look through something that
+  sets nothing of its own**.
+
 **A config value that nothing reads is a lie. A guard that names one thing while
 protecting another is worse. And a value that two places have to agree on, with
 nothing making them agree, is a lie waiting for someone to change one of

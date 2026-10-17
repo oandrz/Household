@@ -10,18 +10,26 @@ in three months or someone new.
 
 ## 1. Where things stand
 
-> **Per-household limits on stored data are built, on branch
-> `feat/household-limits`, since 2026-10-16. Not yet merged or deployed.**
+> **Per-household request limits and time limits are built, on branch
+> `feat/request-limits`, since 2026-10-17. Not yet merged or deployed.** Each
+> household has a request allowance (60, refilling at 10 a second, at most 4
+> running at once), answered `429` with `Retry-After` beyond it; every
+> request has a 15-second deadline (`503 TIMEOUT`) and every query on the
+> request pool 5 seconds; nginx reuses its connections to the API, paired
+> with Go's idle timeout; the daily prune has its own pool; `hearthctl
+> import` paces itself ([ADR 14](adr/0014-per-household-request-limits-and-time-limits.md)).
+> No migration and nothing to configure: a normal `./deploy.sh <sha>`.
+>
+> **Per-household limits on stored data are merged (#81, `5abeb78`) and,
+> per the owner, deployed on 2026-10-17.**
 > What one household can store is capped (transactions per month and in
 > total, named things, records, people, active tokens), text has length
 > limits held by the domain and a database `CHECK`, and budgets can be saved
 > only from January 2000 to two years ahead
 > ([ADR 13](adr/0013-per-household-limits-on-stored-data.md)). The daily prune
 > now also removes spent API tokens and sessions, keeping each person's most
-> recently used session. Before deploying, re-check that no stored name or
-> description is over its new limit, and install the disk alarm
-> (`deploy/disk-check.sh`, `deploy/PROVISION.md` §12). Per-household request
-> rate limits are the next piece of work.
+> recently used session. The disk alarm (`deploy/disk-check.sh`,
+> `deploy/PROVISION.md` §12) is installed by hand on the box; check it is.
 >
 > **One calendar per household is built, on branch `fix/qa-2026-10-01`, since
 > 2026-10-01. Not pushed, not merged, not deployed.** It fixes QA ISSUE-002 to
