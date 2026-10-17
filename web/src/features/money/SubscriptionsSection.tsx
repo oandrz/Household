@@ -66,6 +66,11 @@ export function SubscriptionsSection({
       <h3 data-testid="subscriptions-heading" className="text-[13px] font-semibold text-ink">
         {BILL_COPY.subscriptionsHeading(monthlyLabel)}
       </h3>
+      {/* Under the heading, where the recurring total above keeps its yearly
+          figure, so both halves of the card read the same way. */}
+      <div data-testid="subscriptions-annual" className="mt-0.5 text-[12px] text-muted">
+        {BILL_COPY.subscriptionsAnnualLine(annualLabel)}
+      </div>
 
       <div className="mt-3 flex flex-col gap-3">
         {subscriptions.map((bill) => (
@@ -85,9 +90,6 @@ export function SubscriptionsSection({
         ))}
       </div>
 
-      <div data-testid="subscriptions-annual" className="mt-3.5 border-t border-hairline pt-3 text-[12px] text-muted">
-        {BILL_COPY.subscriptionsAnnualLine(annualLabel)}
-      </div>
       {/* A row shows what is actually charged (a quarterly bill's S$120)
           while the totals are monthly equivalents; without this sentence the
           two kinds of figure cannot be told apart. No "last reviewed" date:
