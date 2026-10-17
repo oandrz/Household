@@ -247,8 +247,8 @@ type TransactionRepository interface {
 	// MonthTotals returns every transaction in one calendar month; the
 	// service converts and sums them.
 	//
-	// Rows, not a SQL SUM, deliberately: the design's busiest example is
-	// 247 rows for one household-month, and a SUM would only be correct if
+	// Rows, not a SQL SUM, deliberately: a household-month holds at most
+	// domain.MaxTransactionsPerMonth rows, and a SUM would only be correct if
 	// every transaction were in the household's primary currency -- two
 	// code paths that could disagree is the trade this refuses. The FX
 	// provider lives in this layer anyway, so the conversion can't move

@@ -95,6 +95,7 @@ func run() error {
 	// that needs it: one implementation per port, backed by this one pool.
 	users := postgres.NewUserRepo(db)
 	households := postgres.NewHouseholdRepo(db)
+	usage := postgres.NewHouseholdUsageRepo(db)
 	memberships := postgres.NewMembershipRepo(db)
 	sessions := postgres.NewSessionRepo(db)
 	magicLinks := postgres.NewMagicLinkRepo(db)
@@ -266,6 +267,7 @@ func run() error {
 		Accounts:   accountRepo,
 		Households: households,
 		FX:         fxProvider,
+		Usage:      usage,
 	})
 	goalSvc := usecase.NewGoalService(usecase.GoalDeps{
 		Goals:      goalRepo,

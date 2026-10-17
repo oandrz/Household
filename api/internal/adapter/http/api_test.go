@@ -234,6 +234,7 @@ func newTestEnvWith(t *testing.T, clk usecase.Clock, outbox usecase.MailOutbox) 
 
 	users := postgres.NewUserRepo(db)
 	households := postgres.NewHouseholdRepo(db)
+	usage := postgres.NewHouseholdUsageRepo(db)
 	memberships := postgres.NewMembershipRepo(db)
 	sessions := postgres.NewSessionRepo(db)
 	magicLinks := postgres.NewMagicLinkRepo(db)
@@ -326,6 +327,7 @@ func newTestEnvWith(t *testing.T, clk usecase.Clock, outbox usecase.MailOutbox) 
 		Accounts:     accountRepo,
 		Households:   households,
 		FX:           fxProvider,
+		Usage:        usage,
 	})
 	goalRepo := postgres.NewGoalRepo(db)
 	holdingSvc := usecase.NewHoldingService(usecase.HoldingDeps{

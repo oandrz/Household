@@ -39,6 +39,22 @@ func newTransactionFixture(t *testing.T, extraAccounts map[string]fakeAccountRec
 // chosen by the test, the same shape as bill_test.go's newBillServiceWithFX.
 func newTransactionFixtureWithFX(t *testing.T, extraAccounts map[string]fakeAccountRecord, fx usecase.FXRateProvider) (*usecase.TransactionService, *fakeTransactionRepo) {
 	t.Helper()
+	return buildTransactionFixture(t, extraAccounts, fx, newUsageDouble())
+}
+
+// transactionFixtureWithUsage is transactionFixture plus a handle on the
+// usage double, for a test that puts the household at a cap.
+func transactionFixtureWithUsage(t *testing.T) (*usecase.TransactionService, *fakeTransactionRepo, *usageDouble) {
+	t.Helper()
+	usage := newUsageDouble()
+	svc, repo := buildTransactionFixture(t, nil, newFXDouble(), usage)
+	return svc, repo, usage
+}
+
+// buildTransactionFixture is the one place the fixtures above build the
+// service.
+func buildTransactionFixture(t *testing.T, extraAccounts map[string]fakeAccountRecord, fx usecase.FXRateProvider, usage usecase.HouseholdUsage) (*usecase.TransactionService, *fakeTransactionRepo) {
+	t.Helper()
 	repo := &fakeTransactionRepo{}
 	households := newHouseholdDouble()
 	households.put(domain.Household{ID: "house-1", PrimaryCurrency: "SGD"})
@@ -68,6 +84,7 @@ func newTransactionFixtureWithFX(t *testing.T, extraAccounts map[string]fakeAcco
 		},
 		Households: households,
 		FX:         fx,
+		Usage:      usage,
 	})
 	return svc, repo
 }
@@ -584,5 +601,137 @@ func TestUpdateChecksTheDateOnlyWhenTheEditChangesIt(t *testing.T) {
 		usecase.TransactionUpdate{OccurredOn: &otherFutureDate}, transactionToday)
 	if !errors.Is(err, domain.ErrDateInFuture) {
 		t.Fatalf("an edit to a different future date: err = %v, want ErrDateInFuture", err)
+	}
+}
+
+func TestCreateRefusesAtTheTotalTransactionCap(t *testing.T) {
+	svc, repo, usage := transactionFixtureWithUsage(t)
+	usage.set(domain.LimitTransactions, domain.MaxTransactions)
+
+	_, err := svc.Create(context.Background(), expenseInput(), transactionToday)
+	var limit *domain.LimitReachedError
+	if !errors.As(err, &limit) || limit.Kind != domain.LimitTransactions || limit.Limit != domain.MaxTransactions {
+		t.Fatalf("err = %v, want the total transaction cap", err)
+	}
+	if len(repo.transactions) != 0 {
+		t.Fatalf("%d row(s) written past the cap", len(repo.transactions))
+	}
+}
+
+// One below the cap is the control: without it, a service that refused
+// everything would pass the test above.
+func TestCreateAllowsTheLastRowBelowTheCap(t *testing.T) {
+	svc, _, usage := transactionFixtureWithUsage(t)
+	usage.set(domain.LimitTransactions, domain.MaxTransactions-1)
+	if _, err := svc.Create(context.Background(), expenseInput(), transactionToday); err != nil {
+		t.Fatalf("create one below the cap: %v", err)
+	}
+}
+
+func TestCreateRefusesAFullMonthAndNamesIt(t *testing.T) {
+	svc, _, usage := transactionFixtureWithUsage(t)
+	july := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
+	usage.setMonth(july, domain.MaxTransactionsPerMonth)
+
+	_, err := svc.Create(context.Background(), expenseInput(), transactionToday) // dated 18 July
+	var limit *domain.LimitReachedError
+	if !errors.As(err, &limit) || limit.Kind != domain.LimitTransactionsInMonth || !limit.Month.Equal(july) {
+		t.Fatalf("err = %v, want July's monthly cap", err)
+	}
+
+	// June is not full: the same transaction dated in June is accepted.
+	june := expenseInput()
+	june.OccurredOn = time.Date(2026, 6, 30, 0, 0, 0, 0, time.UTC)
+	if _, err := svc.Create(context.Background(), june, transactionToday); err != nil {
+		t.Fatalf("create in June: %v", err)
+	}
+}
+
+// The bot and hearthctl resend a keyed transaction when a reply is lost. If
+// the first attempt landed and took the last place, the resend must be
+// told "already saved", not "limit reached".
+func TestAKeyedRetryAtTheCapReplaysTheStoredRow(t *testing.T) {
+	svc, _, usage := transactionFixtureWithUsage(t)
+	in := expenseInput()
+	in.IdempotencyKey = "retry-at-cap"
+	first, err := svc.Create(context.Background(), in, transactionToday)
+	if err != nil {
+		t.Fatalf("first create: %v", err)
+	}
+	usage.set(domain.LimitTransactions, domain.MaxTransactions)
+
+	again, replayed, err := svc.CreateOrReplay(context.Background(), in, transactionToday)
+	if err != nil || !replayed || again.ID != first.ID {
+		t.Fatalf("retry at cap: row %q replayed=%v err=%v, want the stored row %q replayed", again.ID, replayed, err, first.ID)
+	}
+
+	// A new key at the cap is still refused.
+	in.IdempotencyKey = "a-new-key"
+	if _, _, err := svc.CreateOrReplay(context.Background(), in, transactionToday); !errors.Is(err, domain.ErrLimitReached) {
+		t.Fatalf("new key at cap: err = %v, want ErrLimitReached", err)
+	}
+}
+
+// Editing a row in a full month must keep working; only moving a row into
+// a full month is refused.
+func TestUpdateChecksTheMonthOnlyWhenTheRowMovesMonth(t *testing.T) {
+	svc, _, usage := transactionFixtureWithUsage(t)
+	created, err := svc.Create(context.Background(), expenseInput(), transactionToday) // July
+	if err != nil {
+		t.Fatal(err)
+	}
+	july := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
+	june := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
+	usage.setMonth(july, domain.MaxTransactionsPerMonth)
+	usage.setMonth(june, domain.MaxTransactionsPerMonth)
+
+	desc := "Cold Storage, corrected"
+	if _, err := svc.Update(context.Background(), "house-1", created.ID,
+		usecase.TransactionUpdate{Description: &desc}, transactionToday); err != nil {
+		t.Fatalf("editing the description in a full month: %v", err)
+	}
+	sameMonth := time.Date(2026, 7, 2, 0, 0, 0, 0, time.UTC)
+	if _, err := svc.Update(context.Background(), "house-1", created.ID,
+		usecase.TransactionUpdate{OccurredOn: &sameMonth}, transactionToday); err != nil {
+		t.Fatalf("moving within the same full month: %v", err)
+	}
+	intoJune := time.Date(2026, 6, 15, 0, 0, 0, 0, time.UTC)
+	_, err = svc.Update(context.Background(), "house-1", created.ID,
+		usecase.TransactionUpdate{OccurredOn: &intoJune}, transactionToday)
+	if !errors.Is(err, domain.ErrLimitReached) {
+		t.Fatalf("moving into full June: err = %v, want ErrLimitReached", err)
+	}
+}
+
+func TestADescriptionOverTheLimitIsRefusedOnCreateAndUpdate(t *testing.T) {
+	svc, _ := transactionFixture(t)
+	long := expenseInput()
+	long.Description = strings.Repeat("a", domain.MaxTransactionDescriptionLen+1)
+	if _, err := svc.Create(context.Background(), long, transactionToday); !errors.Is(err, domain.ErrTextTooLong) {
+		t.Fatalf("create: err = %v, want ErrTextTooLong", err)
+	}
+	created, err := svc.Create(context.Background(), expenseInput(), transactionToday)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Update(context.Background(), "house-1", created.ID,
+		usecase.TransactionUpdate{Description: &long.Description}, transactionToday); !errors.Is(err, domain.ErrTextTooLong) {
+		t.Fatalf("update: err = %v, want ErrTextTooLong", err)
+	}
+	atLimit := expenseInput()
+	atLimit.Description = strings.Repeat("中", domain.MaxTransactionDescriptionLen)
+	if _, err := svc.Create(context.Background(), atLimit, transactionToday); err != nil {
+		t.Fatalf("200 CJK characters refused: %v", err)
+	}
+}
+
+// A count error must stop the write: an unreachable count is not room.
+func TestACountErrorStopsTheWrite(t *testing.T) {
+	svc, repo := buildTransactionFixture(t, nil, newFXDouble(), failingUsage{})
+	if _, err := svc.Create(context.Background(), expenseInput(), transactionToday); err == nil {
+		t.Fatal("create succeeded although the count failed")
+	}
+	if len(repo.transactions) != 0 {
+		t.Fatal("a row was written although the count failed")
 	}
 }
