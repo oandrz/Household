@@ -21,6 +21,12 @@ export function RequireAuth() {
     if (status === 401) {
       return <Navigate to="/sign-in" replace />;
     }
+    // A background refetch that fails keeps the data it already had. That
+    // is still the right person, so the app stays: swapping it for this
+    // screen would throw away whatever the person was in the middle of.
+    if (me.data !== undefined) {
+      return <Outlet />;
+    }
     // Not "you are not signed in" -- a 500 or a network failure shouldn't be
     // presented as if it were, since bouncing to the sign-in screen would
     // suggest re-entering credentials fixes something that isn't a

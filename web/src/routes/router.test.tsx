@@ -162,6 +162,31 @@ describe("the real route tree", () => {
     expect(screen.queryByText(/Something went wrong loading your account/)).not.toBeInTheDocument();
   });
 
+  // ['me'] refetches in the background (on window focus once stale, and
+  // after settings changes). A refusal then must not swap a working app,
+  // and any form open in it, for the error screen: the data already shown
+  // is still the right person's.
+  it("keeps the app on screen when a background refresh of the account is refused", async () => {
+    stubFetchRoutes({
+      "GET /api/v1/auth/me": [
+        { status: 200, body: meFixture() },
+        {
+          status: 429,
+          body: { error: { code: "RATE_LIMITED", message: "This household is sending too many requests. Wait a few seconds and try again." } },
+        },
+      ],
+    });
+
+    const { queryClient } = renderApp("/", createAppQueryClient());
+    expect(await screen.findByRole("heading", { level: 1, name: "Overview" })).toBeInTheDocument();
+
+    await queryClient.refetchQueries({ queryKey: ["me"] });
+    await waitFor(() => expect(queryClient.getQueryState(["me"])?.status).toBe("error"));
+
+    expect(screen.getByRole("heading", { level: 1, name: "Overview" })).toBeInTheDocument();
+    expect(screen.queryByText(/sending too many requests/)).not.toBeInTheDocument();
+  });
+
   it("keeps the general message when loading the account fails for another reason", async () => {
     stubFetchRoutes({
       "GET /api/v1/auth/me": {
