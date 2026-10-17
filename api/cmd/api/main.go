@@ -80,6 +80,14 @@ func run() error {
 	}
 	defer db.Close()
 
+	// The daily prune runs on its own small pool with a longer query limit;
+	// see postgres.OpenJobs.
+	jobsDB, err := postgres.OpenJobs(ctx, cfg.DatabaseURL)
+	if err != nil {
+		return err
+	}
+	defer jobsDB.Close()
+
 	adminBrowseSvc, readonlyDB, err := openBrowse(ctx, cfg)
 	if err != nil {
 		return err
@@ -478,8 +486,14 @@ func run() error {
 	// The schedule is a bare goroutine like the poller's, cancelled by the
 	// same context, and it starts on every box: see schedule.
 	retention := usecase.NewRetentionService(usecase.RetentionDeps{
-		Signups: signups, LoginAttempts: loginAttempts, TelegramLinks: telegramLinks,
-		MagicLinks: magicLinks, Invites: invites, APITokens: apiTokens, Sessions: sessions, Clock: sysClock,
+		Signups:       postgres.NewSignupRepo(jobsDB),
+		LoginAttempts: postgres.NewLoginAttemptRepo(jobsDB),
+		TelegramLinks: postgres.NewTelegramLinkRepo(jobsDB),
+		MagicLinks:    postgres.NewMagicLinkRepo(jobsDB),
+		Invites:       postgres.NewInviteRepo(jobsDB),
+		APITokens:     postgres.NewAPITokenRepo(jobsDB),
+		Sessions:      postgres.NewSessionRepo(jobsDB),
+		Clock:         sysClock,
 	})
 	go (&schedule{now: time.Now, prune: pruneRetention(retention), digest: digest}).run(ctx)
 
