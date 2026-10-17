@@ -13,7 +13,46 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 )
+
+// importRowsPerSecond paces an import below the server's per-household
+// allowance (httpadapter.ProductionHouseholdLimits), so people using the
+// app in the same household keep at least half of it while a file goes in.
+// TestImportPacingLeavesHalfTheHouseholdAllowance ties the two.
+const importRowsPerSecond = 5
+
+// A row answered 429 is sent again after the server's Retry-After, up to
+// importRetriesPerRow times. Every row carries an idempotency key, so a
+// resend can never create a second copy.
+const (
+	importRetriesPerRow = 10
+	maxRetryAfter       = 30 * time.Second
+)
+
+// sleep is time.Sleep, replaceable in tests.
+var sleep = time.Sleep
+
+// retryAfter reads a Retry-After of whole seconds. Missing, unreadable or
+// below one second means one second; above maxRetryAfter is cut to it.
+func retryAfter(h http.Header) time.Duration {
+	secs, err := strconv.Atoi(h.Get("Retry-After"))
+	if err != nil || secs < 1 {
+		return time.Second
+	}
+	return min(time.Duration(secs)*time.Second, maxRetryAfter)
+}
+
+// postImportRow sends one row, waiting out a 429 and resending.
+func (c *client) postImportRow(ctx context.Context, raw []byte, key string) (response, error) {
+	for attempt := 0; ; attempt++ {
+		res, err := c.doWithHeaders(ctx, http.MethodPost, "/transactions", raw, map[string]string{idempotencyKeyHeader: key})
+		if err != nil || res.status != http.StatusTooManyRequests || attempt == importRetriesPerRow {
+			return res, err
+		}
+		sleep(retryAfter(res.header))
+	}
+}
 
 // transaction import: many rows from a CSV, one POST /transactions each,
 // every row carrying an idempotency key so running the file twice creates
@@ -96,9 +135,12 @@ func cmdImport(ctx context.Context, c *client, args []string, stdout, stderr io.
 
 	var summary importSummary
 	summary.Failed = []importFailure{}
-	for _, r := range rows {
+	for i, r := range rows {
+		if i > 0 {
+			sleep(time.Second / importRowsPerSecond)
+		}
 		raw, _ := json.Marshal(r.body)
-		res, err := c.doWithHeaders(ctx, http.MethodPost, "/transactions", raw, map[string]string{idempotencyKeyHeader: r.key})
+		res, err := c.postImportRow(ctx, raw, r.key)
 		if err != nil {
 			// Network failure: stop here. Every row so far is keyed, so
 			// re-running the file after the server is back is safe, and

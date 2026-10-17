@@ -5,8 +5,12 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
+	"time"
+
+	httpadapter "github.com/andreasoentoro/hearth/api/internal/adapter/http"
 )
 
 func testNames() householdNames {
@@ -149,6 +153,7 @@ func writeCSV(t *testing.T, content string) string {
 
 func TestImportRunTwiceCreatesThenReplaysAndReportsRefusedRows(t *testing.T) {
 	t.Setenv("HEARTH_CONFIG_DIR", t.TempDir())
+	recordSleeps(t)
 	_, url, keys := importServer(t)
 	st, _ := newStore(url)
 	st.save(&credentials{BaseURL: url, Session: "s", CSRF: "c"})
@@ -267,5 +272,135 @@ func TestTransactionAddKeyBecomesTheHeaderNotTheBody(t *testing.T) {
 	}
 	if strings.Contains(string(f.bodies[0]), "row-9") || strings.Contains(string(f.bodies[0]), keyFlag) {
 		t.Fatalf("the key leaked into the body: %s", f.bodies[0])
+	}
+}
+
+// recordSleeps replaces the pause between requests for one test.
+func recordSleeps(t *testing.T) *[]time.Duration {
+	t.Helper()
+	var slept []time.Duration
+	old := sleep
+	sleep = func(d time.Duration) { slept = append(slept, d) }
+	t.Cleanup(func() { sleep = old })
+	return &slept
+}
+
+// limitedImportServer is importServer, except a row whose description is
+// in refuseTimes answers 429 that many times before being accepted. sends
+// counts every POST per description.
+func limitedImportServer(t *testing.T, refuseTimes map[string]int, retryAfter string) (url string, sends map[string]int) {
+	f, url, _ := importServer(t)
+	inner := f.respond
+	sends = map[string]int{}
+	f.respond = func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "POST" && r.URL.Path == "/api/v1/transactions" {
+			var body map[string]any
+			json.Unmarshal(f.bodies[len(f.bodies)-1], &body)
+			desc, _ := body["description"].(string)
+			sends[desc]++
+			if sends[desc] <= refuseTimes[desc] {
+				if retryAfter != "" {
+					w.Header().Set("Retry-After", retryAfter)
+				}
+				http.Error(w, `{"error":{"code":"RATE_LIMITED"}}`, http.StatusTooManyRequests)
+				return
+			}
+		}
+		inner(w, r)
+	}
+	return url, sends
+}
+
+func TestImportWaitsOutA429AndResendsTheSameRow(t *testing.T) {
+	t.Setenv("HEARTH_CONFIG_DIR", t.TempDir())
+	slept := recordSleeps(t)
+	url, sends := limitedImportServer(t, map[string]int{"Coffee": 1}, "2")
+	st, _ := newStore(url)
+	st.save(&credentials{BaseURL: url, Session: "s", CSRF: "c"})
+	file := writeCSV(t, importHeader+
+		"2026-09-08,expense,Coffee,650,DBS Savings,,Groceries,Andreas,,\n"+
+		"2026-09-09,expense,Tea,300,DBS Savings,,Groceries,Andreas,,\n")
+
+	out, _, err := run_(t, url, "", "transaction", "import", file)
+	if err != nil {
+		t.Fatalf("import: %v (%s)", err, out)
+	}
+	var s importSummary
+	json.Unmarshal([]byte(out), &s)
+	if s.Created != 2 || len(s.Failed) != 0 {
+		t.Fatalf("summary %+v, want 2 created and nothing failed", s)
+	}
+	if sends["Coffee"] != 2 {
+		t.Fatalf("Coffee sent %d times, want 2 (refused once, then resent)", sends["Coffee"])
+	}
+	if !slices.Contains(*slept, 2*time.Second) {
+		t.Fatalf("slept %v, want a 2s wait from Retry-After", *slept)
+	}
+}
+
+func TestImportGivesUpOnARowAfterTenRetriesAndCarriesOn(t *testing.T) {
+	t.Setenv("HEARTH_CONFIG_DIR", t.TempDir())
+	recordSleeps(t)
+	url, sends := limitedImportServer(t, map[string]int{"Stuck": 1000}, "1")
+	st, _ := newStore(url)
+	st.save(&credentials{BaseURL: url, Session: "s", CSRF: "c"})
+	file := writeCSV(t, importHeader+
+		"2026-09-08,expense,Stuck,650,DBS Savings,,Groceries,Andreas,,\n"+
+		"2026-09-09,expense,Tea,300,DBS Savings,,Groceries,Andreas,,\n")
+
+	out, _, err := run_(t, url, "", "transaction", "import", file)
+	if exitCode(t, err) != exitAPIRefused {
+		t.Fatalf("a row refused for good must exit 3, got %v", err)
+	}
+	var s importSummary
+	json.Unmarshal([]byte(out), &s)
+	if s.Created != 1 || len(s.Failed) != 1 || s.Failed[0].Line != 2 {
+		t.Fatalf("summary %+v, want Tea created and line 2 failed", s)
+	}
+	if sends["Stuck"] != 11 {
+		t.Fatalf("Stuck sent %d times, want 11 (one try and ten retries)", sends["Stuck"])
+	}
+}
+
+func TestImportPacesItsRows(t *testing.T) {
+	t.Setenv("HEARTH_CONFIG_DIR", t.TempDir())
+	slept := recordSleeps(t)
+	_, url, _ := importServer(t)
+	st, _ := newStore(url)
+	st.save(&credentials{BaseURL: url, Session: "s", CSRF: "c"})
+	file := writeCSV(t, importHeader+
+		"2026-09-08,expense,A,1,DBS Savings,,Groceries,,,\n"+
+		"2026-09-08,expense,B,1,DBS Savings,,Groceries,,,\n"+
+		"2026-09-08,expense,C,1,DBS Savings,,Groceries,,,\n")
+	if _, _, err := run_(t, url, "", "transaction", "import", file); err != nil {
+		t.Fatal(err)
+	}
+	want := []time.Duration{200 * time.Millisecond, 200 * time.Millisecond}
+	if !slices.Equal(*slept, want) {
+		t.Fatalf("slept %v, want %v: a pause before every row but the first", *slept, want)
+	}
+}
+
+// TestImportPacingLeavesHalfTheHouseholdAllowance: the people using the app
+// in the same household keep at least half the allowance while a file goes in.
+func TestImportPacingLeavesHalfTheHouseholdAllowance(t *testing.T) {
+	if float64(importRowsPerSecond)*2 > httpadapter.ProductionHouseholdLimits.PerSecond {
+		t.Fatalf("importRowsPerSecond = %d uses more than half of the household's %v per second",
+			importRowsPerSecond, httpadapter.ProductionHouseholdLimits.PerSecond)
+	}
+}
+
+func TestRetryAfterIsReadSafely(t *testing.T) {
+	for header, want := range map[string]time.Duration{
+		"": time.Second, "abc": time.Second, "0": time.Second, "-3": time.Second,
+		"2": 2 * time.Second, "999": maxRetryAfter,
+	} {
+		h := http.Header{}
+		if header != "" {
+			h.Set("Retry-After", header)
+		}
+		if got := retryAfter(h); got != want {
+			t.Errorf("Retry-After %q gives %v, want %v", header, got, want)
+		}
 	}
 }

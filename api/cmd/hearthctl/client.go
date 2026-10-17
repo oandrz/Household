@@ -51,6 +51,8 @@ func newClient(baseURL string, st *store) *client {
 type response struct {
 	status int
 	body   []byte
+	// header is the response's headers; import reads Retry-After from it.
+	header http.Header
 }
 
 // do sends one request. path is relative to /api/v1 unless it already
@@ -115,7 +117,7 @@ func (c *client) doWithHeaders(ctx context.Context, method, path string, body []
 	}
 
 	c.absorbCookies(res.Cookies())
-	return response{status: res.StatusCode, body: raw}, nil
+	return response{status: res.StatusCode, body: raw, header: res.Header}, nil
 }
 
 func isWrite(method string) bool {
