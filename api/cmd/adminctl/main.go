@@ -90,7 +90,8 @@ func run(args []string) error {
 	}
 
 	ctx := context.Background()
-	db, err := postgres.Open(ctx, cfg.DatabaseURL)
+	// An operator tool, not the request path: the jobs pool's limits fit it.
+	db, err := postgres.OpenJobs(ctx, cfg.DatabaseURL)
 	if err != nil {
 		return err
 	}

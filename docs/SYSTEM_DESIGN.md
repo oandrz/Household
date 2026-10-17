@@ -287,7 +287,8 @@ graph TD
     Browser -->|"same origin, cookies"| Web
     Web -->|"proxy /api/v1"| API
     CLI -->|"HTTP :8080 directly, no proxy —<br/>session + CSRF cookies, or a Bearer API token"| API
-    API -->|"DATABASE_URL — the application pool,<br/>reads and writes, MaxConns 10"| PG
+    API -->|"DATABASE_URL — the application pool,<br/>reads and writes, MaxConns 10, 5 s per query"| PG
+    API -->|"DATABASE_URL again — the jobs pool,<br/>the daily prune, MaxConns 2, 60 s per query"| PG
     API -->|"DATABASE_READONLY_URL — the browse pool,<br/>SELECT-only role, MaxConns 3"| PG
     API -->|SMTP| Mail
     API -->|"HTTP GET, the operator's<br/>outbound message inspector"| Mail
@@ -401,6 +402,14 @@ before the query planner cares what the string said. **The guard is
 Postgres's, not this codebase's** — which is what makes it worth a second
 pool rather than a second code path.
 
+**A third pool, the jobs pool, uses the same `DATABASE_URL` and role.** It
+exists for limits, not for privileges: `postgres.OpenJobs` gives the daily
+retention prune (and `adminctl`) two connections of its own and a 60-second
+limit per query, while `postgres.Open`, the pool every request uses, stops
+any query at 5 seconds (`RequestStatementTimeout`). A delete over a table
+that grew during a busy month may need the longer limit, and running it on
+its own connections keeps it from taking ones a request is waiting for.
+
 Two things enforce that the second pool really is the second role.
 `postgres.OpenReadOnly` runs a privilege check in `AfterConnect` — not once
 at boot, but on **every** connection the pool ever opens, so it stays true
@@ -475,7 +484,7 @@ graph TD
 
     subgraph host["One VPS — Hetzner CX23, Falkenstein, live"]
         Caddy["caddy :443<br/>terminates TLS, renews certs"]
-        Nginx["web — nginx :80<br/>serves the SPA, proxies /api"]
+        Nginx["web — nginx :80<br/>serves the SPA, proxies /api,<br/>reuses up to 16 connections to the API"]
         API["api — Go service :8080<br/>distroless, no shell<br/>the Telegram poller and the digest tick run inside it"]
         PG[("postgres — volume, not published")]
         Mailpit["mailpit — mail stops here<br/>UI bound to 127.0.0.1:8025 only"]
@@ -491,7 +500,7 @@ graph TD
     CLI -->|"HTTPS — session cookies<br/>or a Bearer API token"| Caddy
     Caddy -->|"HTTP, one origin"| Nginx
     Nginx -->|"/api/v1, /healthz, /readyz"| API
-    API -->|"DATABASE_URL — the application pool"| PG
+    API -->|"DATABASE_URL — the application pool<br/>and the jobs pool"| PG
     API -.->|"DATABASE_READONLY_URL — the browse pool;<br/>unset on this box by the owner's decision,<br/>and the role is not created here yet"| PG
     API -->|"SMTP, plaintext, never leaves the host"| Mailpit
     API -.->|"HTTP GET, /admin/mail — needs MAILPIT_API_URL<br/>and a build at or after 3eddbe2"| Mailpit
@@ -1002,8 +1011,8 @@ never does**, because it is history.
 under `usecase.RetentionFloor` (seven days) so it can never reach inside
 `domain.LockoutPolicy.Window` and clear a live lockout, and asks every table
 with the same cutoff. One table failing does not stop the others. The API's
-schedule runs it daily with `usecase.RetentionWindow` (30 days); `adminctl
-prune` runs it by hand. `admin_audit_log` is deliberately absent. Spent API
+schedule runs it daily with `usecase.RetentionWindow` (30 days), over the
+jobs pool (§1); `adminctl prune` runs it by hand. `admin_audit_log` is deliberately absent. Spent API
 tokens and sessions (revoked or expired before the cutoff) are pruned too, so
 rotating tokens or signing in again and again does not pile up rows, with one
 exception: **each person's most recently used session in a household is
@@ -1025,7 +1034,7 @@ model.
 
 ```mermaid
 graph TD
-    Req["Request"] --> RID["RequestID · trustedProxyRealIP · Recoverer<br/>(recoverer writes the standard error envelope)"]
+    Req["Request"] --> RID["RequestID · trustedProxyRealIP · Recoverer<br/>(recoverer writes the standard error envelope)<br/>· a 15 s deadline on every request"]
     RID --> Public{"Public route?"}
 
     Public -->|"magic-link/consume,<br/>invites/{token},<br/>currencies"| Handler
@@ -1035,9 +1044,9 @@ graph TD
     PublicFeature --> Handler
     Public -->|no| Session["requireSession<br/>reads hearth_session cookie,<br/>re-reads membership, resolves this<br/>household's flags and its calendar<br/>day (Scope.Today), extends when<br/>under a day remains, then touches<br/>last_seen_at when it is null or older<br/>than an hour — best-effort, like the extend"]
     Public -->|"no, and an Authorization<br/>header is present"| Token["requireToken<br/>Bearer hearth_… only; resolves a live<br/>api_tokens row, same membership, flags<br/>and calendar-day lookups, AuthVia = token.<br/>Never falls back to the cookie;<br/>no admin grant on the context"]
-    Token --> RouteKind
-
-    Session --> RouteKind{"/admin subtree?"}
+    Token --> HL
+    Session --> HL["limitHousehold — per household:<br/>an allowance of 60 refilling at 10/s,<br/>4 running at once, 56 more waiting up to 5 s —<br/>429 RATE_LIMITED + Retry-After when refused"]
+    HL --> RouteKind{"/admin subtree?"}
     RouteKind -->|yes| AdminChain["requirePlatformAdmin → auditAdmin<br/>→ requireCSRF (mutating only)<br/>→ [requireAdminGrant, granted<br/>group only] — see the diagram below"]
     AdminChain --> Handler
     RouteKind -->|"no — family/calendar"| RequireFeature["requireFeature(family_calendar)<br/>404 unless Scope.Flags says on"]
@@ -1076,11 +1085,32 @@ graph TD
 A capability change therefore takes effect on the caller's very next request;
 session revocation is belt-and-braces rather than the enforcement mechanism.
 
-**Five tests walk the live router, and they are the only thing that notices a
+**The household limit sits right after the session check, ahead of every
+other guard** ([ADR 14](adr/0014-per-household-request-limits-and-time-limits.md)).
+After it, so a caller with no session always gets `401` and a `429` never
+tells a stranger that a route exists; ahead of the rest, because a request
+that `requireOwner` or `requireCSRF` will refuse has still cost the session
+check's reads. It is keyed by household, not address, so a family behind one
+home router shares one allowance, as do its API tokens and `hearthctl`. One
+limiter instance serves all three signed-in groups. `Deps.HouseholdLimiter`
+nil fails every signed-in request closed rather than serving unlimited.
+
+**Time limits fire innermost first:** a query stops at 5 s, a request at
+15 s (`RequestDeadline`, counted from arrival, so waiting in the household's
+line counts), Go's `WriteTimeout` at 20 s, nginx's `proxy_read_timeout` at
+30 s. So a slow request is answered by the API's own JSON, `503 TIMEOUT`,
+never by nginx's HTML page; `logAndWriteInternal` decides that from the
+request's context, so a caller who left is logged at info and an unrelated
+timeout inside a live request is still a `500`. nginx drops idle connections
+to the API after 60 s and Go after 90 s: nginx must always give up first, or
+it would send a request down a connection Go is already closing.
+`cmd/api/server_test.go` reads `web/nginx.conf` and checks both pairings.
+
+**Six tests walk the live router, and they are the only thing that notices a
 route registered in the wrong group.** Authorisation exists only at this edge,
 so a misplaced route has no second line of defence; each walk calls every
 route as a caller who should be refused and allowlists the exceptions, with
-the reason beside each. Adding a route means it either passes all five or
+the reason beside each. Adding a route means it either passes all six or
 gains an allowlist entry someone has to justify:
 
 | Test | Caller | Every route must answer |
@@ -1090,6 +1120,7 @@ gains an allowlist entry someone has to justify:
 | `TestOwnerOnlyRoutesRejectALimitedMember` | a limited member holding Money | `403 FORBIDDEN` on every write |
 | `TestReadRoutesRejectALimitedMember` | two limited members, with and without Money | `403 FORBIDDEN` on every read |
 | `TestAccessRoutesRefuseAnAPIToken` | an owner's API token | `403 SESSION_REQUIRED` on every route under `/auth` and `/household` |
+| `TestEverySignedInRouteIsHouseholdLimited` | an owner whose household has spent its allowance | `429 RATE_LIMITED` on every route behind `requireSession` |
 
 In the two member walks the `/admin` subtree is asserted too, with its own
 answer: `404`, not `403`. The read walk runs twice because the money reads
@@ -5577,6 +5608,8 @@ prefix, which is what made the duplication stop being optional.
 | Seeding | `adminctl seed`, refused unless `APP_ENV=development` **and** the database host is local — both checked before the connection opens |
 | Retention | **The API prunes itself, daily, on every box.** `RetentionService` runs on the first tick of the schedule after start-up and every 24 hours after, with a 30-day window (`usecase.RetentionWindow`), over `signups`, `login_attempts`, `telegram_link_requests`, `magic_links`, lapsed unaccepted `invites`, and spent `api_tokens` and `sessions` (keeping each person's most recently used session per household). Each run logs `retention prune signups=… login_attempts=… telegram_link_requests=… magic_links=… expired_invites=… api_tokens=… sessions=…`; a failed run logs `retention prune failed` and is tried again on the next tick. `adminctl prune --older-than=<days>` (default 30, floor 7) is the same service run by hand. `nudge_deliveries` is pruned beside each day's digest, a month back. Not pruned, by decision: `admin_audit_log` (a log the operator can edit stops meaning anything) |
 | Household limits | **What one household can store is capped** ([ADR 13](adr/0013-per-household-limits-on-stored-data.md)): transactions per month and in total, named things, records, members, invites, active tokens, text lengths and which months a budget can be saved for. The caps bound one household, not many: the disk alarm (`deploy/disk-check.sh`, a second healthchecks.io check, `deploy/PROVISION.md` §12) watches for the rest |
+| Request limits | **Each household has a request allowance** ([ADR 14](adr/0014-per-household-request-limits-and-time-limits.md)): 60 requests, refilling at 10 a second, at most 4 running at once and 56 more waiting up to 5 s, answered `429 RATE_LIMITED` with `Retry-After` beyond that. In memory, per process: a restart resets it, a second API container would double it. A household's refusals are logged at warn, at most once a minute (`household request limit reached household_id=…`). `hearthctl transaction import` sends 5 rows a second and waits out a `429` |
+| Time limits | 5 s per query on the request pool, 60 s on the jobs pool; 15 s per request (`503 TIMEOUT`, logged at warn as `request ran out of time`); `WriteTimeout` 20 s, `IdleTimeout` 90 s; nginx `proxy_read_timeout` 30 s and upstream `keepalive_timeout` 60 s. A query stopped at 5 s is still a `500` and an `unhandled error` log: on capped data it is a defect |
 | Daily digest | **Off unless configured.** `NUDGES_AT` (local `HH:MM`) **and** `NUDGES_TIMEZONE` (IANA), both or neither, refused without Telegram; a bad clock or an unknown zone refuses the boot. A goroutine beside the poller ticks every fifteen minutes; `usecase.NudgeDue` says whether local time is past the clock and which local date to claim. One message per owner-with-Money chat per household per day, never a second one, never one that says "all fine". The start-up log line `daily digest enabled at=… timezone=…` is the tell; each send logs `nudge sent household=…`. One zone for the whole install |
 | Rate limiting | Per-address (3/hour) and a global daily ceiling (1000, reset at midnight, not a rolling 24 hours), both counted from `signups` so a restart cannot reset them — and the Telegram sign-up path counts against that **same** global ceiling, deliberately, so a flood of `/start` cannot run the shared counter up and silently stop email sign-up while having no ceiling of its own. Telegram adds two more: per-**chat**, at most 3 links delivered per hour, counted from `telegram_link_requests` (so a restart cannot reset it either), and a second per-IP bucket of 20/hour on `POST /auth/telegram/start`, in its own limiter instance so it and sign-up cannot spend each other's budget (§4). Per-IP (5/hour on sign-up) is an in-memory token bucket in the HTTP layer — process-local, spoofable in development, and keyed to the *proxy* rather than the client if a proxy is put in front of nginx without `set_real_ip_from`; Caddy is in front in production, so `web/nginx.conf` carries that directive over the compose subnet and it is verified, not assumed (both in §1). The per-IP limit binds before the global one by construction (5 × 24 = 120 ≪ 1000) so one IP alone can never exhaust the global ceiling — but that arithmetic covers only the **email** sign-up path, whose every request to `/auth/sign-up` arrives over HTTP from the stranger's own IP and passes through that 5/hour bucket on the way to the shared counter. **The Telegram sign-up path has no per-IP bound at all.** The row that actually advances the shared global counter is written by `sendSignUp` (`telegram_auth.go`), reached only from the poller processing a Telegram update — the IP on that request is Telegram's own long-poll host, not the stranger's, so no per-IP bucket sees it (the 20/hour bucket on `POST /auth/telegram/start`, above, limits only how often a *browser* can mint a nonce, a step upstream of and separate from a chat sending `/start`). What actually bounds a Telegram sign-up flood is the per-**chat** limit (3/hour, above) plus the same shared global daily ceiling the email path counts against. Account linking adds a fifth bucket, per **user**: at most 3 link nonces minted an hour (`CountMintsSince`), counted from the same `telegram_link_requests` table — a table-growth control rather than a security one, since minting requires an already-authenticated session, unlike every bucket above it |
 | Health | `/healthz` ignores the database; `/readyz` pings it |
