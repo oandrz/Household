@@ -22,6 +22,8 @@
 //   - ports_admin.go: the platform-admin slice's ports: admins, feature
 //     flags, the audit log, re-authentication, the household directory,
 //     the database browse and the outbound mail inspector
+//   - ports_limits.go: the per-household limits' port: counting what a
+//     household has stored, for the caps in domain/limits.go
 //   - ports_money.go: the money slice's core ports: exchange rates,
 //     accounts, transactions, categories and budgets
 //   - ports_money_goal.go: the money slice's goal ports
