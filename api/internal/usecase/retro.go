@@ -50,10 +50,11 @@ type RetroService struct {
 	// keeps its calendar in: together, the month a retro may not start
 	// before (householdCreatedOn).
 	households HouseholdRepository
+	usage      HouseholdUsage
 }
 
-func NewRetroService(retros RetroRepository, actions RetroActionRepository, households HouseholdRepository) *RetroService {
-	return &RetroService{retros: retros, actions: actions, households: households}
+func NewRetroService(retros RetroRepository, actions RetroActionRepository, households HouseholdRepository, usage HouseholdUsage) *RetroService {
+	return &RetroService{retros: retros, actions: actions, households: households, usage: usage}
 }
 
 // householdCreatedOn is the household's calendar day on which it was
@@ -321,6 +322,12 @@ func (s *RetroService) AddAction(ctx context.Context, in RetroActionInput) (Retr
 	in.Body = strings.TrimSpace(in.Body)
 	if in.Body == "" {
 		return RetroActionRecord{}, domain.ErrRetroActionBodyRequired
+	}
+	if err := domain.CheckTextLength(domain.TextNote, in.Body, domain.MaxNoteLen); err != nil {
+		return RetroActionRecord{}, err
+	}
+	if err := refuseAtCap(ctx, s.usage, in.HouseholdID, domain.LimitRetroActions); err != nil {
+		return RetroActionRecord{}, err
 	}
 	return s.actions.Add(ctx, in)
 }

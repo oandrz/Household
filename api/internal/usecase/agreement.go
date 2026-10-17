@@ -398,6 +398,9 @@ func (s *AgreementService) Propose(ctx context.Context, householdID, proposedByM
 	if err := p.Validate(); err != nil {
 		return AgreementProposalView{}, AgreementsView{}, err
 	}
+	if err := refuseAtCap(ctx, s.usage, householdID, domain.LimitAgreementProposals); err != nil {
+		return AgreementProposalView{}, AgreementsView{}, err
+	}
 	rec, err := s.agreements.CreateProposal(ctx, AgreementProposalWrite{HouseholdID: p.HouseholdID,
 		Kind: p.Kind, SectionID: p.SectionID, TargetAgreementID: p.TargetAgreementID, Body: p.Body,
 		PreviousBody: p.PreviousBody, Note: p.Note,

@@ -27,12 +27,14 @@ ALTER TABLE holdings ADD CONSTRAINT holdings_unit_length CHECK (char_length(unit
 ALTER TABLE transactions ADD CONSTRAINT transactions_description_length CHECK (char_length(description) <= 200);
 ALTER TABLE goal_contributions ADD CONSTRAINT goal_contributions_note_length CHECK (char_length(note) <= 500);
 ALTER TABLE holding_events ADD CONSTRAINT holding_events_note_length CHECK (char_length(note) <= 500);
+ALTER TABLE holding_valuations ADD CONSTRAINT holding_valuations_note_length CHECK (char_length(note) <= 500);
 ALTER TABLE holding_income ADD CONSTRAINT holding_income_note_length CHECK (char_length(note) <= 500);
 ALTER TABLE retro_actions ADD CONSTRAINT retro_actions_body_length CHECK (char_length(body) <= 500);
 
 -- +goose Down
 ALTER TABLE retro_actions DROP CONSTRAINT retro_actions_body_length;
 ALTER TABLE holding_income DROP CONSTRAINT holding_income_note_length;
+ALTER TABLE holding_valuations DROP CONSTRAINT holding_valuations_note_length;
 ALTER TABLE holding_events DROP CONSTRAINT holding_events_note_length;
 ALTER TABLE goal_contributions DROP CONSTRAINT goal_contributions_note_length;
 ALTER TABLE transactions DROP CONSTRAINT transactions_description_length;

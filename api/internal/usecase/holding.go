@@ -190,6 +190,13 @@ func (s *HoldingService) RecordEvent(ctx context.Context, e domain.HoldingEvent,
 		return domain.HoldingEvent{}, err
 	}
 
+	if err := domain.CheckTextLength(domain.TextNote, e.Note, domain.MaxNoteLen); err != nil {
+		return domain.HoldingEvent{}, err
+	}
+	if err := refuseAtCap(ctx, s.d.Usage, e.HouseholdID, domain.LimitHoldingEvents); err != nil {
+		return domain.HoldingEvent{}, err
+	}
+
 	// The rule runs INSIDE the write's own transaction, not as a separate
 	// read before it -- two sales of 30 from a holding of 50 are legal alone,
 	// illegal together, and check-then-write lets both through.
@@ -266,10 +273,39 @@ func (s *HoldingService) RecordValuation(ctx context.Context, v domain.Valuation
 	if err := v.Validate(holding.Currency, primaryCurrency); err != nil {
 		return domain.Valuation{}, err
 	}
+	if err := domain.CheckTextLength(domain.TextNote, v.Note, domain.MaxNoteLen); err != nil {
+		return domain.Valuation{}, err
+	}
+	if err := refuseAtCap(ctx, s.d.Usage, v.HouseholdID, domain.LimitHoldingValuations); err != nil {
+		replaces, lookupErr := s.replacesAValuation(ctx, v)
+		if lookupErr != nil {
+			return domain.Valuation{}, lookupErr
+		}
+		if !replaces {
+			return domain.Valuation{}, err
+		}
+	}
 	// Refused BEFORE it is stored, under the same lock an event write takes.
 	// Don't check after writing: a stored price the reads cannot multiply
 	// fails every portfolio read, including the response to this write.
 	return s.d.Valuations.UpsertWithFold(ctx, v, holdingRule(holding, primaryCurrency))
+}
+
+// replacesAValuation reports whether v's holding already has a valuation
+// on v's day. Recording it then overwrites a row rather than adding one, so
+// it is allowed at the cap. Only called at the cap, so the list it reads is
+// rarely loaded.
+func (s *HoldingService) replacesAValuation(ctx context.Context, v domain.Valuation) (bool, error) {
+	existing, err := s.d.Valuations.ListByHolding(ctx, v.HouseholdID, v.HoldingID)
+	if err != nil {
+		return false, err
+	}
+	for _, e := range existing {
+		if sameDay(e.AsOf, v.AsOf) {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func (s *HoldingService) ListEvents(ctx context.Context, householdID, holdingID string) ([]domain.HoldingEvent, error) {
@@ -410,6 +446,12 @@ func (s *HoldingService) RecordIncome(ctx context.Context, i domain.HoldingIncom
 		return domain.HoldingIncome{}, err
 	}
 	if err := i.Validate(holding.Currency, primaryCurrency); err != nil {
+		return domain.HoldingIncome{}, err
+	}
+	if err := domain.CheckTextLength(domain.TextNote, i.Note, domain.MaxNoteLen); err != nil {
+		return domain.HoldingIncome{}, err
+	}
+	if err := refuseAtCap(ctx, s.d.Usage, i.HouseholdID, domain.LimitHoldingIncome); err != nil {
 		return domain.HoldingIncome{}, err
 	}
 	// No fold, no lock, no transaction: income enters no pool, so nothing

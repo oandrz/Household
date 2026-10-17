@@ -279,6 +279,7 @@ func run() error {
 		FX:         fxProvider,
 	})
 	budgetSvc := usecase.NewBudgetService(usecase.BudgetDeps{
+		Usage:        usage,
 		Budgets:      budgetRepo,
 		Transactions: transactionRepo,
 		Categories:   categoryRepo,
@@ -305,7 +306,7 @@ func run() error {
 		// rule as a hand-entered one (see BillDeps).
 		Categories: categoryRepo,
 	})
-	retroSvc := usecase.NewRetroService(retroRepo, retroActionRepo, households)
+	retroSvc := usecase.NewRetroService(retroRepo, retroActionRepo, households, usage)
 	// goalRepo doubles as the GoalProgressReader: Vision needs one
 	// percentage from Goals and the narrow port is what keeps it from
 	// depending on GoalRepository's whole surface.

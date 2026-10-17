@@ -181,6 +181,7 @@ func TestEveryCappedTextColumnHasACharacterLengthCheck(t *testing.T) {
 		{"transactions_description_length", domain.MaxTransactionDescriptionLen},
 		{"goal_contributions_note_length", domain.MaxNoteLen},
 		{"holding_events_note_length", domain.MaxNoteLen},
+		{"holding_valuations_note_length", domain.MaxNoteLen},
 		{"holding_income_note_length", domain.MaxNoteLen},
 		{"retro_actions_body_length", domain.MaxNoteLen},
 	}

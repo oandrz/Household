@@ -23,6 +23,7 @@ type budgetFixture struct {
 	members      *membershipDouble
 	goals        *goalDouble
 	fx           *fxDouble
+	usage        *usageDouble
 }
 
 func newBudgetFixture(t *testing.T) *budgetFixture {
@@ -50,7 +51,9 @@ func newBudgetFixture(t *testing.T) *budgetFixture {
 	goals.setBudgets(budgets)
 
 	fx := newFXDouble()
+	usage := newUsageDouble()
 	svc := usecase.NewBudgetService(usecase.BudgetDeps{
+		Usage:        usage,
 		Budgets:      budgets,
 		Transactions: transactions,
 		Categories:   categories,
@@ -63,7 +66,7 @@ func newBudgetFixture(t *testing.T) *budgetFixture {
 	return &budgetFixture{
 		svc: svc, budgets: budgets, transactions: transactions,
 		categories: categories, households: households, members: members,
-		goals: goals, fx: fx,
+		goals: goals, fx: fx, usage: usage,
 	}
 }
 

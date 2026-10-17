@@ -745,6 +745,14 @@ func (s *BillService) MarkPaid(ctx context.Context, in MarkPayment, today time.T
 		next = &n
 	}
 
+	if err := refuseAtCap(ctx, s.deps.Usage, in.HouseholdID, domain.LimitBillPayments); err != nil {
+		return BillPaymentView{}, err
+	}
+	// A payment writes a ledger row too, so it meets the transaction caps.
+	if err := refuseFullLedger(ctx, s.deps.Usage, in.HouseholdID, in.PaidOn); err != nil {
+		return BillPaymentView{}, err
+	}
+
 	pay, err := s.deps.Bills.RecordPayment(ctx, PaymentWrite{
 		HouseholdID:        in.HouseholdID,
 		BillID:             in.BillID,

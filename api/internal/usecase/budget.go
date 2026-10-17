@@ -103,6 +103,7 @@ type BudgetLineInput struct {
 // There is no Clock: Month, Save and History all take the time they need as
 // parameters, so the days-left and history-window tests stay deterministic.
 type BudgetDeps struct {
+	Usage        HouseholdUsage
 	Budgets      BudgetRepository
 	Transactions TransactionRepository
 	Categories   CategoryRepository
@@ -552,6 +553,9 @@ func (s *BudgetService) Save(ctx context.Context, householdID string, month time
 func (s *BudgetService) RollOver(ctx context.Context, householdID string, month time.Time, goalID string, today time.Time) (domain.GoalContribution, error) {
 	if !startOfMonth(month).Before(startOfMonth(today)) {
 		return domain.GoalContribution{}, domain.ErrRolloverMonthOpen
+	}
+	if err := refuseAtCap(ctx, s.d.Usage, householdID, domain.LimitGoalContributions); err != nil {
+		return domain.GoalContribution{}, err
 	}
 
 	view, err := s.Month(ctx, householdID, month, today)

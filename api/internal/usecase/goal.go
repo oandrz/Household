@@ -478,6 +478,13 @@ func (s *GoalService) AddContribution(ctx context.Context, in NewContribution, t
 		return domain.GoalContribution{}, domain.ErrGoalArchived
 	}
 
+	if err := domain.CheckTextLength(domain.TextNote, in.Note, domain.MaxNoteLen); err != nil {
+		return domain.GoalContribution{}, err
+	}
+	if err := refuseAtCap(ctx, s.d.Usage, in.HouseholdID, domain.LimitGoalContributions); err != nil {
+		return domain.GoalContribution{}, err
+	}
+
 	c := domain.GoalContribution{
 		GoalID:      in.GoalID,
 		HouseholdID: in.HouseholdID,
