@@ -353,9 +353,12 @@ func TestProductionHouseholdLimitsFitWhatTheyProtect(t *testing.T) {
 		t.Errorf("InFlight = %d: two busy households would hold %d of %d pool connections, leaving none",
 			p.InFlight, p.InFlight*2, postgres.RequestPoolMaxConns)
 	}
-	if p.InFlight+p.MaxWaiting < homeScreenParallelCalls {
-		t.Errorf("InFlight + MaxWaiting = %d, want at least %d so a page load waits instead of being refused",
-			p.InFlight+p.MaxWaiting, homeScreenParallelCalls)
+	// A browser restoring several Hearth tabs, or two people opening the app
+	// together, fires several page loads at once. Whatever the bucket lets in
+	// must wait its turn, never be refused by a full line.
+	if p.InFlight+p.MaxWaiting < p.Burst {
+		t.Errorf("InFlight + MaxWaiting = %d, want at least Burst (%d) so every request the bucket admits waits instead of being refused",
+			p.InFlight+p.MaxWaiting, p.Burst)
 	}
 }
 

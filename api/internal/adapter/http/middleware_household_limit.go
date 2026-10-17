@@ -37,16 +37,18 @@ type HouseholdLimits struct {
 //     five quick reloads in a row.
 //   - PerSecond 10: the heaviest read on capped data (the account list at
 //     100,000 transactions) costs about 20 ms of database time, so one
-//     household's steady stream of them stays near a fifth of the box.
+//     household's steady stream of them stays near a fifth of one CPU.
 //   - InFlight 4: the request pool has postgres.RequestPoolMaxConns (10)
 //     connections, and one household holds at most 4 of them.
-//   - MaxWaiting 16 and MaxWait 5 s: long enough for any page's calls to
-//     run in turn, short enough to sit well inside RequestDeadline.
+//   - MaxWaiting 56 (Burst - InFlight) and MaxWait 5 s: everything the
+//     bucket lets in waits its turn instead of being refused, so several
+//     tabs loading at once all load. A waiter holds no connection, and
+//     5 s sits well inside RequestDeadline.
 //
 // TestProductionHouseholdLimitsFitWhatTheyProtect ties these to the
 // numbers they must fit around.
 var ProductionHouseholdLimits = HouseholdLimits{
-	PerSecond: 10, Burst: 60, InFlight: 4, MaxWaiting: 16, MaxWait: 5 * time.Second,
+	PerSecond: 10, Burst: 60, InFlight: 4, MaxWaiting: 56, MaxWait: 5 * time.Second,
 }
 
 // householdSweepEvery is how often households with nothing to remember are

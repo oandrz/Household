@@ -25,7 +25,7 @@ household can *store*. This decision bounds how one household can *ask*:
 |---|---|---|
 | An allowance that refills | 60 requests, refilling at 10 a second | The home screen fires 11 calls at once, so 60 covers about five quick reloads. The heaviest read on capped data, the account list at 100,000 transactions, measured 18 ms (p50) on production's CPU and memory limits, so 10 a second keeps one household near a fifth of one CPU, a tenth of the box. |
 | Requests running at once | 4 | The request pool has 10 connections; one household holds at most 4. |
-| Waiting for a slot | at most 16 waiting, each at most 5 s | A page's calls wait their turn instead of failing; the home screen's 11 run in about three batches, which costs milliseconds. |
+| Waiting for a slot | at most 56 waiting (the allowance less the 4 running), each at most 5 s | Everything the allowance lets in waits its turn instead of failing, so a browser restoring several Hearth tabs loads them all; the home screen's 11 calls run in about three batches, which costs milliseconds. A waiter holds no database connection. |
 
 - **Where it runs:** immediately after `requireSession`, in every signed-in
   route group, keyed by household. `401` always comes first, so a stranger
