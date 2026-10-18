@@ -339,6 +339,10 @@ func run() error {
 		Hasher:   hasher,
 		Clock:    sysClock,
 	})
+	accessResetSvc := usecase.NewAccessResetService(usecase.AccessResetDeps{
+		Users: users, Reauth: adminReauthSvc, Hasher: hasher, Access: accessRevoker,
+		Sessions: sessions, Tokens: tokens, Clock: sysClock, SessionTTL: httpadapter.SessionTTL,
+	})
 	// Policy is left zero here too: the drill-in's lockout line must be
 	// computed by the identical policy sign-in applies, and both
 	// constructors fill in domain.DefaultLockoutPolicy() when handed none.
@@ -379,6 +383,7 @@ func run() error {
 		Access:           accessSvc,
 		Admin:            adminSvc,
 		AdminReauth:      adminReauthSvc,
+		AccessReset:      accessResetSvc,
 		AdminDirectory:   adminDirectorySvc,
 		AdminOutbox:      adminOutboxSvc,
 		AdminBrowse:      adminBrowseSvc,

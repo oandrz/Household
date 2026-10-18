@@ -91,6 +91,10 @@ func TestOwnerOnlyRoutesRejectALimitedMember(t *testing.T) {
 		// DELETE of another member's id is 404, never 403.
 		"POST /api/v1/auth/tokens":        true,
 		"DELETE /api/v1/auth/tokens/{id}": true,
+		// Changing your own password and signing yourself out everywhere
+		// are any member's own call; they reach only the caller's own access.
+		"POST /api/v1/auth/password":            true,
+		"POST /api/v1/auth/sign-out-everywhere": true,
 		// Connecting or disconnecting a Telegram chat is any member's own
 		// call, not owners only: a limited member's chat is already refused
 		// by the Commander's own guard and the digest's recipients query, so

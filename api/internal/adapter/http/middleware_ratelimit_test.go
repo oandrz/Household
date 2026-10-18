@@ -70,8 +70,8 @@ func TestSignUpRateLimitsCompose(t *testing.T) {
 
 // TestHashRouteLimitsLeaveTheHasherRoomForEveryoneElse is the same kind of
 // check as TestSignUpRateLimitsCompose (LEARNING pattern 11), for the
-// password hasher. Three public routes run a derivation, each behind its own
-// per-address limit, and the hasher behind them is shared by everyone: when
+// password hasher. Three public routes and the signed-in password change run
+// derivations, each behind its own per-address limit, and the hasher behind them is shared by everyone: when
 // its queue is full, every person signing in is told "busy".
 //
 // So one address, spending every allowance it has, must only be able to
@@ -89,12 +89,16 @@ func TestHashRouteLimitsLeaveTheHasherRoomForEveryoneElse(t *testing.T) {
 	for _, route := range []struct {
 		limit  int
 		window time.Duration
+		// perRequest is how many derivations one request can run: a password
+		// change checks the current password and hashes the new one.
+		perRequest int
 	}{
-		{signInAttemptsPerIPPerWindow, signInLimitWindow},
-		{signUpCompletionsPerIPPerWindow, passwordSetupLimitWindow},
-		{inviteAcceptsPerIPPerWindow, passwordSetupLimitWindow},
+		{signInAttemptsPerIPPerWindow, signInLimitWindow, 1},
+		{signUpCompletionsPerIPPerWindow, passwordSetupLimitWindow, 1},
+		{inviteAcceptsPerIPPerWindow, passwordSetupLimitWindow, 1},
+		{passwordChangesPerIPPerWindow, passwordSetupLimitWindow, 2},
 	} {
-		asked += float64(route.limit) * pessimisticDerivation.Seconds() / route.window.Seconds()
+		asked += float64(route.limit*route.perRequest) * pessimisticDerivation.Seconds() / route.window.Seconds()
 	}
 
 	share := asked / float64(crypto.MinConcurrentDerivations)

@@ -400,6 +400,12 @@ func newTestEnvWith(t *testing.T, clk usecase.Clock, outbox usecase.MailOutbox) 
 		Hasher:   hasher,
 		Clock:    clk,
 	})
+	// Wired here as well as in main.go: a dependency added to one and not
+	// the other has shipped routes that 500ed only under test.
+	accessResetSvc := usecase.NewAccessResetService(usecase.AccessResetDeps{
+		Users: users, Reauth: adminReauthSvc, Hasher: hasher, Access: accessRevoker,
+		Sessions: sessions, Tokens: tokens, Clock: clk, SessionTTL: httpadapter.SessionTTL,
+	})
 	// Policy is left zero here too: the drill-in's lockout line must be
 	// computed by the identical policy sign-in applies, and both
 	// constructors fill in domain.DefaultLockoutPolicy() when handed none.
@@ -436,6 +442,7 @@ func newTestEnvWith(t *testing.T, clk usecase.Clock, outbox usecase.MailOutbox) 
 		Access:         accessSvc,
 		Admin:          adminSvc,
 		AdminReauth:    adminReauthSvc,
+		AccessReset:    accessResetSvc,
 		AdminDirectory: adminDirectorySvc,
 		AdminOutbox:    adminOutboxSvc,
 		Users:          users,

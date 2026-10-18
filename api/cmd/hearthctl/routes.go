@@ -36,6 +36,8 @@ var routeTable = []route{
 	{"GET", "/auth/tokens", "session", "-"},
 	{"POST", "/auth/tokens", "browser session+csrf (a token cannot mint a token)", `{"name","expiresInDays"?}` + " -> the raw token, shown once"},
 	{"DELETE", "/auth/tokens/{id}", "browser session+csrf", "-"},
+	{"POST", "/auth/password", "browser session+csrf (a token cannot change a password)", `{"currentPassword","newPassword"}` + " -> me; every other session, every token and the Telegram chat are revoked"},
+	{"POST", "/auth/sign-out-everywhere", "browser session+csrf", "-"},
 	{"GET", "/currencies", "public", "-"},
 	{"GET", "/household", "session", "-"},
 	{"PATCH", "/household", "owner+csrf", `{"name"?,"familyName"?,"primaryCurrency"?,"showSecondaryCurrency"?,"secondaryCurrency"?,"fxRateMode"?,"timezone"?}`},
