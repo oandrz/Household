@@ -139,6 +139,13 @@ DELETE FROM magic_links WHERE expires_at < $1;
 SELECT count(*) FROM magic_links m JOIN users u ON u.id = m.user_id
 WHERE u.email = $1 AND m.created_at > $2;
 
+-- ConsumeUnusedMagicLinksForUser marks a person's open links as used rather
+-- than deleting them: CountRecentMagicLinks counts rows by created_at, and
+-- deleting would hand the address its hourly allowance back.
+-- name: ConsumeUnusedMagicLinksForUser :exec
+UPDATE magic_links SET consumed_at = now()
+WHERE user_id = $1 AND consumed_at IS NULL AND expires_at > now();
+
 -- name: RecordLoginAttempt :exec
 INSERT INTO login_attempts (household_id, user_id, email, succeeded, at)
 VALUES ($1, $2, $3, $4, $5);

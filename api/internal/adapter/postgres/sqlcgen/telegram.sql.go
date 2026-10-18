@@ -125,6 +125,20 @@ func (q *Queries) DeleteTelegramAccount(ctx context.Context, userID pgtype.UUID)
 	return err
 }
 
+const expireTelegramLinkRequestsForUser = `-- name: ExpireTelegramLinkRequestsForUser :exec
+UPDATE telegram_link_requests SET expires_at = now()
+WHERE user_id = $1 AND expires_at > now()
+`
+
+// ExpireTelegramLinkRequestsForUser ends every link request this person
+// started that could still be confirmed. It expires rather than deletes:
+// CountTelegramLinkMintsSince counts rows by created_at, and a browser still
+// polling the row reads "expired" instead of a 404.
+func (q *Queries) ExpireTelegramLinkRequestsForUser(ctx context.Context, userID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, expireTelegramLinkRequestsForUser, userID)
+	return err
+}
+
 const getTelegramAccountByChatID = `-- name: GetTelegramAccountByChatID :one
 SELECT user_id FROM telegram_accounts WHERE chat_id = $1
 `
