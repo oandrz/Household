@@ -168,6 +168,25 @@ check-in, and the weekly summary.
 
 Only owners can change any of these. Everyone can see them.
 
+**Your sign-in** — yours alone, for anyone in the household. Nothing here
+changes anyone else's access.
+
+- **Change password**: type your current password and a new one (at least 12
+  characters). You stay signed in on this browser. Every other device is
+  signed out, your API tokens stop working and your Telegram chat is
+  disconnected, so re-create the tokens your scripts need and connect the
+  bot again from **Access**. Three wrong current passwords lock this check
+  for a few minutes; signing in is not affected.
+- **Sign out everywhere**: signs you out on every device, this one included,
+  deletes your API tokens and disconnects your Telegram chat. It asks for no
+  password, so it works even if you have forgotten yours. Use it if a phone
+  or laptop is lost, or you think someone else has been using your account.
+
+If you signed up through Telegram and have no email address, the password
+form is not shown (your password cannot sign you in), and Sign out
+everywhere keeps your Telegram chat connected, because it is how you sign
+in.
+
 ---
 
 ## Logging spending from Telegram

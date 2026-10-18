@@ -10,6 +10,17 @@ in three months or someone new.
 
 ## 1. Where things stand
 
+> **Change password, sign out everywhere, and a full cut-off on removal and
+> reset are built, on branch `feat/cut-off-access`, since 2026-10-18. Not
+> yet merged or deployed.** Settings has a "Your sign-in" card: change your
+> password (every other device, every API token and your Telegram chat are
+> cut off; this browser stays signed in on a fresh session) and "Sign out
+> everywhere". Removing a member and `adminctl reset-password` now cut off
+> the same things. All of it is one transaction, `usecase.AccessRevoker`
+> (ADR 7, amended). An account with no email keeps its Telegram chat, its
+> only way in. No migration and nothing to configure: a normal
+> `./deploy.sh <sha>`.
+>
 > **Per-household request limits and time limits are merged (#82, `89edaf6`)
 > and, per the owner, deployed on 2026-10-18.** Each
 > household has a request allowance (60, refilling at 10 a second, at most 4
@@ -498,7 +509,7 @@ Bare `make` lists every target. The ones you will actually use:
 | `make dev` / `make down` | start and stop |
 | `make dev-local` | API and web as native processes for a debugger; infra stays in Docker |
 | `make seed` | the household above; refuses to run outside `APP_ENV=development` **and** against a non-local database |
-| `make reset-password EMAIL=…` | prompts on stdin, never a flag; also revokes that user's sessions |
+| `make reset-password EMAIL=…` | prompts on stdin, never a flag; then revokes every session, API token and unused sign-in link that user has, and disconnects their Telegram chat |
 | `make unlock-household` | clears a lockout without waiting 15 minutes |
 | `make migrate-new NAME=…` | runs through the pinned dev image, not a host binary |
 | `make lint` | arch lint, frontend typecheck, eslint, `go vet` |

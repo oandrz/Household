@@ -56,5 +56,11 @@ needs none of that.
 - `Scope.AuthVia` exists. Any switch over it refuses by default; a third
   credential kind cannot be added without every such switch being revisited.
 - Sessions and tokens are now two rows in two tables that both mean "this
-  person may call the API". `MemberService.revokeCredentials` is the one
-  place both are reset; a third credential type is added there.
+  person may call the API". **Amended 2026-10-18:** cutting a person off is
+  `usecase.AccessRevoker`, one transaction over sessions, tokens, open
+  sign-in links and the Telegram chat, used by member removal,
+  `adminctl reset-password`, change password and sign out everywhere. A new
+  credential type is added there, and `access_revoke_repo_test.go`'s sweep
+  fails until it is. A role change still revokes sessions and tokens only
+  (`MemberService.endSessionsAndTokens`): membership is re-read on every
+  request, so that is enough for the change to take effect.

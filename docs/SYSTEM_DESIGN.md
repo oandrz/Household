@@ -735,6 +735,7 @@ graph TD
         AdminSvc["AdminService — IsPlatformAdmin, flags<br/>read/write, RecordAudit; takes no actor<br/>parameter for any permission decision"]
         AdminDirectorySvc["AdminDirectoryService — Overview (metrics + search),<br/>Household (members, invites, lockout);<br/>reads across every household; no writes"]
         AdminReauth["AdminReauthService — Verify, against<br/>its own ledger, never login_attempts"]
+        AccessReset["AccessResetService — ChangePassword,<br/>SignOutEverywhere; checks the password<br/>through AdminReauthService, ends in AccessRevoker"]
         AdminOutbox["AdminOutboxService — List/Message;<br/>the only place domain.ExtractLinks runs,<br/>so HTML never reaches the HTTP layer"]
         AdminBrowse["AdminBrowseService — Tables/Rows;<br/>clamps limit and refuses a negative offset,<br/>then calls the port. Knows no SQL"]
         Seed["Seed"]
@@ -925,7 +926,8 @@ in one file.
 | `TelegramAccountRepository` | `adapter/postgres` | Twenty-first. `ByChatID` resolves a chat to the user it is bound to, or `domain.ErrNotFound` — which is the entire branch key of the Telegram sign-in flow: found means "send a sign-in link", not found means "send a sign-up link" (§5). The binding is now written from **two** call sites, and this repository's own doc comment was rewritten to say so rather than to explain why `Create` did not exist: inside `SignupRepository.Provision`'s existing transaction, when a stranger creates a household from a chat, and by `Create(ctx, TelegramBinding) error`, called by `TelegramLinkService.Confirm` when a member who already has an account connects their chat from Settings. `Create` answers `domain.ErrAlreadyExists` for either `UNIQUE` — one chat per user, one user per chat — without distinguishing which: the caller already knows which side it was asking about (a fresh sign-up binds a chat that must be free; `Confirm` binds a user who must have no chat yet) and picks the sentence, rather than the repository guessing at intent. `ByUserID` reads a user's own binding back, `TelegramBinding{UserID, ChatID, ChatUsername, LinkedAt}`, and `Delete` removes it, idempotently — removing a binding that is not there is not an error, because the caller's goal ("this user has no chat") is already true. Both directions of the binding stay `UNIQUE` in the database, and that constraint, not any check in Go, is what makes a sign-in — and now a confirm — unambiguous |
 | `PlatformAdminRepository` | `adapter/postgres` | Twenty-second. `Get`/`Grant`/`Revoke`/`List` over `platform_admins`. `Grant` has exactly one call site in the whole repository outside test code — `adminctl`'s `runGrantPlatformAdmin` — which is the property [ADR 5](adr/0005-platform-admin-authorization.md) exists to keep true; there is no `AdminService` method that calls it, on purpose, since granting is not a decision the running service ever makes |
 | `NudgeRepository` | `adapter/postgres` | The daily digest's at-most-once ledger and opt-out ([ADR 9](adr/0009-scheduled-work-runs-inside-the-api.md)). `Recipients` is the authorisation for the outbound direction: `telegram_accounts ⋈ memberships` keeping only owners with Money whose chat has not said `/nudges off` — a postgres test plants each excluded shape. `Claim` is `INSERT … ON CONFLICT DO NOTHING` on `(chat_id, household_id, day)`, insert-first like the transaction idempotency key; `Release` deletes it after a failed send; `Prune` keeps a month. `BillsReader` and `BudgetReader` are the two narrow reads `NudgeService` declares, satisfied by the bill and budget services |
-| `APITokenRepository` | `adapter/postgres` | Personal API tokens ([ADR 7](adr/0007-personal-api-tokens.md)): `Create` stores only the SHA-256 and an 8-character prefix; `ByTokenHash` is the live lookup (revoked or expired is `ErrNotFound`, like `GetLiveSession`); `Revoke` is user-scoped so a guessed id from another member is a miss; `RevokeAllForUser` sits beside `SessionRepository.RevokeAllForUser` in `MemberService.revokeCredentials`; `Touch` is throttled by the caller to one write an hour. `ListForUser` keeps expired rows in (revoked only is excluded) — see `HouseholdTokenLister` below for the query that does not |
+| `APITokenRepository` | `adapter/postgres` | Personal API tokens ([ADR 7](adr/0007-personal-api-tokens.md)): `Create` stores only the SHA-256 and an 8-character prefix; `ByTokenHash` is the live lookup (revoked or expired is `ErrNotFound`, like `GetLiveSession`); `Revoke` is user-scoped so a guessed id from another member is a miss; `RevokeAllForUser` sits beside `SessionRepository.RevokeAllForUser` in `MemberService.endSessionsAndTokens` (a role change); cutting a person off entirely is `AccessRevoker`; `Touch` is throttled by the caller to one write an hour. `ListForUser` keeps expired rows in (revoked only is excluded) — see `HouseholdTokenLister` below for the query that does not |
+| `AccessRevoker` | `adapter/postgres` (`AccessRevokeRepo`) | Cuts one person off in one transaction: every session, every API token, unused magic links (marked used), open Telegram link requests (expired), and the chat binding unless `KeepChat`. On error nothing was revoked. Called by `MemberService.Remove`, `AccessResetService` and `adminctl reset-password`; the zero `ChatRule` is refused. A new kind of credential is added here (§5 "Cutting a person off") |
 | `HouseholdUsage` | `adapter/postgres` (`HouseholdUsageRepo`, `queries/usage.sql`) | The per-household limits' one port ([ADR 13](adr/0013-per-household-limits-on-stored-data.md)). `Count(household, kind)` answers every `domain.LimitKind` in `domain.CountedLimitKinds`, one query per kind, and **returns an error for any other kind, never a zero** that would let a write through. `TransactionsInMonth` counts one calendar month. Named things count archived rows too, since they are archived rather than deleted; pending invites and active tokens exclude spent ones. Services call it through `refuseAtCap` / `refuseFullMonth` (`usecase/limits.go`) inside their create methods, so every channel meets the same cap. Count-then-write is not atomic: two saves in the same instant can leave a household a few rows over, accepted because the cap bounds disk use rather than being an exact count |
 | `HouseholdTokenLister`, `HouseholdChatLister`, `MemberLister` | `adapter/postgres` (`*APITokenRepo`, `*TelegramAccountRepo` and `*MembershipRepo` already satisfy them) | Unnumbered, like `AccountLookup`/`GoalLookup` above — three narrow ports for the household access list (partner-invite lobby milestone 3), declared beside `AccessListService` in `access_list.go` rather than in a `ports*.go` file, so the existing wide `APITokenRepository`/`TelegramAccountRepository`/`MembershipRepository` doubles never grow a method they do not use. `HouseholdTokenLister.ListForHousehold` is `ListLiveAPITokensForHousehold`: unlike `APITokenRepository.ListForUser` above, it drops expired rows as well as revoked ones, because this list answers "what can get in right now," not "what has this member ever minted" — the query's own SQL comment says so. `HouseholdChatLister.ListForHousehold` joins `telegram_accounts` through `memberships`, since the chat table itself carries no household id (§6). `MemberLister.List` is the one `MembershipRepository` method the service calls, for display names. Neither lister returns `domain.ErrNotFound` for an empty household — both answer `[]` — and a row whose user is no longer a member (left after its token or chat was created) is dropped by `AccessListService` itself, not by either query (fail closed) |
 | `IntentParser` | `adapter/openrouter` | The Telegram bot's free-text reader (stage 5b of the chat-commands spec): an open-weight model through OpenRouter's OpenAI-dialect API over plain `net/http`, up to three model ids tried in order. One implementation and one caller, which is normally the wrong shape for a port — it is one anyway because the implementation is a third-party API behind a key, and the product must behave identically without it: `nil` means "commands only". (A Claude adapter was its second implementation for one day, 2026-09-08, and was removed when the owner chose free models; git has it.) The prompt, the `log_transaction` schema, and the reader that turns the model's arguments into an `Intent` and fails closed on any kind it did not name live in `adapter/intent`, apart from the HTTP, because the reader is the last line between a model's output and the ledger and earns its own tests. The port returns text fields, never ids, so what the person confirms is what they can read. The Commander caps every call at 30 s, because the poller handles one update at a time and a stalled provider would hold every chat |
@@ -1481,6 +1483,8 @@ rows, and a link redemption writes neither.
 | GET | `/auth/tokens` | session (cookie or token) — names and prefixes only, never a secret |
 | POST | `/auth/tokens` | **cookie** session · CSRF · `requireCookieSession` — a token cannot mint a token ([ADR 7](adr/0007-personal-api-tokens.md)); the raw token is in this one response and nowhere else |
 | DELETE | `/auth/tokens/{id}` | cookie session · CSRF · `requireCookieSession` — user-scoped: another member's id is 404 |
+| POST | `/auth/password` | cookie session · CSRF · `requireCookieSession` · per-IP limit (10 per 15 min) — a wrong current password is **403** `CURRENT_PASSWORD_WRONG`, never 401 (the frontend signs out on any 401); three wrong is 423 `PASSWORD_CHECKS_LOCKED`, counted per person in the admin re-auth ledger; success is 200 with the `/auth/me` body and a **fresh** session cookie, every other way in cut off (§5 "Cutting a person off") |
+| POST | `/auth/sign-out-everywhere` | cookie session · CSRF · `requireCookieSession` — no password asked; 204 and cookies cleared only after the cut-off committed |
 | GET | `/invites/{token}` | none — the token is the credential |
 | POST | `/invites/{token}/accept` | none, plus its own per-IP bucket (20 per 15 minutes). `503 BUSY` when the password hasher's queue is full |
 | GET | `/currencies` | none — read before a session exists (sign-up's currency select) and after one (Settings) |
@@ -2467,7 +2471,7 @@ sequenceDiagram
     R-->>S: "callback(current memberships)"
     S->>S: "fill the PATCH's omitted fields from them,<br/>then domain.ValidateMembershipChange / Removal<br/>refuses with ErrLastOwner"
     R->>DB: "UPDATE or DELETE the membership, then COMMIT"
-    S->>DB: "revoke the member's sessions and API tokens"
+    S->>DB: "PATCH: end sessions and API tokens<br/>DELETE: AccessRevoker cuts every way in off"
     H-->>W: "200 (PATCH) or 204 (DELETE); 409 on ErrLastOwner"
 ```
 
@@ -2503,6 +2507,56 @@ never remove the last owner.
 fails, the change stays made and the caller gets
 `ErrSessionRevocationFailed` (a 200 with a `warning`). The comments in
 `usecase/member.go` explain why it is not rolled back.
+
+**A removal cuts the member off; a role change does not.** Removal goes
+through `AccessRevoker` (next section), Telegram chat included. A role or
+capability change only ends sessions and tokens
+(`MemberService.endSessionsAndTokens`): membership is re-read on every
+request and every Telegram message, so the change already takes effect, and
+unlinking the chat would only make the member re-link it.
+
+### Cutting a person off — one transaction, or nothing
+
+```mermaid
+flowchart LR
+    Remove["MemberService.Remove"] -->|RevokeChat| AR
+    Reset["adminctl reset-password<br/>(saves the hash first)"] -->|RevokeChat| AR
+    Change["AccessResetService.ChangePassword<br/>(saves the hash first)"] -->|chat rule| AR
+    Everywhere["AccessResetService.SignOutEverywhere"] -->|chat rule| AR
+    AR["AccessRevoker.RevokeAccess<br/>one transaction"] --> Sess["every session<br/>(admin grants ride on it)"]
+    AR --> Tok["every API token"]
+    AR --> ML["unused magic links: marked used"]
+    AR --> TLR["open Telegram link requests: expired"]
+    AR --> Chat["the chat binding, unless KeepChat"]
+```
+
+**All or nothing.** The five writes share one transaction
+(`postgres.AccessRevokeRepo`). If any fails, none happened, so the person is
+told the truth: "nothing was signed out, try again", and they are still
+signed in to do so. Calling the revokes one by one could leave them signed
+out with an attacker's chat still linked.
+
+**The chat rule.** A linked chat signs its owner in (§5, "Telegram — a
+second delivery channel"), so cutting someone off includes it, except for an account with no email address,
+where the chat is the only way back in (`TelegramLinkService.Unlink` refuses
+for the same reason). `AccessResetService` decides per account
+(`chatRuleFor`); removal and the operator reset always remove it. The zero
+`ChatRule` is refused.
+
+**Marked, not deleted.** Magic links are marked used and link requests are
+expired rather than deleted: both have per-hour limits that count rows by
+`created_at`, and deleting would hand the allowance back.
+
+**Change password keeps this browser signed in on a new session.** It saves
+the new hash, cuts everything off (the current session too), then issues a
+fresh session in the same response. A stolen cookie is a copy of the old
+session, so keeping it would keep the thief in. Wrong current passwords are
+counted per person in the admin re-auth ledger, not `login_attempts`, whose
+lock is household-wide.
+
+**What catches the next credential.** `access_revoke_repo_test.go` lists
+every table with a foreign key to `users` or a `*_hash` column and requires
+each to be classified as "ended by RevokeAccess" or "not a way in, because …".
 
 ### The household's calendar — one day, worked out at each edge
 
