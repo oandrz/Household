@@ -176,7 +176,8 @@ changes anyone else's access.
   signed out, your API tokens stop working and your Telegram chat is
   disconnected, so re-create the tokens your scripts need and connect the
   bot again from **Access**. Three wrong current passwords lock this check
-  for a few minutes; signing in is not affected.
+  until 15 minutes pass with no more wrong tries; signing in is not
+  affected (for an operator, the admin password prompt is locked too).
 - **Sign out everywhere**: signs you out on every device, this one included,
   deletes your API tokens and disconnects your Telegram chat. It asks for no
   password, so it works even if you have forgotten yours. Use it if a phone

@@ -2533,8 +2533,8 @@ flowchart LR
 **All or nothing.** The five writes share one transaction
 (`postgres.AccessRevokeRepo`). If any fails, none happened, so the person is
 told the truth: "nothing was signed out, try again", and they are still
-signed in to do so. Calling the revokes one by one could leave them signed
-out with an attacker's chat still linked.
+signed in to do so. That is why it is one port and one transaction rather
+than a revoke per table called in turn.
 
 **The chat rule.** A linked chat signs its owner in (§5, "Telegram — a
 second delivery channel"), so cutting someone off includes it, except for an account with no email address,

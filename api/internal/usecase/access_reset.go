@@ -26,6 +26,10 @@ var (
 	ErrNothingRevoked = errors.New("revoking access failed; nothing was revoked")
 )
 
+// saveAndRevokeTimeout bounds ChangePassword's save and revoke once they no
+// longer follow the caller's context: two short writes, given room to finish.
+const saveAndRevokeTimeout = 10 * time.Second
+
 type AccessResetDeps struct {
 	Users UserRepository
 	// Reauth counts wrong current passwords per person. It is the admin
@@ -78,10 +82,15 @@ func (s *AccessResetService) ChangePassword(ctx context.Context, userID, househo
 	if err != nil {
 		return SignInResult{}, err
 	}
-	if err := s.d.Users.SetPasswordHash(ctx, userID, hash); err != nil {
+	// The save and the revoke run to the end even if the caller leaves: a
+	// saved password with nothing revoked is the one state nobody would be
+	// told about.
+	both, cancel := context.WithTimeout(context.WithoutCancel(ctx), saveAndRevokeTimeout)
+	defer cancel()
+	if err := s.d.Users.SetPasswordHash(both, userID, hash); err != nil {
 		return SignInResult{}, err
 	}
-	if err := s.d.Access.RevokeAccess(ctx, userID, chatRuleFor(user)); err != nil {
+	if err := s.d.Access.RevokeAccess(both, userID, chatRuleFor(user)); err != nil {
 		return SignInResult{}, fmt.Errorf("%w: %v", ErrPasswordChangedAccessKept, err)
 	}
 	return issueSession(ctx, s.d.Sessions, s.d.Tokens, s.d.SessionTTL, userID, householdID, s.d.Clock.Now())

@@ -248,9 +248,8 @@ func requireLocalDatabase(databaseURL string) error {
 }
 
 // runResetPassword sets a member's password and then cuts off every way into
-// their account. A reset is the moment an account may be compromised, so a
-// surviving session, token or linked chat would leave the operator believing
-// it is secured while the intruder carries on.
+// their account (usecase.AccessRevoker), so a reset leaves no session, token
+// or linked chat behind.
 func runResetPassword(ctx context.Context, args []string, users usecase.UserRepository, hasher usecase.PasswordHasher,
 	access usecase.AccessRevoker) error {
 	fs := flag.NewFlagSet("reset-password", flag.ContinueOnError)

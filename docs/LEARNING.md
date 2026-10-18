@@ -748,13 +748,12 @@ gone from a build, so every hit is real), and a search of Go string literals
 found the fourth in the sign-up email. For "is this string shown to anyone",
 search what ships, not the source.
 
-**"The one place this person's access is reset" stopped being the one place
-(2026-10-18).** `MemberService.revokeCredentials` was written when a person
-had two kinds of credential, and its comment said the next kind would be
-added there. The next kind arrived elsewhere and was not added. Meanwhile
-`adminctl reset-password`, which cannot reach that unexported method, kept
-its own, narrower copy. Two places, each covering less than the full list,
-both describing themselves as complete. The fix is one port, `usecase.AccessRevoker`, used by
+**"Add the next one here" is a hope, not a guard (2026-10-18).** A method
+whose comment said it was the one place a person's access is reset, and
+that the next kind of credential belonged in it, is the shape that drifts:
+nothing fails when a new kind of credential is added somewhere else, or
+when a second entry point that cannot reach the method writes its own
+copy. The shape that holds is one port, `usecase.AccessRevoker`, used by
 every caller, plus a test that reads the schema:
 `TestEveryWayInIsCoveredByRevokeAccess` lists every table with a foreign key
 to `users` or a `*_hash` column and fails on any it does not see classified

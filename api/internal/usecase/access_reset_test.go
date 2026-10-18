@@ -216,3 +216,54 @@ func TestSignOutEverywhereThatFailsSaysNothingWasSignedOut(t *testing.T) {
 		t.Fatalf("err = %v, want ErrNothingRevoked", err)
 	}
 }
+
+// cancelOnSave cancels the request the moment the new password is saved, as
+// a closed tab or a dropped connection would.
+type cancelOnSave struct {
+	*userDouble
+	cancel context.CancelFunc
+}
+
+func (c cancelOnSave) SetPasswordHash(ctx context.Context, userID, hash string) error {
+	err := c.userDouble.SetPasswordHash(ctx, userID, hash)
+	c.cancel()
+	return err
+}
+
+// ctxCheckingRevoker fails the way a real transaction does when its context
+// is already cancelled.
+type ctxCheckingRevoker struct{ *accessRevokerDouble }
+
+func (r ctxCheckingRevoker) RevokeAccess(ctx context.Context, userID string, chat usecase.ChatRule) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return r.accessRevokerDouble.RevokeAccess(ctx, userID, chat)
+}
+
+// TestChangePasswordStillRevokesWhenTheCallerLeavesAfterTheSave: once the new
+// password is saved, the revoke must run even if the caller has gone. A saved
+// password with nothing revoked is the one state nobody would be told about.
+func TestChangePasswordStillRevokesWhenTheCallerLeavesAfterTheSave(t *testing.T) {
+	f := newResetFixture(t, &fakeHasher{})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	clock := &fixedClock{now: time.Now()}
+	svc := usecase.NewAccessResetService(usecase.AccessResetDeps{
+		Users: cancelOnSave{userDouble: f.users, cancel: cancel},
+		Reauth: usecase.NewAdminReauthService(usecase.AdminReauthDeps{
+			Users: f.users, Attempts: newFakeReauthAttemptRepo(), Hasher: &fakeHasher{}, Clock: clock,
+		}),
+		Hasher: &fakeHasher{}, Access: ctxCheckingRevoker{f.access},
+		Sessions: f.sessions, Tokens: &seqTokens{}, Clock: clock, SessionTTL: time.Hour,
+	})
+
+	_, _ = svc.ChangePassword(ctx, f.userID, "household-1", "old-password-123", "new-password-456")
+
+	if f.storedHash(t) != "hashed:new-password-456" {
+		t.Fatalf("stored hash = %q, want the new password saved", f.storedHash(t))
+	}
+	if len(f.access.calls) != 1 {
+		t.Fatalf("revoke calls = %+v, want the cut-off to run although the caller left", f.access.calls)
+	}
+}

@@ -118,11 +118,11 @@ func TestEverySignedInRouteIsHouseholdLimited(t *testing.T) {
 		t.Fatalf("chi.Walk: %v", err)
 	}
 	t.Logf("checked %d signed-in routes", checked)
-	// 102 is this walk's own measured output. Its only job is catching a
+	// 104 is this walk's own measured output. Its only job is catching a
 	// walk that silently stopped enumerating routes; when a route is added,
 	// re-run the walk and set this to exactly what it reports.
-	if checked < 102 {
-		t.Fatalf("checked %d signed-in routes, want at least 102 -- "+
+	if checked < 104 {
+		t.Fatalf("checked %d signed-in routes, want at least 104 -- "+
 			"the walk may not be enumerating routes correctly", checked)
 	}
 }

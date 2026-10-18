@@ -15,8 +15,8 @@ in three months or someone new.
 > yet merged or deployed.** Settings has a "Your sign-in" card: change your
 > password (every other device, every API token and your Telegram chat are
 > cut off; this browser stays signed in on a fresh session) and "Sign out
-> everywhere". Removing a member and `adminctl reset-password` now cut off
-> the same things. All of it is one transaction, `usecase.AccessRevoker`
+> everywhere". Removing a member and `adminctl reset-password` use the same
+> cut-off. All of it is one transaction, `usecase.AccessRevoker`
 > (ADR 7, amended). An account with no email keeps its Telegram chat, its
 > only way in. No migration and nothing to configure: a normal
 > `./deploy.sh <sha>`.
