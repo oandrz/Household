@@ -285,7 +285,10 @@ func newTestEnvWith(t *testing.T, clk usecase.Clock, outbox usecase.MailOutbox) 
 		Chats:             noopInviteChats{},
 	})
 	apiTokens := postgres.NewAPITokenRepo(db)
-	memberSvc := usecase.NewMemberService(usecase.MemberDeps{Members: memberships, Sessions: sessions, APITokens: apiTokens})
+	accessRevoker := postgres.NewAccessRevokeRepo(db)
+	memberSvc := usecase.NewMemberService(usecase.MemberDeps{
+		Members: memberships, Sessions: sessions, APITokens: apiTokens, Access: accessRevoker,
+	})
 	apiTokenSvc := usecase.NewAPITokenService(usecase.APITokenDeps{Tokens: apiTokens, Gen: tokens, Clock: clk, Usage: usage})
 	accessSvc := usecase.NewAccessListService(usecase.AccessListDeps{
 		Tokens: apiTokens, Chats: telegramAccounts, Members: memberships,

@@ -1968,6 +1968,7 @@ type fixture struct {
 	clock          *fixedClock
 	sessions       *sessionDouble
 	apiTokens      *apiTokenDouble
+	access         *accessRevokerDouble
 	mailer         *mailerDouble
 	hasher         *fakeHasher
 	attempts       *loginAttemptDouble
@@ -2071,10 +2072,12 @@ func newFixture(t *testing.T) *fixture {
 
 	apiTokens := newAPITokenDouble()
 	apiTokens.clock = clock
+	access := newAccessRevokerDouble(sessions, apiTokens)
 	memberSvc := usecase.NewMemberService(usecase.MemberDeps{
 		Members:   members,
 		Sessions:  sessions,
 		APITokens: apiTokens,
+		Access:    access,
 	})
 
 	households := newHouseholdDouble()
@@ -2105,7 +2108,7 @@ func newFixture(t *testing.T) *fixture {
 	return &fixture{
 		auth: auth, invites: invites, memberSvc: memberSvc, householdSvc: householdSvc, householdUsage: householdUsage,
 		inviteUsage: inviteUsage,
-		clock:       clock, sessions: sessions, apiTokens: apiTokens, mailer: mailer, hasher: hasher,
+		clock:       clock, sessions: sessions, apiTokens: apiTokens, access: access, mailer: mailer, hasher: hasher,
 		attempts: attempts,
 		users:    users, members: members, magicLinks: magicLinks, inviteRepo: inviteRepo,
 		chats:          chats,
@@ -5012,6 +5015,46 @@ func (d *apiTokenDouble) RevokeAllForUser(_ context.Context, userID string) erro
 		}
 	}
 	return nil
+}
+
+// accessRevokerDouble stands in for the one-transaction AccessRevoker. It
+// ends the person's sessions and tokens in the same doubles the fixture
+// already reads, so existing "were they signed out" assertions keep working,
+// and records each call so a test can check which chat rule was chosen.
+// failNext makes the next call fail having changed nothing, as the real
+// transaction would.
+type accessRevokerDouble struct {
+	sessions *sessionDouble
+	tokens   *apiTokenDouble
+	calls    []revokeCall
+	failErr  error
+}
+
+type revokeCall struct {
+	UserID string
+	Chat   usecase.ChatRule
+}
+
+func newAccessRevokerDouble(sessions *sessionDouble, tokens *apiTokenDouble) *accessRevokerDouble {
+	return &accessRevokerDouble{sessions: sessions, tokens: tokens}
+}
+
+func (d *accessRevokerDouble) failNext(err error) { d.failErr = err }
+
+func (d *accessRevokerDouble) RevokeAccess(ctx context.Context, userID string, chat usecase.ChatRule) error {
+	if d.failErr != nil {
+		err := d.failErr
+		d.failErr = nil
+		return err
+	}
+	if chat != usecase.RevokeChat && chat != usecase.KeepChat {
+		return fmt.Errorf("unknown chat rule %d", chat)
+	}
+	d.calls = append(d.calls, revokeCall{UserID: userID, Chat: chat})
+	if err := d.sessions.RevokeAllForUser(ctx, userID); err != nil {
+		return err
+	}
+	return d.tokens.RevokeAllForUser(ctx, userID)
 }
 
 func (d *apiTokenDouble) Touch(_ context.Context, tokenID string, at time.Time) error {
