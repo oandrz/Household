@@ -1,7 +1,8 @@
 // The Settings screen (design/Household Dashboard.dc.html's is_settings
 // panel). Four of the design's five cards: Members, Spaces, Currency &
 // region, and Notifications, plus Access -- API tokens and linked Telegram
-// chats, which the design never drew (milestone 3 spec,
+// chats -- and Your sign-in (change password, sign out everywhere), neither
+// of which the design drew (milestone 3 spec,
 // docs/superpowers/specs/2026-09-23-hearth-household-access-list-design.md).
 // The Telegram card that used to stand alone is now Access's Linked chats
 // group. The design's fifth card, Connected accounts (bank sync), is a
@@ -14,6 +15,7 @@ import { CurrencyPanel } from "./CurrencyPanel";
 import { MembersPanel } from "./MembersPanel";
 import { NotificationsPanel } from "./NotificationsPanel";
 import { SpacesPanel } from "./SpacesPanel";
+import { YourSignInPanel } from "./YourSignInPanel";
 
 // openPartnerInvite arrives from settingsRoute's validated ?invite=partner and
 // is passed straight through to the panel that owns the modal. Defaulted, so
@@ -44,6 +46,7 @@ export function SettingsPage({ openPartnerInvite = false }: { openPartnerInvite?
 
       <NotificationsPanel />
       <AccessPanel />
+      <YourSignInPanel />
     </PageContainer>
   );
 }
