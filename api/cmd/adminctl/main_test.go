@@ -2,11 +2,14 @@ package main
 
 import (
 	"context"
-	"github.com/andreasoentoro/hearth/api/internal/adapter/clock"
-	"github.com/andreasoentoro/hearth/api/internal/usecase"
+	"errors"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/andreasoentoro/hearth/api/internal/adapter/clock"
+	"github.com/andreasoentoro/hearth/api/internal/domain"
+	"github.com/andreasoentoro/hearth/api/internal/usecase"
 )
 
 func TestRequireLocalDatabase(t *testing.T) {
@@ -144,5 +147,58 @@ func TestUsageListsEveryAdminCommand(t *testing.T) {
 		if !strings.Contains(usage, want) {
 			t.Fatalf("usage does not mention %q", want)
 		}
+	}
+}
+
+type resetUsers struct {
+	usecase.UserRepository
+	hash string
+}
+
+func (u *resetUsers) ByEmail(_ context.Context, email string) (usecase.StoredUser, error) {
+	return usecase.StoredUser{User: domain.User{ID: "user-1", Email: email}}, nil
+}
+func (u *resetUsers) SetPasswordHash(_ context.Context, _ string, hash string) error {
+	u.hash = hash
+	return nil
+}
+
+type plainHasher struct{ usecase.PasswordHasher }
+
+func (plainHasher) Hash(_ context.Context, p string) (string, error) { return "hashed:" + p, nil }
+
+type recordingRevoker struct {
+	calls []usecase.ChatRule
+	err   error
+}
+
+func (r *recordingRevoker) RevokeAccess(_ context.Context, _ string, chat usecase.ChatRule) error {
+	r.calls = append(r.calls, chat)
+	return r.err
+}
+
+func TestResetPasswordCutsOffEverythingAndSaysWhat(t *testing.T) {
+	users, access := &resetUsers{}, &recordingRevoker{}
+	msg, err := resetPassword(context.Background(), users, plainHasher{}, access, "andreas@hearth.family", "a-new-password-1")
+	if err != nil {
+		t.Fatalf("resetPassword: %v", err)
+	}
+	if users.hash != "hashed:a-new-password-1" {
+		t.Fatalf("hash = %q", users.hash)
+	}
+	if len(access.calls) != 1 || access.calls[0] != usecase.RevokeChat {
+		t.Fatalf("revoke calls = %v, want one RevokeChat", access.calls)
+	}
+	want := "Password reset for andreas@hearth.family. Every session, API token and unused sign-in link has been revoked and their Telegram chat disconnected."
+	if msg != want {
+		t.Fatalf("message = %q, want %q", msg, want)
+	}
+}
+
+func TestResetPasswordWhoseRevokeFailsSaysNothingElseWasRevoked(t *testing.T) {
+	access := &recordingRevoker{err: errors.New("simulated")}
+	_, err := resetPassword(context.Background(), &resetUsers{}, plainHasher{}, access, "andreas@hearth.family", "a-new-password-1")
+	if err == nil || !strings.Contains(err.Error(), "password was reset, but nothing else was revoked; run reset-password again") {
+		t.Fatalf("err = %v", err)
 	}
 }

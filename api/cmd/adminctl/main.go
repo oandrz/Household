@@ -135,7 +135,7 @@ func run(args []string) error {
 			BaseURL:       cfg.AppBaseURL,
 		})
 	case "reset-password":
-		return runResetPassword(ctx, args[1:], users, hasher, sessions)
+		return runResetPassword(ctx, args[1:], users, hasher, postgres.NewAccessRevokeRepo(db))
 	case "unlock-household":
 		return runUnlockHousehold(ctx, args[1:], users, memberships, loginAttempts)
 	case "create-invite":
@@ -247,14 +247,12 @@ func requireLocalDatabase(databaseURL string) error {
 	}
 }
 
-// runResetPassword revokes every one of the user's live sessions once the
-// new password is set. A password reset is precisely the moment an account
-// may be compromised -- the reason an operator does this by hand instead of
-// the member's own "forgot password" flow -- so a surviving session would
-// defeat the point: the operator believes the account is secured while a
-// session minted before the reset keeps working exactly as before.
+// runResetPassword sets a member's password and then cuts off every way into
+// their account. A reset is the moment an account may be compromised, so a
+// surviving session, token or linked chat would leave the operator believing
+// it is secured while the intruder carries on.
 func runResetPassword(ctx context.Context, args []string, users usecase.UserRepository, hasher usecase.PasswordHasher,
-	sessions usecase.SessionRepository) error {
+	access usecase.AccessRevoker) error {
 	fs := flag.NewFlagSet("reset-password", flag.ContinueOnError)
 	// ContinueOnError already writes its own error and usage to stderr by
 	// default; discarding that here avoids printing the same failure twice,
@@ -268,8 +266,9 @@ func runResetPassword(ctx context.Context, args []string, users usecase.UserRepo
 		return errors.New("--email is required")
 	}
 
-	user, err := users.ByEmail(ctx, *email)
-	if err != nil {
+	// Looked up before the prompt, so an unknown address fails without
+	// asking for a password first.
+	if _, err := users.ByEmail(ctx, *email); err != nil {
 		return fmt.Errorf("look up %q: %w", *email, err)
 	}
 
@@ -285,20 +284,36 @@ func runResetPassword(ctx context.Context, args []string, users usecase.UserRepo
 		return errors.New("password must not be empty")
 	}
 
+	msg, err := resetPassword(ctx, users, hasher, access, *email, password)
+	if err != nil {
+		return err
+	}
+	fmt.Println(msg)
+	return nil
+}
+
+// resetPassword saves the new password before revoking, so a session minted
+// with the old one in between is caught by the revoke.
+func resetPassword(ctx context.Context, users usecase.UserRepository, hasher usecase.PasswordHasher,
+	access usecase.AccessRevoker, email, password string) (string, error) {
+	user, err := users.ByEmail(ctx, email)
+	if err != nil {
+		return "", fmt.Errorf("look up %q: %w", email, err)
+	}
 	hash, err := hasher.Hash(ctx, password)
 	if err != nil {
-		return fmt.Errorf("hash password: %w", err)
+		return "", fmt.Errorf("hash password: %w", err)
 	}
 	if err := users.SetPasswordHash(ctx, user.ID, hash); err != nil {
-		return fmt.Errorf("set password hash: %w", err)
+		return "", fmt.Errorf("set password hash: %w", err)
 	}
-
-	if err := sessions.RevokeAllForUser(ctx, user.ID); err != nil {
-		return fmt.Errorf("password was reset, but revoking existing sessions failed: %w", err)
+	// RevokeChat: the user was found by email, so the chat is never their
+	// only way in.
+	if err := access.RevokeAccess(ctx, user.ID, usecase.RevokeChat); err != nil {
+		return "", fmt.Errorf("password was reset, but nothing else was revoked; run reset-password again: %w", err)
 	}
-
-	fmt.Printf("Password reset for %s. Their existing sessions have been revoked.\n", *email)
-	return nil
+	return fmt.Sprintf("Password reset for %s. Every session, API token and unused sign-in link "+
+		"has been revoked and their Telegram chat disconnected.", email), nil
 }
 
 // readPassword prompts on stderr (so stdout stays script-friendly) and reads
