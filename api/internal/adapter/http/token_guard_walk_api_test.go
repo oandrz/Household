@@ -105,12 +105,12 @@ func TestAccessRoutesRefuseAnAPIToken(t *testing.T) {
 	}
 
 	t.Logf("checked %d cookie-only routes", checked)
-	// 15 is this walk's own re-measured count. Its only job is catching a
+	// 17 is this walk's own re-measured count. Its only job is catching a
 	// walk that stopped enumerating routes and so asserts nothing. Set it to
 	// what the walk reports whenever a cookie-only route is added; never
 	// guess.
-	if checked < 15 {
-		t.Fatalf("checked %d cookie-only routes, want at least 15 -- "+
+	if checked < 17 {
+		t.Fatalf("checked %d cookie-only routes, want at least 17 -- "+
 			"the walk may not be enumerating routes correctly", checked)
 	}
 }

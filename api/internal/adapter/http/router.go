@@ -91,6 +91,9 @@ type Deps struct {
 	Admin          *usecase.AdminService
 	AdminReauth    *usecase.AdminReauthService
 	AdminDirectory *usecase.AdminDirectoryService
+	// AccessReset serves change password and sign out everywhere. Never nil
+	// in a real deployment.
+	AccessReset *usecase.AccessResetService
 	// AdminOutbox is nil when MAILPIT_API_URL is unset, the same shape
 	// Telegram above has: the routes are registered either way so the tree
 	// does not change with configuration, and the handlers' nil check is the
@@ -177,6 +180,7 @@ func NewRouter(deps Deps) http.Handler {
 			authNow := func() time.Time { return deps.Clock.Now() }
 			signInLimit := rateLimitByIP(newIPRateLimiter(signInAttemptsPerIPPerWindow, signInLimitWindow, authNow))
 			magicLinkLimit := rateLimitByIP(newIPRateLimiter(magicLinkRequestsPerIPPerHour, time.Hour, authNow))
+			passwordChangeLimit := rateLimitByIP(newIPRateLimiter(passwordChangesPerIPPerWindow, passwordSetupLimitWindow, authNow))
 			auth.With(signInLimit).Post("/sign-in", handleSignIn(deps))
 			auth.With(magicLinkLimit).Post("/magic-link", handleRequestMagicLink(deps))
 			auth.Post("/magic-link/consume", handleConsumeMagicLink(deps))
@@ -260,15 +264,20 @@ func NewRouter(deps Deps) http.Handler {
 					m.Post("/sign-out", handleSignOut(deps))
 				})
 
-				// Minting and revoking a token needs a browser session, not
-				// a token: a leaked token must not be able to make itself
-				// permanent. requireCookieSession sits inside requireCSRF so
-				// the order reads guard-then-guard.
+				// Minting and revoking a token, changing the password and
+				// signing out everywhere need a browser session, not a token:
+				// a leaked token must not be able to make itself permanent or
+				// turn itself into a password. requireCookieSession sits
+				// inside requireCSRF so the order reads guard-then-guard.
 				g.Group(func(m chi.Router) {
 					m.Use(requireCSRF)
 					m.Use(requireCookieSession)
 					m.Post("/tokens", handleCreateAPIToken(deps))
 					m.Delete("/tokens/{id}", handleRevokeAPIToken(deps))
+					// Both end with every token revoked, so a token must not
+					// be able to call them (ADR 7).
+					m.Post("/sign-out-everywhere", handleSignOutEverywhere(deps))
+					m.With(passwordChangeLimit).Post("/password", handleChangePassword(deps))
 				})
 			})
 		})

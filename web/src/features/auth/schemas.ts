@@ -73,6 +73,7 @@ export const signInRequestSchema = z.object({
   password: z.string(),
 });
 export type SignInRequest = z.infer<typeof signInRequestSchema>;
+export type ChangePasswordRequest = { currentPassword: string; newPassword: string };
 
 export const magicLinkRequestSchema = z.object({
   email: z.string(),

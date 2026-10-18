@@ -238,7 +238,7 @@ func TestRemoveSucceedingDeletesTheMembershipAndRevokesThatUsersSessions(t *test
 func TestRemoveSucceedingButSessionRevocationFailingReturnsADistinctErrorAndKeepsTheMutation(t *testing.T) {
 	f := newFixture(t)
 	ctx := context.Background()
-	f.sessions.failNextRevokeAllForUser(errors.New("simulated revoke failure"))
+	f.access.failNext(errors.New("simulated revoke failure"))
 
 	err := f.memberSvc.Remove(ctx, f.householdID, "membership-ethan")
 	if !errors.Is(err, usecase.ErrSessionRevocationFailed) {
@@ -282,5 +282,36 @@ func TestListReturnsEveryMemberOfTheHousehold(t *testing.T) {
 	}
 	if seen["membership-ethan"].User.DisplayName != "Ethan" {
 		t.Fatalf("membership-ethan's user = %+v, want Ethan", seen["membership-ethan"].User)
+	}
+}
+
+// TestRemoveCutsOffEveryWayInIncludingTheChat: removing a member goes through
+// the full cut-off, chat included -- nothing is left for a binding to protect,
+// and a leftover binding would block a later Telegram re-invite.
+func TestRemoveCutsOffEveryWayInIncludingTheChat(t *testing.T) {
+	f := newFixture(t)
+	if err := f.memberSvc.Remove(context.Background(), f.householdID, "membership-ethan"); err != nil {
+		t.Fatalf("Remove: %v", err)
+	}
+	if len(f.access.calls) != 1 || f.access.calls[0] != (revokeCall{UserID: f.ethanID, Chat: usecase.RevokeChat}) {
+		t.Fatalf("revoke calls = %+v, want one RevokeChat for Ethan", f.access.calls)
+	}
+}
+
+// TestUpdateLeavesTheChatAlone: a role or capability change ends sessions and
+// tokens only. Membership is re-read on every request and every Telegram
+// message, so unlinking the chat would only make the member re-link it.
+func TestUpdateLeavesTheChatAlone(t *testing.T) {
+	f := newFixture(t)
+	seedLiveSession(t, f, f.ethanID)
+	if _, err := f.memberSvc.Update(context.Background(), f.householdID, "membership-ethan",
+		fullPatch(domain.RoleLimited, domain.Capabilities{domain.CapChores, domain.CapCalendar})); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	if len(f.access.calls) != 0 {
+		t.Fatalf("Update called RevokeAccess %+v, want sessions and tokens only", f.access.calls)
+	}
+	if got := f.sessions.liveForUser(f.ethanID); got != 0 {
+		t.Fatalf("live sessions for Ethan = %d, want 0", got)
 	}
 }

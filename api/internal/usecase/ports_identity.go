@@ -119,8 +119,9 @@ type APITokenRepository interface {
 	// Revoke stamps one token, scoped to its owner: another user's id, an
 	// unknown id and an already-revoked token are all domain.ErrNotFound.
 	Revoke(ctx context.Context, userID, tokenID string) error
-	// RevokeAllForUser is the "this person is gone" call MemberService
-	// makes beside SessionRepository.RevokeAllForUser.
+	// RevokeAllForUser ends every token one person holds. MemberService.Update
+	// calls it on a role change, beside SessionRepository.RevokeAllForUser;
+	// cutting a person off entirely is AccessRevoker.
 	RevokeAllForUser(ctx context.Context, userID string) error
 	// Touch records the last use. Callers throttle it; the repository
 	// does not.
@@ -130,6 +131,40 @@ type APITokenRepository interface {
 	// piling up rows.
 	Prune(ctx context.Context, before time.Time) (int64, error)
 }
+
+// AccessRevoker cuts off every way a person can act as themselves, at once:
+// every session (an admin grant lives on its session row and goes with it),
+// every API token, every unused magic link (marked used), every Telegram
+// link request still open (expired), and the Telegram chat binding unless
+// chat is KeepChat.
+//
+// All of it happens in one transaction: on error nothing was revoked, so the
+// caller can truthfully say nothing changed. It is idempotent. A new kind of
+// credential is added here; access_revoke_repo_test.go's sweep fails until
+// it is.
+//
+// The password is not touched. A caller that changes it does so first, so a
+// session minted with the old password before the change is caught here.
+type AccessRevoker interface {
+	RevokeAccess(ctx context.Context, userID string, chat ChatRule) error
+}
+
+// ChatRule says what RevokeAccess does with the person's Telegram chat. The
+// zero value is refused, so a caller that forgot to choose fails loudly
+// instead of silently picking either behaviour.
+type ChatRule int
+
+const (
+	_ ChatRule = iota
+	// RevokeChat removes the binding. A bound chat can ask the bot for a
+	// sign-in link (TelegramAuthService), so a binding left behind is a way
+	// back in.
+	RevokeChat
+	// KeepChat leaves the binding. For an account with no email address the
+	// chat is its only way to sign in; TelegramLinkService.Unlink refuses to
+	// remove it for the same reason.
+	KeepChat
+)
 
 // FailureReservation is a failed attempt written before its password is
 // checked, together with the failures that were already on record.

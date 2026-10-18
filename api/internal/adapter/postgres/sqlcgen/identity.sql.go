@@ -77,6 +77,19 @@ func (q *Queries) ConsumeMagicLink(ctx context.Context, tokenHash []byte) (pgtyp
 	return user_id, err
 }
 
+const consumeUnusedMagicLinksForUser = `-- name: ConsumeUnusedMagicLinksForUser :exec
+UPDATE magic_links SET consumed_at = now()
+WHERE user_id = $1 AND consumed_at IS NULL AND expires_at > now()
+`
+
+// ConsumeUnusedMagicLinksForUser marks a person's open links as used rather
+// than deleting them: CountRecentMagicLinks counts rows by created_at, and
+// deleting would hand the address its hourly allowance back.
+func (q *Queries) ConsumeUnusedMagicLinksForUser(ctx context.Context, userID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, consumeUnusedMagicLinksForUser, userID)
+	return err
+}
+
 const countRecentMagicLinks = `-- name: CountRecentMagicLinks :one
 SELECT count(*) FROM magic_links m JOIN users u ON u.id = m.user_id
 WHERE u.email = $1 AND m.created_at > $2

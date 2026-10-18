@@ -33,6 +33,14 @@ WHERE user_id = $1 AND created_at >= $2;
 SELECT count(*) FROM telegram_link_requests
 WHERE chat_id = $1 AND consumed_at >= $2;
 
+-- ExpireTelegramLinkRequestsForUser ends every link request this person
+-- started that could still be confirmed. It expires rather than deletes:
+-- CountTelegramLinkMintsSince counts rows by created_at, and a browser still
+-- polling the row reads "expired" instead of a 404.
+-- name: ExpireTelegramLinkRequestsForUser :exec
+UPDATE telegram_link_requests SET expires_at = now()
+WHERE user_id = $1 AND expires_at > now();
+
 -- name: GetTelegramAccountByChatID :one
 SELECT user_id FROM telegram_accounts WHERE chat_id = $1;
 

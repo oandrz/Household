@@ -175,10 +175,12 @@ func run() error {
 		Accounts:          telegramAccounts,
 	})
 	apiTokens := postgres.NewAPITokenRepo(db)
+	accessRevoker := postgres.NewAccessRevokeRepo(db)
 	memberSvc := usecase.NewMemberService(usecase.MemberDeps{
 		Members:   memberships,
 		Sessions:  sessions,
 		APITokens: apiTokens,
+		Access:    accessRevoker,
 	})
 	apiTokenSvc := usecase.NewAPITokenService(usecase.APITokenDeps{Tokens: apiTokens, Gen: tokens, Clock: sysClock, Usage: usage})
 	accessSvc := usecase.NewAccessListService(usecase.AccessListDeps{
@@ -337,6 +339,10 @@ func run() error {
 		Hasher:   hasher,
 		Clock:    sysClock,
 	})
+	accessResetSvc := usecase.NewAccessResetService(usecase.AccessResetDeps{
+		Users: users, Reauth: adminReauthSvc, Hasher: hasher, Access: accessRevoker,
+		Sessions: sessions, Tokens: tokens, Clock: sysClock, SessionTTL: httpadapter.SessionTTL,
+	})
 	// Policy is left zero here too: the drill-in's lockout line must be
 	// computed by the identical policy sign-in applies, and both
 	// constructors fill in domain.DefaultLockoutPolicy() when handed none.
@@ -377,6 +383,7 @@ func run() error {
 		Access:           accessSvc,
 		Admin:            adminSvc,
 		AdminReauth:      adminReauthSvc,
+		AccessReset:      accessResetSvc,
 		AdminDirectory:   adminDirectorySvc,
 		AdminOutbox:      adminOutboxSvc,
 		AdminBrowse:      adminBrowseSvc,

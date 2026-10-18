@@ -87,7 +87,9 @@ type TelegramBinding struct {
 }
 
 // TelegramAccountRepository is the binding between a Telegram chat and the
-// Hearth user it belongs to. Bindings are written in exactly three places:
+// Hearth user it belongs to. Bindings are removed by Delete and by
+// AccessRevoker.RevokeAccess's own transaction, and written in exactly three
+// places:
 // inside SignupRepository.Provision's transaction, when a stranger creates a
 // household from a chat; inside InviteRepo.Admit's own transaction, when an
 // owner lets a knocked Telegram invite in -- both write it themselves because

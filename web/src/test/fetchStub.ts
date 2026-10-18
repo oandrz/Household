@@ -52,7 +52,9 @@ export function stubFetchRoutes(routes: Record<string, RouteEntry>) {
       const rawBody = init?.body;
       next.capture(typeof rawBody === "string" ? JSON.parse(rawBody) : rawBody);
     }
-    return new Response(JSON.stringify(next.body), {
+    // A 204 may not carry a body: the Response constructor throws if given
+    // one, which would turn every stubbed "No Content" into a network error.
+    return new Response(next.status === 204 ? null : JSON.stringify(next.body), {
       status: next.status,
       headers: { "Content-Type": "application/json" },
     });

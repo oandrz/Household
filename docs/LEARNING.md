@@ -748,6 +748,19 @@ gone from a build, so every hit is real), and a search of Go string literals
 found the fourth in the sign-up email. For "is this string shown to anyone",
 search what ships, not the source.
 
+**"Add the next one here" is a hope, not a guard (2026-10-18).** A method
+whose comment said it was the one place a person's access is reset, and
+that the next kind of credential belonged in it, is the shape that drifts:
+nothing fails when a new kind of credential is added somewhere else, or
+when a second entry point that cannot reach the method writes its own
+copy. The shape that holds is one port, `usecase.AccessRevoker`, used by
+every caller, plus a test that reads the schema:
+`TestEveryWayInIsCoveredByRevokeAccess` lists every table with a foreign key
+to `users` or a `*_hash` column and fails on any it does not see classified
+as "ended by RevokeAccess" or "not a way in, because …". **A comment saying
+"add the next one here" is a hope; a test that enumerates the candidates is
+the class fix.**
+
 ### 2. A test that cannot fail protects nothing
 
 - A sidebar ordering test supplied spaces **already in ascending order**, so a
@@ -2573,6 +2586,12 @@ different component, after it was already written down here once.
   a function`: a crash no tree on disk could produce. Restarting `web` after
   each edit cleared it. A console error that names code you just deleted
   means a stale dev server, not a bug.
+- **The database's clock is not the test's clock (2026-10-18).** A test set a
+  row's `expires_at` with Postgres's `now()` and then checked it against Go's
+  `time.Now()`; it failed by a few milliseconds every time, because the
+  colima VM's clock runs ahead of the laptop's. Nothing was wrong with the
+  code. Compare a database timestamp with `SELECT now()` from the same
+  database, never with the test process's clock.
 
 ### 4. Guards scoped to the wrong interval
 

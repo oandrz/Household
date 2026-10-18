@@ -60,6 +60,9 @@ func decodeJSONBody(w http.ResponseWriter, r *http.Request, dest any) bool {
 //     agreement_handlers.go's maxAgreementRequestBodyBytes.
 //   - PUT /marriage/vision/{year} carries a whole vision document.
 //     Caller: vision_handlers.go's maxVisionRequestBodyBytes.
+//   - POST /auth/password carries two passwords, each up to 256 bytes,
+//     which JSON escaping can push past 1 KiB. Caller:
+//     access_reset_handlers.go's maxChangePasswordBodyBytes.
 //
 // Every other route keeps using the tighter default via decodeJSONBody
 // above.
@@ -257,6 +260,34 @@ var domainErrorResponses = []domainErrorResponse{
 		status:    http.StatusServiceUnavailable,
 		code:      "BUSY",
 		message:   "Hearth is busy. Try again in a moment.",
+	},
+	{
+		// 403, never 401: the frontend reads any 401 as "your session is
+		// gone" and signs the browser out, so a typo would sign them out.
+		sentinels: []error{usecase.ErrCurrentPasswordWrong},
+		status:    http.StatusForbidden,
+		code:      "CURRENT_PASSWORD_WRONG",
+		message:   "That isn't your current password.",
+	},
+	{
+		sentinels: []error{usecase.ErrPasswordChecksLocked},
+		status:    http.StatusLocked,
+		code:      "PASSWORD_CHECKS_LOCKED",
+		message:   "Too many wrong passwords. Wait a few minutes and try again.",
+	},
+	{
+		sentinels: []error{usecase.ErrPasswordChangedAccessKept},
+		status:    http.StatusInternalServerError,
+		code:      "ACCESS_NOT_REVOKED",
+		message:   "Your password was changed, but nothing was signed out. Use Sign out everywhere.",
+		logAs:     "password changed but revoking access failed",
+	},
+	{
+		sentinels: []error{usecase.ErrNothingRevoked},
+		status:    http.StatusInternalServerError,
+		code:      "NOT_SIGNED_OUT",
+		message:   "Nothing was signed out. Try again.",
+		logAs:     "sign out everywhere failed",
 	},
 	{
 		sentinels: []error{domain.ErrHouseholdLocked},

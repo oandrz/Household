@@ -10,10 +10,10 @@ import (
 )
 
 // ErrSessionRevocationFailed is returned by Update and Remove when the
-// membership mutation succeeded but the follow-up
-// SessionRepository.RevokeAllForUser call failed -- so a caller can tell "no
-// change happened" apart from "it happened, but a session may still be live."
-var ErrSessionRevocationFailed = errors.New("membership was updated but revoking the member's sessions failed")
+// membership change was saved but revoking the person's access afterwards
+// failed -- so a caller can tell "no change happened" apart from "it
+// happened, but an old session or token may still work".
+var ErrSessionRevocationFailed = errors.New("the change was saved but revoking the person's access failed")
 
 // MemberDeps mirrors AuthDeps/InviteDeps: every port MemberService needs,
 // gathered into one struct so NewMemberService has a single, named argument.
@@ -24,6 +24,9 @@ type MemberDeps struct {
 	// changed or who was removed must not keep working through a token
 	// their browser session no longer has.
 	APITokens APITokenRepository
+	// Access cuts a removed member off entirely: sessions, tokens, open
+	// sign-in links and their Telegram chat.
+	Access AccessRevoker
 }
 
 // MemberService lists and changes a household's members. Every rule about
@@ -98,7 +101,7 @@ func (s *MemberService) Update(ctx context.Context, householdID, membershipID st
 	// trade a small window (a stale session lives a little longer) for a
 	// worse one (a write that reports success and then silently reverts
 	// itself). sendMagicLinkAsync (auth.go) makes the same trade.
-	if err := s.revokeCredentials(ctx, written.UserID); err != nil {
+	if err := s.endSessionsAndTokens(ctx, written.UserID); err != nil {
 		slog.Error("failed to revoke credentials after a membership update",
 			"error", err, "household_id", householdID, "membership_id", membershipID)
 		return written, fmt.Errorf("%w: %v", ErrSessionRevocationFailed, err)
@@ -106,11 +109,12 @@ func (s *MemberService) Update(ctx context.Context, householdID, membershipID st
 	return written, nil
 }
 
-// revokeCredentials is the one place "this person's access is reset" is
-// spelled out: sessions and API tokens together, so a later credential
-// type is added here and nowhere else. Both are attempted even if the first
-// fails; the first error is reported.
-func (s *MemberService) revokeCredentials(ctx context.Context, userID string) error {
+// endSessionsAndTokens is what a role or capability change revokes. It is
+// not the full cut-off (AccessRevoker): membership is re-read on every
+// request and every Telegram message, so the change already takes effect;
+// this only stops an open tab or a script carrying on as before. Both are
+// attempted even if the first fails; the first error is reported.
+func (s *MemberService) endSessionsAndTokens(ctx context.Context, userID string) error {
 	sessErr := s.d.Sessions.RevokeAllForUser(ctx, userID)
 	tokErr := s.d.APITokens.RevokeAllForUser(ctx, userID)
 	if sessErr != nil {
@@ -122,9 +126,9 @@ func (s *MemberService) revokeCredentials(ctx context.Context, userID string) er
 // Remove deletes a membership, refusing to leave the household without an
 // owner (domain.ValidateMembershipRemoval), inside DeleteWithCheck's
 // transaction under the household's lock so it can't race a concurrent
-// demotion or removal of the other owner. A successful removal also revokes
-// the removed member's sessions, exactly as Update, so their open tab stops
-// working immediately rather than riding out its session TTL.
+// demotion or removal of the other owner. A successful removal also cuts the
+// member off entirely (AccessRevoker), Telegram chat included, so their open
+// tab, scripts and bot stop working immediately.
 func (s *MemberService) Remove(ctx context.Context, householdID, membershipID string) error {
 	var targetUserID string
 	err := s.d.Members.DeleteWithCheck(ctx, householdID, membershipID,
@@ -142,8 +146,8 @@ func (s *MemberService) Remove(ctx context.Context, householdID, membershipID st
 
 	// Same deliberate asymmetry as Update above: the deletion is not undone
 	// if the revocation that follows it fails -- see Update's comment for why.
-	if err := s.revokeCredentials(ctx, targetUserID); err != nil {
-		slog.Error("failed to revoke credentials after a membership removal",
+	if err := s.d.Access.RevokeAccess(ctx, targetUserID, RevokeChat); err != nil {
+		slog.Error("failed to revoke access after a membership removal",
 			"error", err, "household_id", householdID, "membership_id", membershipID)
 		return fmt.Errorf("%w: %v", ErrSessionRevocationFailed, err)
 	}

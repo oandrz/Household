@@ -100,6 +100,12 @@ const (
 	passwordSetupLimitWindow        = 15 * time.Minute
 )
 
+// passwordChangesPerIPPerWindow limits POST /auth/password. A caller who
+// knows the password could otherwise repeat a check and a hash at the
+// household allowance's 10 a second; the per-person guess counter only
+// stops wrong guesses.
+const passwordChangesPerIPPerWindow = 10
+
 // magicLinkRequestsPerIPPerHour matches the reasoning of sign-up's limit: the
 // per-address limit in AuthService is trivially bypassed by varying the
 // address, so this is what stands between the mail relay and a loop.

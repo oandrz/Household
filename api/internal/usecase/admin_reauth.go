@@ -6,12 +6,14 @@ import (
 	"github.com/andreasoentoro/hearth/api/internal/domain"
 )
 
-// AdminReauthService re-verifies the password before the admin surface
-// opens, so a stolen 30-day session cookie alone isn't the key to every
-// household's data. Failures are counted in their own ledger, never
-// login_attempts -- that table's lockout is household-scoped, and would
-// lock a whole household out of the ordinary product over mistypes on a
-// screen nobody else can see.
+// AdminReauthService re-verifies a signed-in person's password: before the
+// admin surface opens, so a stolen 30-day session cookie alone isn't the key
+// to every household's data, and before AccessResetService.ChangePassword
+// accepts a new password. Failures are counted in their own per-person
+// ledger, never login_attempts -- that table's lockout is household-scoped,
+// and would lock a whole household out of the ordinary product over
+// mistypes on a screen nobody else can see. The two callers share the
+// ledger: it is the same person's same password.
 type AdminReauthService struct{ d AdminReauthDeps }
 
 type AdminReauthDeps struct {
@@ -51,11 +53,12 @@ func (s *AdminReauthService) Verify(ctx context.Context, userID, password string
 	if s.d.Policy.Evaluate(reserved.Earlier, now).Locked {
 		// The reserved attempt stays on record and so extends the lock,
 		// matching AuthService.SignIn: an indefinitely extending lock beats
-		// one that expires on a schedule an attacker can wait out. Unlike
-		// the household lock, there's no in-product escape hatch -- the way
-		// back in is `adminctl unlock-admin --email=`, run on the box, an
-		// acceptable trade since only shell access could have made anyone
-		// an admin to begin with.
+		// one that expires on a schedule an attacker can wait out. The way
+		// out is to stop guessing for the policy window, or
+		// `adminctl unlock-admin --email=` on the box. Signing in is not
+		// affected, and Sign out everywhere needs no password, so a person
+		// whose check is held locked by someone else's guesses can still
+		// end every session that is guessing.
 		//
 		// No hash runs here, which is what bounds this route: however many
 		// requests arrive at once, only the few that find room get one.

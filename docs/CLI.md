@@ -59,6 +59,14 @@ a leaked token. Reach it with `hearthctl api GET /household/access` from a
 password login (`hearthctl routes` shows it too); a token session gets
 `403 SESSION_REQUIRED`.
 
+**`POST /auth/password`** (change password) and
+**`POST /auth/sign-out-everywhere`** need a browser session too, for the
+same reason as `token create`: each ends with every token revoked, so a
+token must not be able to call them. From a password login,
+`hearthctl api POST /auth/password --data='{"currentPassword":"…","newPassword":"…"}'`
+answers with fresh session cookies, which the CLI keeps; every other
+session, every token and the linked Telegram chat are cut off.
+
 **Do not loop on login.** Five wrong passwords lock the whole household out.
 The CLI itself never retries.
 

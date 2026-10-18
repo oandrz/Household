@@ -23,6 +23,7 @@ import {
   meQuerySchema,
   signUpPreviewSchema,
   type AcceptInviteRequest,
+  type ChangePasswordRequest,
   type Currency,
   type Me,
   type MagicLinkRequest,
@@ -94,6 +95,39 @@ export function useSignOut() {
   const navigate = useNavigate();
   return useMutation({
     mutationFn: () => apiFetch<void>("/api/v1/auth/sign-out", { method: "POST" }),
+    onSuccess: () => {
+      signedOut(queryClient);
+      navigate({ to: "/sign-in" });
+    },
+  });
+}
+
+// Changing the password revokes every session, this one included, and
+// answers with a fresh session for this tab. The person has not changed, so
+// this is not signedInAs: ['me'] is stored and everything is refetched,
+// because the token list and the Telegram link just changed under them.
+export function useChangePassword() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: ChangePasswordRequest): Promise<Me> =>
+      fetchAndParse(meQuerySchema, "/api/v1/auth/password", {
+        method: "POST",
+        body: JSON.stringify(vars),
+      }),
+    onSuccess: (me) => {
+      queryClient.setQueryData(meQueryKey, me);
+      void queryClient.invalidateQueries();
+    },
+  });
+}
+
+// Signing out everywhere ends this tab's session too, so it ends like
+// useSignOut: an empty cache and the sign-in page.
+export function useSignOutEverywhere() {
+  const queryClient = useQueryClient();
+  const navigate = useNavigate();
+  return useMutation({
+    mutationFn: () => apiFetch<void>("/api/v1/auth/sign-out-everywhere", { method: "POST" }),
     onSuccess: () => {
       signedOut(queryClient);
       navigate({ to: "/sign-in" });
