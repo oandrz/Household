@@ -258,3 +258,16 @@ func TestJudgeIsNeverGreenWithNoSpendingToMeasureCushion(t *testing.T) {
 		wantColour(t, v, domain.LightYellow, "cushion_unknown")
 	}
 }
+
+func TestAveragePerMonthRoundsOnceFromTheSum(t *testing.T) {
+	avg := domain.CashflowAverage{Months: 3, SumIn: 100, SumOut: 0}
+	if got := avg.PerMonth(avg.SumIn); got != 33 {
+		t.Errorf("100/3 = %d, want 33", got)
+	}
+	if got := avg.PerMonth(-50); got != -17 {
+		t.Errorf("-50/3 = %d, want -17 (half away from zero)", got)
+	}
+	if got := (domain.CashflowAverage{}).PerMonth(500); got != 0 {
+		t.Errorf("no months averaged = %d, want 0", got)
+	}
+}

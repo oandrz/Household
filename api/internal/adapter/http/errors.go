@@ -587,6 +587,18 @@ var domainErrorResponses = []domainErrorResponse{
 		message:   "That date is in the future.",
 	},
 	{
+		sentinels: []error{domain.ErrCashflowYearOutOfRange},
+		status:    http.StatusUnprocessableEntity,
+		code:      "CASHFLOW_YEAR_OUT_OF_RANGE",
+		message:   "Cashflow can be shown from the year of your first transaction up to this year.",
+	},
+	{
+		sentinels: []error{domain.ErrCashflowMonthOutOfRange},
+		status:    http.StatusUnprocessableEntity,
+		code:      "CASHFLOW_MONTH_OUT_OF_RANGE",
+		message:   "Only a finished month, from January 2000, can be confirmed.",
+	},
+	{
 		sentinels: []error{domain.ErrBudgetMonthOutOfRange},
 		status:    http.StatusUnprocessableEntity,
 		code:      "BUDGET_MONTH_OUT_OF_RANGE",

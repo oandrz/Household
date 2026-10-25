@@ -317,6 +317,14 @@ func run() error {
 		// rule as a hand-entered one (see BillDeps).
 		Categories: categoryRepo,
 	})
+	cashflowSvc := usecase.NewCashflowService(usecase.CashflowDeps{
+		Households:    households,
+		Rows:          postgres.NewCashflowRowRepo(db),
+		Confirmations: postgres.NewCashflowConfirmationRepo(db),
+		Accounts:      accountRepo,
+		Bills:         billRepo,
+		FX:            fxProvider,
+	})
 	retroSvc := usecase.NewRetroService(retroRepo, retroActionRepo, households, usage)
 	// goalRepo doubles as the GoalProgressReader: Vision needs one
 	// percentage from Goals and the narrow port is what keeps it from
@@ -370,6 +378,7 @@ func run() error {
 		Transactions:     transactionSvc,
 		Categories:       categorySvc,
 		Budgets:          budgetSvc,
+		Cashflow:         cashflowSvc,
 		Goals:            goalSvc,
 		Holdings:         holdingSvc,
 		Bills:            billSvc,

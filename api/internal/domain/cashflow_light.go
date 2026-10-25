@@ -17,6 +17,17 @@ type CashflowAverage struct {
 // negative, so the subtraction cannot wrap.
 func (a CashflowAverage) SumLeft() int64 { return a.SumIn - a.SumOut }
 
+// PerMonth is sum divided by the months averaged, rounded half away from zero
+// once from the sum. It is 0 when no month was averaged, so a caller shows an
+// empty average rather than dividing by zero.
+func (a CashflowAverage) PerMonth(sum int64) int64 {
+	if a.Months <= 0 {
+		return 0
+	}
+	v, _ := mulDivRoundHalfAway(sum, 1, int64(a.Months))
+	return v
+}
+
 // cashflowAverageWindow is how many finished months the average looks back.
 const cashflowAverageWindow = 3
 
