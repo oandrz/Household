@@ -76,11 +76,11 @@ export function CashflowMonthTable({ months, formatAmount }: Props) {
         <table data-testid="cashflow-table" className="w-full border-collapse text-[13px] sm:min-w-[520px]">
           <thead>
             <tr className="text-left text-xs text-muted">
-              <th scope="col" className="py-2 pr-3 font-normal">{cashflowCopy.tableMonth}</th>
+              <th scope="col" className="py-2 pr-2 font-normal sm:pr-3">{cashflowCopy.tableMonth}</th>
               <th scope="col" className="hidden py-2 pr-3 text-right font-normal sm:table-cell">{cashflowCopy.moneyIn}</th>
               <th scope="col" className="hidden py-2 pr-3 text-right font-normal sm:table-cell">{cashflowCopy.moneyOut}</th>
-              <th scope="col" className="py-2 pr-3 text-right font-normal">{cashflowCopy.leftOver}</th>
-              <th scope="col" className="py-2 pr-3 text-right font-normal">{cashflowCopy.tableKept}</th>
+              <th scope="col" className="py-2 pr-2 text-right font-normal sm:pr-3">{cashflowCopy.leftOver}</th>
+              <th scope="col" className="py-2 pr-2 text-right font-normal sm:pr-3">{cashflowCopy.tableKept}</th>
               <th scope="col" className="py-2 font-normal">{cashflowCopy.tableLight}</th>
             </tr>
           </thead>
@@ -92,7 +92,7 @@ export function CashflowMonthTable({ months, formatAmount }: Props) {
               return (
                 <Fragment key={month.month}>
                   <tr className="border-t border-hairline">
-                    <td className="py-2 pr-3">
+                    <td className="py-2 pr-2 sm:pr-3">
                       <button
                         type="button"
                         aria-expanded={open}
@@ -104,8 +104,8 @@ export function CashflowMonthTable({ months, formatAmount }: Props) {
                     </td>
                     <td className="tabular hidden py-2 pr-3 text-right text-ink sm:table-cell">{formatAmount(month.inMinor)}</td>
                     <td className="tabular hidden py-2 pr-3 text-right text-ink sm:table-cell">{formatAmount(month.outMinor)}</td>
-                    <td className="tabular py-2 pr-3 text-right text-ink">{formatAmount(month.leftMinor)}</td>
-                    <td className="tabular py-2 pr-3 text-right text-ink">{keptCell(month.keptBasisPoints)}</td>
+                    <td className="tabular py-2 pr-2 text-right text-ink sm:pr-3">{formatAmount(month.leftMinor)}</td>
+                    <td className="tabular py-2 pr-2 text-right text-ink sm:pr-3">{keptCell(month.keptBasisPoints)}</td>
                     <td className="py-2" data-tone={light.tone}>
                       <span className="inline-flex items-center gap-1.5 text-xs text-ink">
                         <span aria-hidden="true" className={`inline-block h-2.5 w-2.5 shrink-0 rounded-full ${DOT_CLASS[light.tone]}`} />
