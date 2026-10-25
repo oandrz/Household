@@ -229,9 +229,16 @@ function TransactionRow({
   );
 }
 
-export function TransactionsPage() {
+// initialMonth is only where the month filter starts (a link into the ledger).
+// The household can still change it; it is never read again after mount. A
+// string, never null: null means "the server decides the month".
+export function TransactionsPage({ initialMonth }: { initialMonth?: string } = {}) {
   const householdToday = todayIn(useHouseholdZone());
-  const [filters, setFilters] = useState<TransactionFilterValues>(EMPTY_TRANSACTION_FILTERS);
+  const [filters, setFilters] = useState<TransactionFilterValues>(
+    initialMonth === undefined
+      ? EMPTY_TRANSACTION_FILTERS
+      : { ...EMPTY_TRANSACTION_FILTERS, month: initialMonth },
+  );
   const [addOpen, setAddOpen] = useState(false);
   // Phones only: at `sm` and up the filters are always shown and this is unused.
   const [filtersOpen, setFiltersOpen] = useState(false);

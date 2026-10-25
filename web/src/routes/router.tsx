@@ -243,10 +243,26 @@ const moneyIndexRoute = createRoute({
 // `money` would reach a ledger the sidebar never offered them --
 // router.test.tsx's own "redirects a member without the money capability
 // away from /money/transactions" pins exactly this.
+function wellFormedMonth(value: unknown): string | undefined {
+  return typeof value === "string" && /^\d{4}-\d{2}$/.test(value) ? value : undefined;
+}
 const moneyTransactionsRoute = createRoute({
   getParentRoute: () => moneyGuardRoute,
   path: "transactions",
-  component: TransactionsPage,
+  // A link (the Cashflow month drill-down) opens the ledger at a month.
+  validateSearch: (search: Record<string, unknown>): { month?: string } => {
+    const month = wellFormedMonth(search.month);
+    return month === undefined ? {} : { month };
+  },
+  // Named for the rules-of-hooks reason SettingsRouteComponent gives below.
+  component: function MoneyTransactionsRouteComponent() {
+    const search = useSearch({ from: "/authenticated/shell/money/transactions" });
+    // Checked again here: TanStack merges the raw URL search over what
+    // validateSearch returns (see the invite note on the settings route), so a
+    // malformed month would otherwise still arrive. Only a well-formed
+    // YYYY-MM may start the filter; the server rejects anything else.
+    return <TransactionsPage initialMonth={wellFormedMonth(search.month)} />;
+  },
 });
 // A sibling of moneyTransactionsRoute, same reasoning: nested under
 // moneyGuardRoute (not the shell) so RequireCapability still runs --

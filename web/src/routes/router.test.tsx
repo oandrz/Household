@@ -408,6 +408,55 @@ describe("the real route tree", () => {
     expect(router.state.location.pathname).toBe("/money/transactions");
   });
 
+  // The Cashflow month drill-down links here. The month is where the filter
+  // starts, so the first list request must already name it.
+  describe("/money/transactions?month=", () => {
+    function stubLedger(listKey: string) {
+      const fetchMock = stubFetchRoutes({
+        "GET /api/v1/auth/me": { status: 200, body: meFixture() },
+        "GET /api/v1/currencies": {
+          status: 200,
+          body: { currencies: [{ code: "SGD", symbol: "S$", name: "Singapore dollar" }] },
+        },
+        "GET /api/v1/categories": { status: 200, body: { categories: [] } },
+        "GET /api/v1/household/members": { status: 200, body: [] },
+        "GET /api/v1/accounts": { status: 200, body: { accounts: [] } },
+        [listKey]: {
+          status: 200,
+          body: {
+            transactions: [],
+            nextCursor: null,
+            summary: { currency: "SGD", month: "2026-08", count: 0, spentMinor: 0, excludedNoRate: [] },
+          },
+        },
+      });
+      return fetchMock;
+    }
+
+    it("opens the ledger filtered to the month in the URL", async () => {
+      const fetchMock = stubLedger("GET /api/v1/transactions?month=2026-08");
+
+      renderApp("/money/transactions?month=2026-08");
+
+      expect(await screen.findByLabelText(/month/i)).toHaveValue("2026-08");
+      const urls = fetchMock.mock.calls.map(([input]) => String(input));
+      expect(urls).toContain("/api/v1/transactions?month=2026-08");
+    });
+
+    it("ignores a malformed month in the URL", async () => {
+      // Only the month-less list route is registered: a request that kept the
+      // bad month would hit the stub's loud "no stub registered" error.
+      const fetchMock = stubLedger("GET /api/v1/transactions");
+
+      renderApp("/money/transactions?month=2026-8");
+
+      expect(await screen.findByLabelText(/month/i)).toHaveValue("2026-08");
+      const urls = fetchMock.mock.calls.map(([input]) => String(input));
+      expect(urls).toContain("/api/v1/transactions");
+      expect(urls.some((url) => url.includes("month="))).toBe(false);
+    });
+  });
+
   // Task 11's analogue of the transactions redirect above: moneyBudgetRoute
   // has to sit under moneyGuardRoute too, for the same reason -- a member
   // without money must never reach the Budget screen.
