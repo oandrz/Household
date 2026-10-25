@@ -44,10 +44,10 @@ function pageFixture(oldestYear: number): CashflowData {
   } as CashflowData;
 }
 
-function renderPage(oldestYear: number) {
+function renderPage(oldestYear: number, overrides: Partial<CashflowData> = {}) {
   stubFetchRoutes({
     "GET /api/v1/currencies": CURRENCIES,
-    "GET /api/v1/cashflow": { status: 200, body: pageFixture(oldestYear) },
+    "GET /api/v1/cashflow": { status: 200, body: { ...pageFixture(oldestYear), ...overrides } },
   });
   renderWithRouter(<CashflowPage />);
 }
@@ -87,6 +87,18 @@ describe("year picker", () => {
     expect(screen.queryByRole("button", { name: "Next year" })).not.toBeInTheDocument();
   });
 
+  it("left-aligns the year label when there are no arrows, and centres it when there are", async () => {
+    renderPage(2026);
+    await openYearly();
+    expect(screen.getByTestId("cashflow-year")).not.toHaveClass("text-center");
+  });
+
+  it("centres the year label between the arrows", async () => {
+    renderPage(2024);
+    await openYearly();
+    expect(screen.getByTestId("cashflow-year")).toHaveClass("text-center");
+  });
+
   it("shows both arrows when there is more than one year", async () => {
     renderPage(2024);
     await openYearly();
@@ -109,5 +121,42 @@ describe("yearly cards", () => {
     await openYearly();
     const item = screen.getByText("Car insurance").closest("li") as HTMLElement;
     expect(within(item).getByText("S$2,100.00")).toHaveClass("tabular");
+  });
+});
+
+describe("page semantics", () => {
+  it("names the tab list", async () => {
+    renderPage(2024);
+    expect(await screen.findByRole("tablist", { name: "Cashflow view" })).toBeInTheDocument();
+  });
+
+  it("makes the empty-state headline a heading", async () => {
+    renderPage(2024, { hasTransactions: false });
+    expect(await screen.findByRole("heading", { name: "Nothing to show yet" })).toBeInTheDocument();
+  });
+
+  it("gives both tabs a border so selecting one does not change its size", async () => {
+    renderPage(2024);
+    const monthly = await screen.findByRole("tab", { name: "Monthly" });
+    expect(monthly).toHaveClass("border", "border-accent");
+    expect(screen.getByRole("tab", { name: "Yearly" })).toHaveClass("border");
+  });
+});
+
+describe("open month", () => {
+  it("shades the open month's row and detail together and flips its arrow", async () => {
+    renderPage(2024);
+    const button = await screen.findByRole("button", { name: "September 2026" });
+    expect(button).toHaveAttribute("aria-expanded", "false");
+    expect(button.querySelector("[aria-hidden='true']")).toHaveTextContent("▸");
+    expect(button.closest("tr")).not.toHaveClass("bg-canvas");
+
+    fireEvent.click(button);
+
+    const open = screen.getByRole("button", { name: "September 2026" });
+    expect(open.querySelector("[aria-hidden='true']")).toHaveTextContent("▾");
+    expect(open.closest("tr")).toHaveClass("bg-canvas");
+    const detailRow = screen.getByTestId("cashflow-month-detail").closest("tr");
+    expect(detailRow).toHaveClass("bg-canvas");
   });
 });

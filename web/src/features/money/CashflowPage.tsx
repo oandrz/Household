@@ -14,7 +14,7 @@ import { useCashflow } from "./useCashflow";
 
 type Tab = "monthly" | "yearly";
 
-const TAB_BASE = "min-h-11 rounded-lg px-3.5 text-[13px] font-semibold lg:min-h-0 lg:py-1.5";
+const TAB_BASE = "min-h-11 rounded-lg border px-3.5 text-[13px] font-semibold transition-colors duration-[var(--transition-state)] lg:min-h-0 lg:py-1.5";
 
 const TABS = ["monthly", "yearly"] as const;
 
@@ -135,8 +135,8 @@ export function CashflowPage({ initialView = "monthly", initialYear }: Props) {
 
       {infoOpen && (
         <section data-testid="cashflow-info" className="rounded-xl border border-hairline bg-card p-[22px]">
-          <h2 className="text-[13px] font-semibold text-ink">{cashflowCopy.infoTitle}</h2>
-          <ul className="mt-2 flex list-disc flex-col gap-1.5 pl-5 text-[13px] leading-relaxed text-ink">
+          <h2 className="mb-3 text-xs text-muted">{cashflowCopy.infoTitle}</h2>
+          <ul className="flex list-disc flex-col gap-1.5 pl-5 text-[13px] leading-relaxed text-ink">
             {cashflowCopy.infoPanel.map((line) => (
               <li key={line}>{line}</li>
             ))}
@@ -146,12 +146,12 @@ export function CashflowPage({ initialView = "monthly", initialYear }: Props) {
 
       {!data.hasTransactions ? (
         <div data-testid="cashflow-empty" className="rounded-xl border border-hairline bg-card p-16 text-center">
-          <div className="text-[19px] font-semibold tracking-[-0.01em] text-ink">{cashflowCopy.emptyHeadline}</div>
+          <h2 className="text-[19px] font-semibold tracking-[-0.01em] text-ink">{cashflowCopy.emptyHeadline}</h2>
           <p className="mx-auto mt-2 max-w-[420px] text-[13.5px] leading-relaxed text-muted">{cashflowCopy.emptyBody}</p>
           <div className="mt-6 flex justify-center">
             <Link
               to="/money/transactions"
-              className="inline-flex min-h-11 items-center rounded-lg bg-accent px-5 py-2.5 text-[13px] font-semibold text-white lg:min-h-0"
+              className="inline-flex min-h-11 items-center rounded-lg bg-accent px-5 py-2.5 text-[13px] font-semibold text-white transition-colors duration-[var(--transition-state)] hover:bg-accent-dark lg:min-h-0"
             >
               {cashflowCopy.addTransaction}
             </Link>
@@ -159,7 +159,7 @@ export function CashflowPage({ initialView = "monthly", initialYear }: Props) {
         </div>
       ) : (
         <>
-          <div role="tablist" className="flex gap-1.5">
+          <div role="tablist" aria-label={cashflowCopy.tabsLabel} className="flex gap-1.5">
             {TABS.map((name) => (
               <button
                 key={name}
@@ -176,8 +176,8 @@ export function CashflowPage({ initialView = "monthly", initialYear }: Props) {
                 onKeyDown={onTabKeyDown}
                 className={`${TAB_BASE} ${
                   tab === name
-                    ? "bg-accent text-white"
-                    : "border border-hairline text-ink transition-colors duration-[var(--transition-state)] hover:bg-canvas active:bg-toggle-off"
+                    ? "border-accent bg-accent text-white"
+                    : "border-hairline text-ink hover:bg-canvas active:bg-toggle-off"
                 }`}
               >
                 {name === "monthly" ? cashflowCopy.monthlyTab : cashflowCopy.yearlyTab}

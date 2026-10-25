@@ -27,7 +27,7 @@ export function CashflowYearly({ data, formatAmount, onSelectYear }: Props) {
   // With one year of data there is nowhere to step to, so the arrows would
   // only be two dead buttons.
   const onlyOneYear = data.oldestYear === 0 || data.oldestYear === currentYear;
-  const pickerButton = "min-h-11 min-w-11 rounded-lg border border-hairline text-[13px] text-ink transition-colors duration-[var(--transition-state)] enabled:hover:bg-canvas enabled:active:bg-toggle-off disabled:opacity-40 lg:min-h-0 lg:min-w-0 lg:px-2.5 lg:py-1";
+  const pickerButton = "min-h-11 min-w-11 rounded-lg border border-hairline text-[13px] text-ink transition-colors duration-[var(--transition-state)] enabled:hover:bg-canvas enabled:active:bg-toggle-off disabled:opacity-60 lg:min-h-0 lg:min-w-0 lg:px-2.5 lg:py-1";
 
   return (
     <div className="flex flex-col gap-5">
@@ -45,7 +45,7 @@ export function CashflowYearly({ data, formatAmount, onSelectYear }: Props) {
             ◀
           </button>
         )}
-        <span data-testid="cashflow-year" className="min-w-14 text-center text-[15px] font-semibold text-ink">
+        <span data-testid="cashflow-year" className={`text-[15px] font-semibold text-ink ${onlyOneYear ? "" : "min-w-14 text-center"}`}>
           {year.year}
         </span>
         {!onlyOneYear && (
@@ -88,7 +88,7 @@ export function CashflowYearly({ data, formatAmount, onSelectYear }: Props) {
 
       <section className="rounded-xl border border-hairline bg-card p-[22px]">
         <h2 className="text-xs text-muted">{cashflowCopy.billsToCome}</h2>
-        <p className="mt-1 text-[11.5px] text-muted">{cashflowCopy.billsToComeNote}</p>
+        <p className="mt-1 text-xs text-muted">{cashflowCopy.billsToComeNote}</p>
         {year.billsToCome.length === 0 ? (
           <p className="mt-3 text-[13px] text-muted">{cashflowCopy.billsNone}</p>
         ) : (
@@ -97,7 +97,7 @@ export function CashflowYearly({ data, formatAmount, onSelectYear }: Props) {
               <li key={bill.billId} className="flex items-baseline justify-between gap-3 text-[13px]">
                 <span className="min-w-0">
                   <span className="text-ink">{bill.name}</span>
-                  <span className="block text-[11.5px] text-muted">{dateLabel(bill.nextDue)}</span>
+                  <span className="block text-xs text-muted">{dateLabel(bill.nextDue)}</span>
                 </span>
                 <span className="tabular shrink-0 text-ink">
                   {bill.unconvertible ? cashflowCopy.billUnconvertible : formatAmount(bill.amountMinor)}

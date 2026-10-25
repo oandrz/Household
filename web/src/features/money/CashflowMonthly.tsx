@@ -28,7 +28,7 @@ export function CashflowMonthly({ data, formatAmount }: Props) {
             {lastFinishedLabel(lastFinished.month)}
           </h2>
           {lastFinished.status === "grey" && (
-            <div data-testid="cashflow-last-grey" className="rounded-lg border border-hairline bg-card p-3 text-[12.5px] text-muted">
+            <div data-testid="cashflow-last-grey" className="rounded-lg border border-hairline bg-card p-3 text-xs text-muted">
               <div className="font-semibold text-ink">{cashflowCopy.rowGrey}</div>
               {lastFinished.grey.map((reason) => (
                 <div key={reason}>{greyReasonText(reason, lastFinished.unconvertibleCurrencies)}</div>
@@ -64,7 +64,7 @@ export function CashflowMonthly({ data, formatAmount }: Props) {
         </section>
       )}
 
-      <section className="rounded-xl border border-hairline bg-card p-[18px] text-[13px]">
+      <section className="rounded-xl border border-hairline bg-card p-[22px] text-[13px]">
         {average.months === 0 ? (
           <p className="text-muted">{cashflowCopy.noAverage}</p>
         ) : (
@@ -89,7 +89,7 @@ export function CashflowMonthly({ data, formatAmount }: Props) {
       <section
         data-testid="cashflow-current"
         data-tone="none"
-        className="rounded-xl border border-dashed border-hairline bg-card p-[18px] text-[13px]"
+        className="rounded-xl border border-dashed border-hairline bg-card p-[22px] text-[13px]"
       >
         <div className="text-xs text-muted">{cashflowCopy.soFar(monthLabel(current.month))}</div>
         <div className="mt-1 text-ink">
@@ -97,7 +97,7 @@ export function CashflowMonthly({ data, formatAmount }: Props) {
           <span className="whitespace-nowrap">{cashflowCopy.moneyOut} {formatAmount(current.outMinor)}</span> ·{" "}
           <span className="whitespace-nowrap">{cashflowCopy.leftOver} {formatAmount(current.leftMinor)}</span>
         </div>
-        <div className="mt-1 text-[11.5px] text-muted">{cashflowCopy.soFarNote}</div>
+        <div className="mt-1 text-xs text-muted">{cashflowCopy.soFarNote}</div>
       </section>
 
       <section className="rounded-xl border border-hairline bg-card p-[22px]">

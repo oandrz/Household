@@ -5,6 +5,7 @@
 // only displays them. When the server says the sum cannot be shown, or sends
 // a line this build cannot describe, one sentence replaces the whole sum:
 // never a partial one that would not add up.
+import { useId } from "react";
 import { Link } from "@tanstack/react-router";
 import { cadenceWord, cashflowCopy, dateLabel, fullMonthName } from "./cashflowCopy";
 import { monthLabel } from "./month";
@@ -100,29 +101,56 @@ function hiddenSentence(month: CashflowMonth, reconciliation: CashflowReconcilia
   return cashflowCopy.sum.mismatch(monthName);
 }
 
-function SumList({ rows, month, formatAmount }: { rows: SumRow[]; month: CashflowMonth; formatAmount: Props["formatAmount"] }) {
+// A real table so a screen reader can read each line as "label, amount" and
+// reach the total as the footer. The look is the plain list it replaced:
+// th/td defaults are reset by the classes below.
+function SumList({
+  rows,
+  month,
+  formatAmount,
+  labelledBy,
+}: {
+  rows: SumRow[];
+  month: CashflowMonth;
+  formatAmount: Props["formatAmount"];
+  labelledBy: string;
+}) {
   const total = month.status === "current" ? cashflowCopy.sum.totalSoFar : cashflowCopy.sum.total;
   return (
-    <ul className="flex max-w-[480px] flex-col gap-2">
-      {rows.map((row, index) => (
-        <li key={index} className="flex items-baseline justify-between gap-3 text-[13px]">
-          <span className="min-w-0">
-            <span data-part="label" className="text-ink">{row.label}</span>
-            <span className="block text-[11.5px] text-muted">{row.note}</span>
-          </span>
-          <span data-part="amount" className="tabular shrink-0 text-ink">{row.amount}</span>
-        </li>
-      ))}
-      <li className="flex items-baseline justify-between gap-3 border-t border-hairline pt-2 text-[14px] font-semibold">
-        <span data-part="label" className="text-ink">{total}</span>
-        <span data-part="amount" className="tabular shrink-0 text-ink">{formatAmount(month.outMinor)}</span>
-      </li>
-    </ul>
+    <table aria-labelledby={labelledBy} className="w-full max-w-[480px] border-collapse text-[13px]">
+      <tbody>
+        {rows.map((row, index) => (
+          <tr key={index}>
+            <th scope="row" className="pb-2 pr-3 text-left align-baseline font-normal">
+              <span data-part="label" className="text-ink">{row.label}</span>
+              <span className="block text-xs text-muted">{row.note}</span>
+            </th>
+            <td data-part="amount" className="tabular pb-2 text-right align-baseline whitespace-nowrap text-ink">{row.amount}</td>
+          </tr>
+        ))}
+      </tbody>
+      <tfoot>
+        <tr className="text-[14px] font-semibold">
+          <th scope="row" className="border-t border-hairline pr-3 pt-2 text-left align-baseline">
+            <span data-part="label" className="text-ink">{total}</span>
+          </th>
+          <td data-part="amount" className="tabular border-t border-hairline pt-2 text-right align-baseline whitespace-nowrap text-ink">
+            {formatAmount(month.outMinor)}
+          </td>
+        </tr>
+      </tfoot>
+    </table>
   );
 }
 
+// Close and the link sit inside the shaded open block, where hover:bg-canvas
+// would vanish against the shading: they darken to the toggle track instead.
+const DETAIL_BUTTON =
+  "-mx-1 rounded-md px-1 transition-colors duration-[var(--transition-state)] hover:bg-toggle-off active:bg-hairline";
+
 export function CashflowMonthDetail({ month, formatAmount, onClose }: Props) {
   const monthName = fullMonthName(month.month);
+  const headingId = useId();
   const reconciliation = month.reconciliation;
   const rows =
     reconciliation !== null && reconciliation.status === "shown"
@@ -132,13 +160,13 @@ export function CashflowMonthDetail({ month, formatAmount, onClose }: Props) {
   return (
     <div data-testid="cashflow-month-detail" className="flex flex-col gap-3 py-2">
       <div className="flex max-w-[480px] items-center justify-between gap-3">
-        <h3 className="text-[13px] font-semibold text-ink">
+        <h3 id={headingId} className="text-[13px] font-semibold text-ink">
           {reconciliation === null ? monthLabel(month.month) : cashflowCopy.sum.heading(monthName)}
         </h3>
         <button
           type="button"
           onClick={onClose}
-          className="min-h-11 text-xs font-semibold text-accent lg:min-h-0"
+          className={`min-h-11 text-xs font-semibold text-accent lg:min-h-0 ${DETAIL_BUTTON}`}
         >
           {cashflowCopy.detailsClose}
         </button>
@@ -148,7 +176,7 @@ export function CashflowMonthDetail({ month, formatAmount, onClose }: Props) {
           <p className="text-[13px] text-ink">{hiddenSentence(month, reconciliation)}</p>
         ) : (
           <>
-            <SumList rows={rows} month={month} formatAmount={formatAmount} />
+            <SumList rows={rows} month={month} formatAmount={formatAmount} labelledBy={headingId} />
             {reconciliation.lines.length === 0 && (
               <p className="text-[13px] text-muted">{cashflowCopy.detailsNone}</p>
             )}
@@ -157,7 +185,7 @@ export function CashflowMonthDetail({ month, formatAmount, onClose }: Props) {
       <Link
         to="/money/transactions"
         search={{ month: month.month }}
-        className="inline-flex min-h-11 items-center text-xs font-semibold text-accent lg:min-h-0"
+        className={`inline-flex min-h-11 items-center self-start text-xs font-semibold text-accent lg:min-h-0 ${DETAIL_BUTTON}`}
       >
         {cashflowCopy.sum.link(monthName, month.transactionCount)}
       </Link>

@@ -218,6 +218,7 @@ export const cashflowCopy = {
   loadError: "Cashflow could not be loaded. Try refreshing the page.",
   ownerOnlyHeading: "Owner only",
   ownerOnlyBody: "Cashflow is visible to the household owner. Ask them if you'd like to see where things stand.",
+  tabsLabel: "Cashflow view",
   emptyHeadline: "Nothing to show yet",
   emptyBody: "Log income and spending for a month to see cashflow.",
   addTransaction: "Add a transaction",

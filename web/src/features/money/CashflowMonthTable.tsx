@@ -48,6 +48,19 @@ function canCountIt(month: CashflowMonth): boolean {
   );
 }
 
+// The open month's row, its note line and its detail share this background so
+// they read as one block inside the white card.
+const OPEN_BLOCK = "bg-canvas";
+
+// Buttons on the note line sit on white, or on the open block's shading, so
+// the hover colour changes with them: canvas would vanish on canvas.
+function noteButton(open: boolean): string {
+  const hover = open
+    ? "enabled:hover:bg-toggle-off enabled:active:bg-hairline"
+    : "enabled:hover:bg-canvas enabled:active:bg-toggle-off";
+  return `-mx-1 min-h-11 rounded-md px-1 font-semibold text-accent transition-colors duration-[var(--transition-state)] disabled:opacity-60 lg:min-h-0 ${hover}`;
+}
+
 type Props = {
   months: CashflowMonth[];
   formatAmount: (minor: number) => string;
@@ -94,7 +107,7 @@ export function CashflowMonthTable({ months, formatAmount }: Props) {
               const showNote = month.confirmation !== null || month.status === "grey";
               return (
                 <Fragment key={month.month}>
-                  <tr className="border-t border-hairline">
+                  <tr className={`border-t border-hairline ${open ? OPEN_BLOCK : ""}`}>
                     <td className="py-2 pr-2 sm:pr-3">
                       <button
                         type="button"
@@ -104,6 +117,7 @@ export function CashflowMonthTable({ months, formatAmount }: Props) {
                         className="min-h-11 text-left font-semibold text-accent hover:underline lg:min-h-0"
                       >
                         {monthLabel(month.month)}
+                        <span aria-hidden="true" className="ml-1 text-xs text-muted">{open ? "▾" : "▸"}</span>
                       </button>
                     </td>
                     <td className="tabular hidden py-2 pr-3 text-right text-ink sm:table-cell">{formatAmount(month.inMinor)}</td>
@@ -118,7 +132,7 @@ export function CashflowMonthTable({ months, formatAmount }: Props) {
                     </td>
                   </tr>
                   {showNote && (
-                    <tr>
+                    <tr className={open ? OPEN_BLOCK : ""}>
                       <td colSpan={6} className="pb-2">
                         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted">
                           {/* A confirmation never clears a missing exchange rate, so a
@@ -134,7 +148,7 @@ export function CashflowMonthTable({ months, formatAmount }: Props) {
                                 type="button"
                                 disabled={busy}
                                 onClick={() => unconfirm.mutate(month.month)}
-                                className="min-h-11 font-semibold text-accent disabled:opacity-60 lg:min-h-0"
+                                className={noteButton(open)}
                               >
                                 {cashflowCopy.undo}
                               </button>
@@ -145,7 +159,7 @@ export function CashflowMonthTable({ months, formatAmount }: Props) {
                                 type="button"
                                 disabled={busy}
                                 onClick={() => confirm.mutate(month.month)}
-                                className="min-h-11 font-semibold text-accent disabled:opacity-60 lg:min-h-0"
+                                className={noteButton(open)}
                               >
                                 {cashflowCopy.countIt}
                               </button>
@@ -156,7 +170,7 @@ export function CashflowMonthTable({ months, formatAmount }: Props) {
                     </tr>
                   )}
                   {open && (
-                    <tr>
+                    <tr className={OPEN_BLOCK}>
                       <td id={`cashflow-detail-${month.month}`} colSpan={6}>
                         <CashflowMonthDetail month={month} formatAmount={formatAmount} onClose={() => setOpenMonth(null)} />
                       </td>

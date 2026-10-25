@@ -56,7 +56,7 @@ function open(month: CashflowMonth) {
 // Each row's label and amount, in the order they appear.
 function rows(detail: HTMLElement) {
   return within(detail)
-    .getAllByRole("listitem")
+    .getAllByRole("row")
     .map((item) => [
       item.querySelector("[data-part='label']")?.textContent,
       item.querySelector("[data-part='amount']")?.textContent,
@@ -64,6 +64,16 @@ function rows(detail: HTMLElement) {
 }
 
 describe("CashflowMonthDetail worked sum", () => {
+  it("is a named table: each line's label is its row header, its amount a cell, the total in the footer", async () => {
+    const detail = await open(monthFixture());
+    const table = within(detail).getByRole("table", { name: "How September's money out adds up" });
+    const wholeRow = within(table).getByRole("rowheader", { name: /Car insurance, whole yearly bill/ }).closest("tr") as HTMLElement;
+    expect(within(wholeRow).getByRole("cell")).toHaveTextContent("−S$2,100.00");
+    const footer = table.querySelector("tfoot") as HTMLElement;
+    expect(within(footer).getByRole("rowheader")).toHaveTextContent("= Money out");
+    expect(within(footer).getByRole("cell")).toHaveTextContent("S$4,069.50");
+  });
+
   it("shows September's sum in order with signs on the amounts only", async () => {
     const detail = await open(monthFixture());
     expect(within(detail).getByRole("heading", { name: "How September's money out adds up" })).toBeInTheDocument();
