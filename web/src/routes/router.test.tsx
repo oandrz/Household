@@ -690,6 +690,65 @@ describe("the real route tree", () => {
     expect(router.state.location.pathname).toBe("/money/bills");
   });
 
+  it("redirects a member without the money capability away from /money/cashflow", async () => {
+    stubFetchRoutes({
+      "GET /api/v1/auth/me": {
+        status: 200,
+        body: meFixture({
+          membership: {
+            id: "membership-2",
+            householdId: "household-1",
+            userId: "user-2",
+            role: "limited",
+            capabilities: ["calendar", "chores"],
+          },
+          capabilities: ["calendar", "chores"],
+        }),
+      },
+    });
+
+    const { router } = renderApp("/money/cashflow");
+
+    await waitFor(() => expect(router.state.location.pathname).toBe("/"));
+    expect(
+      await screen.findByRole("heading", { level: 1, name: "Overview" }),
+    ).toBeInTheDocument();
+  });
+
+  it("mounts the Cashflow page at /money/cashflow", async () => {
+    stubFetchRoutes({
+      "GET /api/v1/auth/me": { status: 200, body: meFixture() },
+      "GET /api/v1/currencies": { status: 200, body: { currencies: [] } },
+      "GET /api/v1/cashflow": {
+        status: 200,
+        body: {
+          currency: "SGD",
+          hasTransactions: false,
+          oldestYear: 0,
+          light: { colour: "grey", reasons: [] },
+          average: { months: 0, inMinor: 0, outMinor: 0, leftMinor: 0, keptBasisPoints: null },
+          cushion: { known: false, tenths: null, reason: "no_cash_accounts" },
+          lastFinished: null,
+          current: {
+            month: "2026-10", status: "current", inMinor: 0, outMinor: 0, leftMinor: 0,
+            keptBasisPoints: null, spreadMinor: 0, loanMinor: 0, transactionCount: 0, grey: [],
+            unconvertibleCurrencies: [], projectedLeftMinor: null, confirmation: null, contributions: [],
+          },
+          recent: [],
+          year: {
+            year: 2026, months: [], keptSoFarMinor: 0, incomeMinor: 0, greyMonths: 0,
+            keptBasisPoints: null, sameMonthsLastYearMinor: null, headingForMinor: null, billsToCome: [],
+          },
+        },
+      },
+    });
+
+    const { router } = renderApp("/money/cashflow");
+
+    expect(await screen.findByTestId("cashflow-page")).toBeInTheDocument();
+    expect(router.state.location.pathname).toBe("/money/cashflow");
+  });
+
   // Task 10: Marriage's own route came back in the same change as its
   // SPACE_PAGES entry and RequireCapability guard (router.tsx's own header
   // comment on why splitting them across tasks isn't safe) -- a member

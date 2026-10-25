@@ -17,6 +17,7 @@
 //       /money/budget RequireCapability("money") -> Budget (Task 11; BudgetPage stub -- Task 12 builds the real screen)
 //       /money/goals RequireCapability("money") -> Goals (Task 11; the real GoalsPage)
 //       /money/bills RequireCapability("money") -> Bills (the real BillsPage)
+//       /money/cashflow RequireCapability("money") -> Cashflow (CashflowPage)
 //       /marriage/retros RequireCapability("marriage") -> Retros (Task 10; RetrosPage)
 //       /marriage/vision RequireCapability("marriage") -> Vision & goals (Task 11; VisionPage)
 //       /settings                                   -- the real Settings screen (Task 20)
@@ -100,6 +101,7 @@ import { RetrosPage } from "../features/marriage/RetrosPage";
 import { VisionPage } from "../features/marriage/VisionPage";
 import { BillsPage } from "../features/money/BillsPage";
 import { BudgetPage } from "../features/money/BudgetPage";
+import { CashflowPage } from "../features/money/CashflowPage";
 import { FinancesPage } from "../features/money/FinancesPage";
 import { GoalsPage } from "../features/money/GoalsPage";
 import { PortfolioPage } from "../features/money/PortfolioPage";
@@ -324,6 +326,13 @@ const moneyBillsRoute = createRoute({
   getParentRoute: () => moneyGuardRoute,
   path: "bills",
   component: BillsPage,
+});
+// Cashflow joins the other Money pages under the same guard. The read is
+// owner-only on the server too, so the page handles that refusal itself.
+const moneyCashflowRoute = createRoute({
+  getParentRoute: () => moneyGuardRoute,
+  path: "cashflow",
+  component: CashflowPage,
 });
 
 // Marriage's own guard, the moneyGuardRoute shape restated: a pathless route
@@ -672,6 +681,7 @@ export const routeTree = rootRoute.addChildren([
         moneyPortfolioRoute,
     moneyPortfolioReportRoute,
         moneyBillsRoute,
+        moneyCashflowRoute,
       ]),
       marriageGuardRoute.addChildren([
         marriageIndexRoute,

@@ -8,7 +8,7 @@
 // The design's 5a sidebar groups each space into an uppercase label plus
 // several sub-page links (Finances/Transactions/Budget/... under Money, and
 // so on). That grouped form arrived with Transactions and now carries
-// Budget, Goals and Bills too: Money renders as a label plus five links.
+// Budget, Goals and Bills too: Money renders as a label plus its links.
 // SPACE_PAGES grows a row per shipped page -- a page joins it once its route
 // exists, not before, because a permanent grey "soon" row reads as broken.
 import { Link, useMatchRoute } from "@tanstack/react-router";
@@ -43,6 +43,7 @@ const SPACE_PAGES: Record<string, { label: string; to: string }[]> = {
     { label: "Goals", to: "/money/goals" },
     { label: "Portfolio", to: "/money/portfolio" },
     { label: "Bills", to: "/money/bills" },
+    { label: "Cashflow", to: "/money/cashflow" },
   ],
   // Task 10 -- Retros is the first of Marriage's three pages
   // (docs/FEATURE_TRACKER.md section 6). This is the entry `110ab0a` deleted

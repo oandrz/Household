@@ -18,7 +18,7 @@ export const cashflowRootKey = ["cashflow"] as const;
 
 // year undefined means "the current year", which the server resolves in the
 // household's own time zone.
-export function cashflowQueryKey(year: number | undefined) {
+function cashflowQueryKey(year: number | undefined) {
   return ["cashflow", year] as const;
 }
 
