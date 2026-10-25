@@ -248,3 +248,13 @@ func TestCashflowAverageOfTakesThreeSolidMonthsBeforeCurrent(t *testing.T) {
 		t.Fatalf("got %+v", avg)
 	}
 }
+
+func TestJudgeIsNeverGreenWithNoSpendingToMeasureCushion(t *testing.T) {
+	// Three solid months of income and no spending: the cushion is
+	// cash / 0, undefined, even though the caller marked it Known.
+	avg := avgOf(3, 300_000, 0)
+	for _, cash := range []int64{50_000, -50_000} {
+		v := domain.JudgeCashflow(solidMonth(100_000, 0), true, avg, knownCash(cash), nil)
+		wantColour(t, v, domain.LightYellow, "cushion_unknown")
+	}
+}

@@ -71,7 +71,9 @@ const (
 )
 
 // CashCushion is the household's spendable cash. CashMinor means nothing
-// unless Known is true.
+// unless Known is true. Known is not enough on its own: with no spending in
+// the average the cushion is undefined, and JudgeCashflow treats that as
+// unknown too, so the light can never be green on it.
 type CashCushion struct {
 	Known     bool
 	CashMinor int64
@@ -175,7 +177,7 @@ func redReasons(avg CashflowAverage, c CashCushion) []LightReason {
 		out = append(out, LightReason{Code: ReasonLeftNotPositive})
 	}
 	// An unknown cushion is not a danger Hearth can see, so it is never red.
-	if c.Known && productLess(c.CashMinor, int64(avg.Months), avg.SumOut, cashflowCushionRedMonths) {
+	if cushionMeasurable(c, avg) && productLess(c.CashMinor, int64(avg.Months), avg.SumOut, cashflowCushionRedMonths) {
 		out = append(out, LightReason{Code: ReasonCushionUnder1, CushionTenths: cushionTenthsPtr(c, avg)})
 	}
 	return out
@@ -195,7 +197,7 @@ func yellowReasons(last CashflowMonth, avg CashflowAverage, c CashCushion, dueSo
 		out = append(out, LightReason{Code: ReasonLastMonthNegative})
 	}
 	switch {
-	case !c.Known:
+	case !cushionMeasurable(c, avg):
 		out = append(out, LightReason{Code: ReasonCushionUnknown})
 	case productLess(c.CashMinor, int64(avg.Months), avg.SumOut, cashflowCushionYellowMonths):
 		out = append(out, LightReason{Code: ReasonCushionUnder3, CushionTenths: cushionTenthsPtr(c, avg)})
@@ -208,6 +210,13 @@ func yellowReasons(last CashflowMonth, avg CashflowAverage, c CashCushion, dueSo
 		}
 	}
 	return out
+}
+
+// cushionMeasurable is false when the cushion is "—": the caller could not
+// work it out, or there is no spending to divide by (income-only months).
+// Either way the light must not be green, so both read as cushion_unknown.
+func cushionMeasurable(c CashCushion, avg CashflowAverage) bool {
+	return c.Known && avg.SumOut > 0
 }
 
 func cushionTenthsPtr(c CashCushion, avg CashflowAverage) *int64 {
