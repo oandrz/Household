@@ -315,6 +315,12 @@ function leftOver(value: number, formatAmount: (minor: number) => string): strin
   return value > 0 ? `${formatAmount(value)} left over` : `nothing left over (${formatAmount(value)})`;
 }
 
+// The line under the chart for a bar drawn shorter than its amount, so the
+// real figure is on screen without hovering.
+export function cutOffNote(month: CashflowMonth, value: number, formatAmount: (minor: number) => string): string {
+  return `${barTitle(month, value, false, formatAmount)}, cut off to fit the chart.`;
+}
+
 // The hover text for one bar, spoken the way the table speaks: a month with
 // nothing left over says so and shows the figure in brackets. `clipped` adds
 // the note that the drawn bar is shorter than the real amount.

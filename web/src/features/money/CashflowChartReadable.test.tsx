@@ -49,6 +49,21 @@ describe("CashflowChart without a mouse", () => {
     ]);
   });
 
+  it("says the real amount of a bar cut off to fit, under the chart where anyone can read it", () => {
+    renderChart([
+      monthFixture({ month: "2026-09", leftMinor: 100000 }),
+      monthFixture({ month: "2026-10", status: "current", leftMinor: 4728250 }),
+    ]);
+    const note = screen.getByTestId("cashflow-cut-note");
+    expect(note).toHaveTextContent("October 2026 so far: S$47282.50 left over, cut off to fit the chart.");
+    expect(note).not.toHaveClass("sr-only");
+  });
+
+  it("says nothing about cutting when every bar fits", () => {
+    renderChart([monthFixture({ month: "2026-09", leftMinor: 100000 })]);
+    expect(screen.queryByTestId("cashflow-cut-note")).toBeNull();
+  });
+
   it("keeps the short month labels under the bars out of the spoken text", () => {
     renderChart([monthFixture({ month: "2026-09" })]);
     expect(screen.getByText("Sep")).toHaveAttribute("aria-hidden", "true");

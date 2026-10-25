@@ -8,7 +8,7 @@
 //   grey       tinted with an outline: the month is there but too thin to trust
 //   current    pale and uncoloured: still running
 //   projected  dashed outline: a forecast, not money that happened
-import { barTitle, cashflowCopy, shortMonthLabel } from "./cashflowCopy";
+import { barTitle, cashflowCopy, cutOffNote, shortMonthLabel } from "./cashflowCopy";
 import { monthLabel } from "./month";
 import type { CashflowMonth } from "./cashflowSchemas";
 
@@ -198,7 +198,13 @@ export function CashflowChart({ months, formatAmount }: Props) {
     const value = values[index];
     if (value === null) return [];
     const clipped = Math.min(max, Math.max(min, value)) !== value;
-    return [{ key: month.month, text: barTitle(month, value, clipped, formatAmount) }];
+    return [
+      {
+        key: month.month,
+        text: barTitle(month, value, clipped, formatAmount),
+        cutNote: clipped ? cutOffNote(month, value, formatAmount) : null,
+      },
+    ];
   });
 
   return (
@@ -284,6 +290,16 @@ export function CashflowChart({ months, formatAmount }: Props) {
         <LegendItem style="current" label={cashflowCopy.chartLegend.current} />
         <LegendItem style="projected" label={cashflowCopy.chartLegend.projected} />
       </ul>
+      {/* The cut marks alone are too faint to carry the real figure, and a
+          title needs a mouse; this line says it in plain text. */}
+      {spoken.map(
+        (bar) =>
+          bar.cutNote && (
+            <p key={bar.key} data-testid="cashflow-cut-note" aria-hidden="true" className="mt-1 text-[11.5px] text-muted">
+              {bar.cutNote}
+            </p>
+          ),
+      )}
     </div>
   );
 }
