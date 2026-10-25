@@ -179,6 +179,20 @@ hearthctl api PUT    /cashflow/confirmations/2026-09   # no body
 hearthctl api DELETE /cashflow/confirmations/2026-09   # undo; answers 204
 ```
 
+Every month that has figures also carries a `reconciliation`: the worked sum
+from the Transactions page's `spentMinor` to the month's `outMinor`. It is
+`null` for a `future` or `none` month, and its `lines` are empty unless `status`
+is `shown` (the other values are `no_rate` and `mismatch`):
+
+```json
+"reconciliation": {
+  "status": "shown", "spentMinor": 30000,
+  "lines": [{"kind": "bill_in_full", "name": "Car insurance", "amountMinor": -120000,
+             "paidOn": "2026-09-12", "shareIndex": 0, "spread": 12}],
+  "unratedCount": 0, "unratedEarlierBill": false, "unratedCurrencies": []
+}
+```
+
 The month must be finished (not the current one) and from 2000-01 on.
 Like every owner-gated money route it needs the money capability and an
 owner.

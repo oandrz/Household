@@ -3048,8 +3048,20 @@ sequenceDiagram
     Svc->>Svc: CashflowAverageOf, cushion from CashflowAccounts,<br/>due bills from CashflowBills
     Svc->>Dom: JudgeCashflow(last, avg, cushion, billsDue)
     Svc-->>H: CashflowPage
+    H->>Dom: ReconcileCashflowMonth(month), per month with figures
     H-->>B: 200 JSON
 ```
+
+**The worked sum (`reconciliation`).** Each month that has figures (`solid`,
+`grey`, `current`; `null` for `future` and `none`) carries the sum "ledger
+spent, minus bills paid in full, plus their shares, plus loans = money out".
+It is built in the handler from the same converted items the page was folded
+from, in the same request, so it cannot drift from `outMinor`. It starts at
+`LedgerSpentMinor`, the number the Transactions page shows as `spentMinor`
+for that month. The lines are exact or absent: a month with a missing exchange
+rate is `no_rate`, and lines that do not add up to `outMinor` are `mismatch`;
+both send empty `lines` rather than a sum that is slightly wrong.
+`contributions` is still sent unchanged.
 
 **One query, then arithmetic.** The ledger is read once and folded in memory
 rather than queried per month, because a household's history is capped

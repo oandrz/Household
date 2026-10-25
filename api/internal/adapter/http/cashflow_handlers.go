@@ -52,6 +52,27 @@ type cashflowContributionDTO struct {
 	PaidOn      string `json:"paidOn"`
 }
 
+// cashflowSumLineDTO is one step from the ledger's spent figure to money out.
+type cashflowSumLineDTO struct {
+	Kind        string `json:"kind"`
+	Name        string `json:"name"`
+	AmountMinor int64  `json:"amountMinor"`
+	PaidOn      string `json:"paidOn"`
+	ShareIndex  int    `json:"shareIndex"`
+	Spread      int    `json:"spread"`
+}
+
+// cashflowReconciliationDTO is a month's worked sum. Lines is empty unless
+// Status is "shown": a sum that does not add up is hidden, never sent wrong.
+type cashflowReconciliationDTO struct {
+	Status             string               `json:"status"`
+	SpentMinor         int64                `json:"spentMinor"`
+	Lines              []cashflowSumLineDTO `json:"lines"`
+	UnratedCount       int                  `json:"unratedCount"`
+	UnratedEarlierBill bool                 `json:"unratedEarlierBill"`
+	UnratedCurrencies  []string             `json:"unratedCurrencies"`
+}
+
 type cashflowMonthDTO struct {
 	Month                   string                    `json:"month"`
 	Status                  string                    `json:"status"`
@@ -67,6 +88,8 @@ type cashflowMonthDTO struct {
 	ProjectedLeftMinor      *int64                    `json:"projectedLeftMinor"`
 	Confirmation            *cashflowConfirmationDTO  `json:"confirmation"`
 	Contributions           []cashflowContributionDTO `json:"contributions"`
+	// Reconciliation is null for a month with no figures ("future", "none").
+	Reconciliation *cashflowReconciliationDTO `json:"reconciliation"`
 }
 
 type cashflowBillToComeDTO struct {
@@ -263,8 +286,32 @@ func toCashflowMonthDTO(m domain.CashflowMonth, projected *int64, confirmations 
 			Kind: c.Kind, Name: c.Name, AmountMinor: c.AmountMinor, PaidOn: c.PaidOn.Format(cashflowDayLayout),
 		})
 	}
+	if m.Status == domain.CashflowSolid || m.Status == domain.CashflowGrey || m.Status == domain.CashflowCurrent {
+		dto.Reconciliation = toCashflowReconciliationDTO(domain.ReconcileCashflowMonth(m))
+	}
 	if c, ok := confirmations[m.Month]; ok {
 		dto.Confirmation = &cashflowConfirmationDTO{ConfirmedAt: c.ConfirmedAt, ConfirmedByName: c.ConfirmedByName}
+	}
+	return dto
+}
+
+// toCashflowReconciliationDTO converts with string(...) because the status and
+// kinds come from ReconcileCashflowMonth's own constants, not from a row or a
+// request.
+func toCashflowReconciliationDTO(r domain.CashflowReconciliation) *cashflowReconciliationDTO {
+	dto := &cashflowReconciliationDTO{
+		Status:             string(r.Status),
+		SpentMinor:         r.SpentMinor,
+		Lines:              make([]cashflowSumLineDTO, 0, len(r.Lines)),
+		UnratedCount:       r.UnratedCount,
+		UnratedEarlierBill: r.UnratedEarlierBill,
+		UnratedCurrencies:  append([]string{}, r.UnratedCurrencies...),
+	}
+	for _, l := range r.Lines {
+		dto.Lines = append(dto.Lines, cashflowSumLineDTO{
+			Kind: string(l.Kind), Name: l.Name, AmountMinor: l.AmountMinor,
+			PaidOn: l.PaidOn.Format(cashflowDayLayout), ShareIndex: l.ShareIndex, Spread: l.Spread,
+		})
 	}
 	return dto
 }

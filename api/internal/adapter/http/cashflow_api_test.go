@@ -11,9 +11,20 @@ import (
 
 // cashflowMonthBody is the part of one month the tests read.
 type cashflowMonthBody struct {
-	Month        string   `json:"month"`
-	Status       string   `json:"status"`
-	Grey         []string `json:"grey"`
+	Month          string   `json:"month"`
+	Status         string   `json:"status"`
+	Grey           []string `json:"grey"`
+	OutMinor       int64    `json:"outMinor"`
+	Reconciliation *struct {
+		Status     string `json:"status"`
+		SpentMinor int64  `json:"spentMinor"`
+		Lines      []struct {
+			Kind        string `json:"kind"`
+			Name        string `json:"name"`
+			AmountMinor int64  `json:"amountMinor"`
+			PaidOn      string `json:"paidOn"`
+		} `json:"lines"`
+	} `json:"reconciliation"`
 	Confirmation *struct {
 		ConfirmedAt     time.Time `json:"confirmedAt"`
 		ConfirmedByName string    `json:"confirmedByName"`
@@ -229,6 +240,132 @@ func TestCashflowRoutesRequireMoneyAndOwner(t *testing.T) {
 			rec := requestRouteAs(t, env, route.method, route.path, session, csrf)
 			if rec.Code != http.StatusForbidden {
 				t.Errorf("%s %s as %s = %d, want 403 (body = %s)", route.method, route.path, c.name, rec.Code, rec.Body.String())
+			}
+		}
+	}
+}
+
+// TestCashflowSumStartsFromTheLedgersSpent proves the worked sum begins at the
+// number the Transactions page shows for the same month, then adds a bill
+// paid in full, its first share and a loan transfer to reach money out.
+func TestCashflowSumStartsFromTheLedgersSpent(t *testing.T) {
+	env := newTestEnv(t)
+	session, csrf := env.signIn(t, env.ownerEmail, env.ownerPassword)
+	categoryID, _ := env.firstExpenseCategory(t, session)
+	cashID := env.mustCreateAccountID(t, session, csrf)
+	loanRec := env.authed(t, http.MethodPost, "/api/v1/accounts", map[string]any{
+		"nickname": "Car loan", "type": "loan", "openingBalanceMinor": 1_450_000,
+		"openingBalanceCurrency": "SGD", "openingBalanceAsOf": "2026-01-01",
+	}, session, csrf)
+	var loan struct {
+		ID string `json:"id"`
+	}
+	if loanRec.Code != http.StatusCreated || json.Unmarshal(loanRec.Body.Bytes(), &loan) != nil {
+		t.Fatalf("create loan account: status = %d, body = %s", loanRec.Code, loanRec.Body.String())
+	}
+	loanID := loan.ID
+
+	now := time.Now().UTC()
+	last := time.Date(now.Year(), now.Month()-1, 1, 0, 0, 0, 0, time.UTC)
+	day := func(d int) string { return last.AddDate(0, 0, d-1).Format("2006-01-02") }
+
+	env.mustCreateExpense(t, session, csrf, day(5), categoryID, cashID, 30_000)
+	bill := env.mustCreateBill(t, session, csrf, map[string]any{
+		"name": "Car insurance", "amountMinor": 120_000, "cadence": "yearly",
+		"nextDue": day(10), "categoryId": categoryID, "payFromAccountId": cashID,
+	})
+	env.mustPayBill(t, session, csrf, bill.Bill.ID, map[string]any{"paidOn": day(12)})
+	rec := env.authed(t, http.MethodPost, "/api/v1/transactions", map[string]any{
+		"kind": "transfer", "occurredOn": day(15), "description": "Loan repayment",
+		"fromAccountId": cashID, "toAccountId": loanID, "amountMinor": 40_000,
+	}, session, csrf)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create transfer: status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+
+	month := last.Format("2006-01")
+	var lastMonth *cashflowMonthBody
+	body := getCashflow(t, env, "", session)
+	for i := range body.Recent {
+		if body.Recent[i].Month == month {
+			lastMonth = &body.Recent[i]
+		}
+	}
+	if lastMonth == nil || lastMonth.Reconciliation == nil {
+		t.Fatalf("last month %s has no reconciliation: %+v", month, lastMonth)
+	}
+	r := lastMonth.Reconciliation
+	if r.Status != "shown" {
+		t.Fatalf("status = %q, want shown", r.Status)
+	}
+
+	rec = env.authedGet(t, "/api/v1/transactions?month="+month, session)
+	var ledger struct {
+		Summary struct {
+			SpentMinor int64 `json:"spentMinor"`
+		} `json:"summary"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &ledger); err != nil {
+		t.Fatalf("decode transactions: %v", err)
+	}
+	if r.SpentMinor != ledger.Summary.SpentMinor {
+		t.Errorf("sum starts at %d, the Transactions page says spent %d", r.SpentMinor, ledger.Summary.SpentMinor)
+	}
+	total := r.SpentMinor
+	kinds := map[string]bool{}
+	for _, l := range r.Lines {
+		total += l.AmountMinor
+		kinds[l.Kind] = true
+	}
+	if total != lastMonth.OutMinor {
+		t.Errorf("spent plus lines = %d, money out = %d", total, lastMonth.OutMinor)
+	}
+	for _, k := range []string{"bill_in_full", "bill_share", "loan"} {
+		if !kinds[k] {
+			t.Errorf("no %s line in %+v", k, r.Lines)
+		}
+	}
+}
+
+// TestCashflowSumIsNullForMonthsWithoutFigures pins when the sum is sent: for
+// every month that has figures, never for one that has none.
+func TestCashflowSumIsNullForMonthsWithoutFigures(t *testing.T) {
+	env := newTestEnv(t)
+	session, _ := env.signIn(t, env.ownerEmail, env.ownerPassword)
+	rec := env.authedGet(t, "/api/v1/cashflow", session)
+
+	var raw struct {
+		LastFinished map[string]any   `json:"lastFinished"`
+		Current      map[string]any   `json:"current"`
+		Recent       []map[string]any `json:"recent"`
+		Year         struct {
+			Months []map[string]any `json:"months"`
+		} `json:"year"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &raw); err != nil {
+		t.Fatal(err)
+	}
+	months := append(append([]map[string]any{raw.Current, raw.LastFinished}, raw.Recent...), raw.Year.Months...)
+	for _, m := range months {
+		if m == nil {
+			continue
+		}
+		status, _ := m["status"].(string)
+		rc := m["reconciliation"]
+		if status == "none" || status == "future" {
+			if rc != nil {
+				t.Errorf("month %v (%s) has a reconciliation: %v", m["month"], status, rc)
+			}
+			continue
+		}
+		obj, ok := rc.(map[string]any)
+		if !ok {
+			t.Errorf("month %v (%s) reconciliation = %v, want an object", m["month"], status, rc)
+			continue
+		}
+		for _, key := range []string{"lines", "unratedCurrencies"} {
+			if _, isArray := obj[key].([]any); !isArray {
+				t.Errorf("month %v reconciliation.%s = %v, want an array", m["month"], key, obj[key])
 			}
 		}
 	}
