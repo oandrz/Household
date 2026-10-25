@@ -96,6 +96,7 @@ export function CashflowMonthTable({ months, formatAmount }: Props) {
                       <button
                         type="button"
                         aria-expanded={open}
+                        aria-controls={open ? `cashflow-detail-${month.month}` : undefined}
                         onClick={() => setOpenMonth(open ? null : month.month)}
                         className="min-h-11 text-left font-semibold text-accent lg:min-h-0"
                       >
@@ -153,7 +154,7 @@ export function CashflowMonthTable({ months, formatAmount }: Props) {
                   )}
                   {open && (
                     <tr>
-                      <td colSpan={6}>
+                      <td id={`cashflow-detail-${month.month}`} colSpan={6}>
                         <CashflowMonthDetail month={month} formatAmount={formatAmount} onClose={() => setOpenMonth(null)} />
                       </td>
                     </tr>

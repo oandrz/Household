@@ -30,6 +30,7 @@ function monthFixture(overrides: Partial<CashflowMonth> = {}): CashflowMonth {
     projectedLeftMinor: null,
     confirmation: null,
     contributions: [],
+    reconciliation: null,
     ...overrides,
   };
 }
@@ -300,13 +301,23 @@ describe("CashflowMonthTable", () => {
       month: "2026-09",
       spreadMinor: 17500,
       contributions: [{ kind: "spread_bill", name: "Car insurance", amountMinor: 17500, paidOn: "2026-03-14" }],
+      outMinor: 417500,
+      reconciliation: {
+        status: "shown",
+        spentMinor: 400000,
+        lines: [{ kind: "bill_share", name: "Car insurance", amountMinor: 17500, paidOn: "2026-03-14", shareIndex: 7, spread: 12 }],
+        unratedCount: 0,
+        unratedEarlierBill: false,
+        unratedCurrencies: [],
+      },
     });
     renderPage(pageFixture({ recent: [withBills], lastFinished: withBills }));
     fireEvent.click(await screen.findByRole("button", { name: /September 2026/ }));
     const detail = await screen.findByTestId("cashflow-month-detail");
-    expect(within(detail).getByText("Car insurance")).toBeInTheDocument();
-    expect(within(detail).getByText("S$175.00")).toBeInTheDocument();
-    const link = within(detail).getByRole("link", { name: /transactions/i });
+    expect(within(detail).getByText("Car insurance, September's share")).toBeInTheDocument();
+    expect(within(detail).getByText("+S$175.00")).toBeInTheDocument();
+    expect(within(detail).getByText("Month 7 of 12 of the yearly bill paid 14 Mar 2026")).toBeInTheDocument();
+    const link = within(detail).getByRole("link", { name: "See September's 12 transactions" });
     expect(link.getAttribute("href")).toContain("/money/transactions");
     expect(link.getAttribute("href")).toContain("month=2026-09");
   });

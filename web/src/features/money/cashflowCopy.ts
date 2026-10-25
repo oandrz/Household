@@ -32,6 +32,34 @@ export function dateLabel(isoDate: string): string {
   return `${day} ${MONTH_ABBREVIATIONS[month - 1]} ${year}`;
 }
 
+const MONTH_NAMES = [
+  "January", "February", "March", "April", "May", "June",
+  "July", "August", "September", "October", "November", "December",
+];
+
+// "2026-09" -> "September".
+export function fullMonthName(month: string): string {
+  return MONTH_NAMES[Number(month.slice(5, 7)) - 1];
+}
+
+// How often a spread bill is paid. Null for any other length: the caller
+// must not guess a word for a bill it does not understand.
+export function cadenceWord(spread: number): "yearly" | "quarterly" | null {
+  if (spread === 12) return "yearly";
+  if (spread === 3) return "quarterly";
+  return null;
+}
+
+// "USD" / "USD and EUR" / "USD, EUR and GBP".
+function currencyList(currencies: string[]): string {
+  if (currencies.length <= 1) return currencies.join("");
+  return `${currencies.slice(0, -1).join(", ")} and ${currencies[currencies.length - 1]}`;
+}
+
+function transactions(count: number): string {
+  return `${count} ${count === 1 ? "transaction" : "transactions"}`;
+}
+
 // "2026-09" -> "Sep".
 export function shortMonthLabel(month: string): string {
   return MONTH_ABBREVIATIONS[Number(month.slice(5, 7)) - 1];
@@ -205,12 +233,33 @@ export const cashflowCopy = {
   rowGrey: "Not enough data",
   rowCurrent: "So far",
   detailsNone: "No yearly bills spread and no loan repayments in this month.",
-  detailsSpread: "Yearly or quarterly bill, spread",
-  detailsLoan: "Loan repayment",
-  detailsPaidOn: (date: string) => `paid ${date}`,
-  detailsLedger: "See the transactions behind this month",
   detailsClose: "Close",
-  transactionCount: (count: number) => `${count} ${count === 1 ? "transaction" : "transactions"}`,
+
+  sum: {
+    heading: (m: string) => `How ${m}'s money out adds up`,
+    spent: (m: string) => `Spent in ${m}`,
+    spentNote: "From the Transactions page",
+    wholeBill: (name: string, cadence: string) => `${name}, whole ${cadence} bill`,
+    wholeBillNote: (date: string, spread: number) =>
+      `Paid ${date}, taken out here and spread over ${spread} months`,
+    share: (name: string, m: string) => `${name}, ${m}'s share`,
+    shareNote: (index: number, spread: number) => `Month ${index} of ${spread}`,
+    shareNoteEarlier: (index: number, spread: number, cadence: string, date: string) =>
+      `Month ${index} of ${spread} of the ${cadence} bill paid ${date}`,
+    loan: (name: string) => `${name} repayment`,
+    loanNote: (date: string) => `Transfer to a loan account, ${date}`,
+    total: "= Money out",
+    totalSoFar: "= Money out so far",
+    noRateHere: (m: string, count: number, currencies: string[]) =>
+      `Hearth can't add up ${m}: ${transactions(count)} ${count === 1 ? "is" : "are"} not counted because Hearth has no exchange rate for ${currencyList(currencies)}.`,
+    noRateEarlier: (m: string, currencies: string[]) =>
+      `Hearth can't add up ${m}: a bill spread into this month is in ${currencyList(currencies)}, and Hearth has no exchange rate for it.`,
+    noRateBoth: (m: string, count: number, currencies: string[]) =>
+      `Hearth can't add up ${m}: it has no exchange rate for ${currencyList(currencies)}, so ${transactions(count)} and a bill spread into this month are not counted.`,
+    mismatch: (m: string) =>
+      `Hearth can't show how ${m} adds up right now. The figures above are still the ones it uses.`,
+    link: (m: string, count: number) => `See ${m}'s ${transactions(count)}`,
+  },
 
   keptSoFar: "Kept so far",
   sameMonthsLastYear: (amount: string) => `${amount} in the same months last year`,

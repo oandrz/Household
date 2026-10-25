@@ -19,6 +19,7 @@ function monthFixture(overrides: Partial<CashflowMonth> = {}): CashflowMonth {
     projectedLeftMinor: null,
     confirmation: null,
     contributions: [],
+    reconciliation: null,
     ...overrides,
   };
 }

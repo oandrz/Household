@@ -25,6 +25,7 @@ const month = {
   projectedLeftMinor: null,
   confirmation: null,
   contributions: [{ kind: "spread_bill", name: "Car insurance", amountMinor: 17500, paidOn: "2026-03-14" }],
+  reconciliation: null,
 };
 
 const page = {

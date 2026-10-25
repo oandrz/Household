@@ -732,7 +732,7 @@ describe("the real route tree", () => {
           current: {
             month: "2026-10", status: "current", inMinor: 0, outMinor: 0, leftMinor: 0,
             keptBasisPoints: null, spreadMinor: 0, loanMinor: 0, transactionCount: 0, grey: [],
-            unconvertibleCurrencies: [], projectedLeftMinor: null, confirmation: null, contributions: [],
+            unconvertibleCurrencies: [], projectedLeftMinor: null, confirmation: null, contributions: [], reconciliation: null,
           },
           recent: [],
           year: {

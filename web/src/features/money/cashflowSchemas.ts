@@ -80,6 +80,31 @@ const cashflowContributionSchema = z.object({
   paidOn: z.string(),
 });
 
+export const cashflowSumLineSchema = z.object({
+  kind: z.enum(["bill_in_full", "bill_share", "loan"]),
+  name: z.string(),
+  // Signed: a bill taken out in full is negative, shares and loans positive.
+  amountMinor: z.number(),
+  paidOn: z.string(),
+  // 1-based month of the spread; 0 for a line that is not a share.
+  shareIndex: z.number(),
+  // Months the bill covers; 0 for a loan.
+  spread: z.number(),
+});
+export type CashflowSumLine = z.infer<typeof cashflowSumLineSchema>;
+
+// The server has already checked that the lines add up to the month's money
+// out; the frontend only displays them.
+export const cashflowReconciliationSchema = z.object({
+  status: z.enum(["shown", "no_rate", "mismatch"]),
+  spentMinor: z.number(),
+  lines: z.array(cashflowSumLineSchema),
+  unratedCount: z.number(),
+  unratedEarlierBill: z.boolean(),
+  unratedCurrencies: z.array(z.string()),
+});
+export type CashflowReconciliation = z.infer<typeof cashflowReconciliationSchema>;
+
 export const cashflowMonthSchema = z.object({
   month: z.string(),
   status: cashflowMonthStatusSchema,
@@ -95,6 +120,8 @@ export const cashflowMonthSchema = z.object({
   projectedLeftMinor: z.number().nullable(),
   confirmation: cashflowConfirmationSchema.nullable(),
   contributions: z.array(cashflowContributionSchema),
+  // Null for a month with nothing worked out yet (future, or none).
+  reconciliation: cashflowReconciliationSchema.nullable(),
 });
 export type CashflowMonth = z.infer<typeof cashflowMonthSchema>;
 
