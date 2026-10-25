@@ -13,7 +13,13 @@ needed them to exist (see "Where things stand" below).
 | ⬜ | Not started |
 | 🚫 | Out of scope — three different reasons, and **the row always says which**: marked "· not built" by the design itself; cut outright by the product owner (the audit screen, §9 — the code was deleted); or **deferred past the current release** by the product owner, meaning it is expected back later (the Family calendar, §7). A 🚫 is not a promise that something will never exist — it is a statement that it is not this release's work, and the row says what would bring it back |
 
-**Where things stand:** 155 of 175 features built or partly built — and **five of the 175 are 🚫**, so the honest denominator for this release is 170.
+**Where things stand:** 156 of 176 features built or partly built — and **five of the 176 are 🚫**, so the honest denominator for this release is 171.
+
+> **Recounted 2026-10-25 (Cashflow review fixes)**. One row the design does
+> not draw is added to Money, ✅: "Cashflow — how money out adds up from the
+> ledger". Money goes 43/6/8 → 44/6/8. Totals **134/22/15/5 = 176**,
+> Built + Partial **156**, denominator **171**. Recounted by script before
+> and after the edit; the first run reproduced the previous table exactly.
 
 > **Recounted 2026-10-25 (Cashflow design review)**. "Cashflow — monthly
 > view" moves 🟡 → ✅: the month table now fits at phone width. Money goes
@@ -1220,13 +1226,13 @@ above now states Built + Partial **113** of **134**, denominator **129**.
 | Navigation shell | 7 | 1 | 1 | 0 |
 | Household settings | 18 | 8 | 2 | 0 |
 | Overview (home) | 9 | 2 | 1 | 0 |
-| Money | 43 | 6 | 8 | 0 |
+| Money | 44 | 6 | 8 | 0 |
 | Marriage | 17 | 2 | 2 | 0 |
 | Family | 0 | 0 | 0 | 3 |
 | Household extras | 0 | 0 | 0 | 1 |
 | Platform administration | 7 | 1 | 0 | 1 |
 | Automation | 10 | 0 | 0 | 0 |
-| **Total** | **133** | **22** | **15** | **5** |
+| **Total** | **134** | **22** | **15** | **5** |
 
 ---
 
@@ -1466,6 +1472,7 @@ browser on 2026-10-25 against a freshly seeded household.
 | Not-enough-data rule with "Looks right, count it" (no mockup) | ✅ — a finished month with no income, spending under half of usual, or an amount that could not be converted goes grey and drops out of every average. "Looks right, count it" clears the first two for that month ("Counted by Andreas on 25 Oct 2026") and Undo reverses it; stored in `cashflow_month_confirmations` via `PUT`/`DELETE /cashflow/confirmations/{month}`, owner-only. |
 | Cash cushion (no mockup) | ✅ — months of usual money out that the household's `cash` accounts would cover, to one decimal. Shown as "—" with a reason, never as 0, when there is no cash account, no solid month to average, or an account cannot be converted; the light cannot be green then. |
 | Open the ledger at a month from a link (no mockup) | ✅ — `/money/transactions?month=2026-09`; a month in the Cashflow table links there, and the ledger's "Spent in September" reconciles with Money out before spread bills and loan transfers. |
+| Cashflow — how money out adds up from the ledger (no mockup) | ✅ — click a month in the table and its detail opens a worked sum, built by the server beside the totals so the screen never re-adds: Spent in the month (the ledger's figure), minus a yearly bill paid that month, plus the month's share of each spread bill, plus loan repayments, equals Money out ("= Money out so far" for the current month, whose share note reads "Month 2 of 12 of the yearly bill paid 20 Sep 2026"). Every line has a plain-words note, and "See September's N transactions" links to the ledger at that month. The sum is hidden for a month with nothing to add up and for one with an amount that could not be converted, rather than showing a total that disagrees with the row. A Go parity test asserts the sum's total equals the row's Money out. Walked 2026-10-25: September reads S\$5,194.50, −S\$2,100.00, +S\$175.00, +S\$800.00 = S\$4,069.50, and the ledger's "Spent in September 2026" shows the same S\$5,194.50. |
 
 **Portfolio — investment holdings.** Twelve rows the design does not draw at
 all: `design/Household Dashboard.dc.html` shows "Investments & CPF" only as a

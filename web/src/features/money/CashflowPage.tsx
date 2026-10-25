@@ -31,6 +31,15 @@ export function CashflowPage({ initialView = "monthly", initialYear }: Props) {
   const [infoOpen, setInfoOpen] = useState(false);
   const tabRefs = useRef<Record<Tab, HTMLButtonElement | null>>({ monthly: null, yearly: null });
   const navigate = useNavigate();
+
+  // The address can change without this page remounting (the sidebar link
+  // back to a plain /money/cashflow while on Yearly), so the screen follows
+  // it. Our own writeAddress calls land on values the state already holds.
+  useEffect(() => {
+    setTab(initialView);
+    setYear(initialYear);
+  }, [initialView, initialYear]);
+
   const cashflow = useCashflow(year);
   const currencies = useCurrencies();
 

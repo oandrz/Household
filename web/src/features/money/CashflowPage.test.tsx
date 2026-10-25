@@ -1,5 +1,6 @@
 // Drives the whole Cashflow page through its real components against a
 // stubbed network, so what is asserted is what a person would read.
+import { useState } from "react";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { renderWithRouter } from "../../test/renderWithRouter";
@@ -462,6 +463,28 @@ describe("negative cushion", () => {
     expect(cushionText({ known: true, tenths: -42, reason: "" })).toBe("-4.2 months");
     const base = { keptBasisPoints: null, cushionTenths: -42, billName: "", billUnconvertible: false };
     expect(reasonText({ ...base, code: "cushion_under_1" }, 3)).toContain("-4.2 months");
+  });
+});
+
+describe("CashflowPage address", () => {
+  it("follows the address when it changes without a remount", async () => {
+    stubFetchRoutes({
+      "GET /api/v1/currencies": CURRENCIES,
+      "GET /api/v1/cashflow": { status: 200, body: pageFixture() },
+    });
+    function Harness() {
+      const [view, setView] = useState<"monthly" | "yearly">("yearly");
+      return (
+        <>
+          <button onClick={() => setView("monthly")}>plain address</button>
+          <CashflowPage initialView={view} />
+        </>
+      );
+    }
+    renderWithRouter(<Harness />);
+    expect(await screen.findByRole("tab", { name: "Yearly", selected: true })).toBeTruthy();
+    fireEvent.click(screen.getByText("plain address"));
+    expect(await screen.findByRole("tab", { name: "Monthly", selected: true })).toBeTruthy();
   });
 });
 

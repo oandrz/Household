@@ -7516,6 +7516,33 @@ route with a missing guard has no second line of defence.
   arithmetic above, and neither page says so. Reporting that as "matches"
   overstated it.
 
+- **Review fixes, same day: the worked sum, and what the second walk
+  caught.** The September sum now reads S$5,194.50, -S$2,100.00, +S$175.00,
+  +S$800.00 = S$4,069.50, and "Spent in September 2026" on the Transactions
+  page is the same S$5,194.50. That settles the correction above: the screen
+  now shows the arithmetic instead of leaving the reader to find it. A Go
+  parity test asserts the sum's total equals the row's Money out, so the two
+  cannot drift.
+- **Address and screen disagreed.** The tab and year were read from the
+  address once, into state, so clicking the sidebar "Cashflow" link while on
+  Yearly changed the address to a plain `/money/cashflow` and left Yearly on
+  screen; a reload then showed Monthly. Every test mounted the page fresh, so
+  none could see it. The fix follows the props (`CashflowPage.test.tsx`,
+  "follows the address when it changes without a remount", which failed
+  before). The rule: **state seeded from the address must also follow the
+  address**, and a test must change the address under a mounted page, not
+  only mount at a new one.
+- **A stretched SVG stretches everything drawn in it.** The chart is a
+  fixed-height `preserveAspectRatio="none"` SVG, so a stripe pattern is
+  squashed with the box and a slash as wide as the bar flattens to a
+  near-horizontal line at desktop width. Grey bars use a fill plus an
+  outline, and the cut-off slashes keep a small fixed run so they stay
+  steep. The walk measured the chart at 200px tall at both 1440px and 375px.
+  Check a chart's drawing at two widths, not one.
+- **A walk can only show data the household has.** This seeded household has
+  no grey "not enough data" month, so that bar style was checked by its
+  test and legend only, not by eye.
+
 ### The household calendar's browser walk (2026-10-01)
 
 - **Which zone to walk in depends on the hour, and so does what the walk
