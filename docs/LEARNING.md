@@ -7561,6 +7561,14 @@ route with a missing guard has no second line of defence.
   sideways cuts off anything outside its box, including the 2px ring (2px
   offset) on a control at its left edge. Give the wrapper padding and the
   same negative margin, and tab to the first control to check.
+- **A `<th>` is bold until told otherwise.** Turning the worked sum from a
+  list into a table (so a screen reader hears each label with its amount)
+  made its "= Money out" label render at weight 700 beside a 600 amount:
+  Tailwind's preflight does not reset `th`'s browser weight, and a class on
+  the `<tr>` does not reach a cell that sets its own. Every jsdom test
+  passed, because none can compute a weight; measuring `fontWeight` in the
+  browser found it. When a list becomes a table, set the weight on each
+  `th` and measure it.
 
 ### The household calendar's browser walk (2026-10-01)
 
