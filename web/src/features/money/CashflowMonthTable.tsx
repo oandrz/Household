@@ -98,7 +98,7 @@ export function CashflowMonthTable({ months, formatAmount }: Props) {
                         aria-expanded={open}
                         aria-controls={open ? `cashflow-detail-${month.month}` : undefined}
                         onClick={() => setOpenMonth(open ? null : month.month)}
-                        className="min-h-11 text-left font-semibold text-accent lg:min-h-0"
+                        className="min-h-11 text-left font-semibold text-accent hover:underline lg:min-h-0"
                       >
                         {monthLabel(month.month)}
                       </button>

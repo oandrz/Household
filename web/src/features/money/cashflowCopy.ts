@@ -275,6 +275,7 @@ export const cashflowCopy = {
   billsToComeNote: "For information. Once paid, each is spread across the months it covers.",
   billsNone: "No quarterly or yearly bills are due before the end of the year.",
   billUnconvertible: "can't be converted",
+  tableHeading: "Month by month",
   previousYear: "Previous year",
   nextYear: "Next year",
 

@@ -102,6 +102,7 @@ export function CashflowMonthly({ data, formatAmount }: Props) {
       </section>
 
       <section className="rounded-xl border border-hairline bg-card p-[22px]">
+        <h2 className="mb-3 text-xs text-muted">{cashflowCopy.tableHeading}</h2>
         <CashflowMonthTable months={data.recent} formatAmount={formatAmount} />
       </section>
     </div>

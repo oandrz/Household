@@ -329,10 +329,28 @@ const moneyBillsRoute = createRoute({
 });
 // Cashflow joins the other Money pages under the same guard. The read is
 // owner-only on the server too, so the page handles that refusal itself.
+// The tab and the year live in the address so a reload or a shared link lands
+// on the same view; Monthly and the current year have no parameter.
+type CashflowSearch = { view?: "yearly"; year?: number };
+export function cashflowSearch(search: Record<string, unknown>): CashflowSearch {
+  const result: CashflowSearch = {};
+  if (search.view === "yearly") result.view = "yearly";
+  const year = typeof search.year === "number" ? search.year : /^\d{4}$/.test(String(search.year)) ? Number(search.year) : NaN;
+  if (Number.isInteger(year) && year >= 2000 && year <= 9999) result.year = year;
+  return result;
+}
 const moneyCashflowRoute = createRoute({
   getParentRoute: () => moneyGuardRoute,
   path: "cashflow",
-  component: CashflowPage,
+  validateSearch: cashflowSearch,
+  // Named for the rules-of-hooks reason SettingsRouteComponent gives below.
+  component: function MoneyCashflowRouteComponent() {
+    const search = useSearch({ from: "/authenticated/shell/money/cashflow" });
+    // Checked again here for the reason moneyTransactionsRoute gives: the raw
+    // URL search is merged over validateSearch's result.
+    const clean = cashflowSearch(search);
+    return <CashflowPage initialView={clean.view ?? "monthly"} initialYear={clean.year} />;
+  },
 });
 
 // Marriage's own guard, the moneyGuardRoute shape restated: a pathless route

@@ -21,7 +21,7 @@ import { createAppQueryClient } from "../api/queryClient";
 import { createUnauthorizedHandler } from "../api/unauthorizedRedirect";
 import type { InvitePreview, Me } from "../features/auth/schemas";
 import { stubFetchRoutes } from "../test/fetchStub";
-import { routeTree } from "./router";
+import { cashflowSearch, routeTree } from "./router";
 
 function meFixture(overrides: Partial<Me> = {}): Me {
   return {
@@ -1308,5 +1308,22 @@ describe("the real route tree", () => {
     expect(await screen.findByText("Page not found.")).toBeInTheDocument();
     expect(screen.queryByText("Hearth · Operator")).not.toBeInTheDocument();
     expect(router.state.location.pathname).toBe("/admin/flags");
+  });
+});
+
+describe("/money/cashflow search", () => {
+  it("keeps the yearly view and a four-digit year", () => {
+    expect(cashflowSearch({ view: "yearly", year: "2025" })).toEqual({ view: "yearly", year: 2025 });
+    expect(cashflowSearch({ view: "yearly", year: 2025 })).toEqual({ view: "yearly", year: 2025 });
+  });
+
+  it("drops a view that is not yearly and a year that is not a number", () => {
+    expect(cashflowSearch({ view: "weird", year: "abc" })).toEqual({});
+  });
+
+  it("drops a year outside 2000 to 9999 or with a fraction", () => {
+    expect(cashflowSearch({ year: "1999" })).toEqual({});
+    expect(cashflowSearch({ year: 10000 })).toEqual({});
+    expect(cashflowSearch({ year: 2025.5 })).toEqual({});
   });
 });

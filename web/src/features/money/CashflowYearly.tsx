@@ -24,7 +24,7 @@ export function CashflowYearly({ data, formatAmount, onSelectYear }: Props) {
   const currentYear = Number(data.current.month.slice(0, 4));
   const canGoBack = year.year > data.oldestYear;
   const canGoForward = year.year < currentYear;
-  const pickerButton = "min-h-11 min-w-11 rounded-lg border border-hairline text-[13px] text-ink disabled:opacity-40 lg:min-h-0 lg:min-w-0 lg:px-2.5 lg:py-1";
+  const pickerButton = "min-h-11 min-w-11 rounded-lg border border-hairline text-[13px] text-ink transition-colors duration-[var(--transition-state)] enabled:hover:bg-canvas enabled:active:bg-toggle-off disabled:opacity-40 lg:min-h-0 lg:min-w-0 lg:px-2.5 lg:py-1";
 
   return (
     <div className="flex flex-col gap-5">
