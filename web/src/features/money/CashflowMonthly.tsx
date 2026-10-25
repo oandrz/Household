@@ -72,10 +72,13 @@ export function CashflowMonthly({ data, formatAmount }: Props) {
             <div className="text-xs text-muted">
               {average.months < 3 ? cashflowCopy.averageOf(average.months) : cashflowCopy.average}
             </div>
+            {/* Each label stays on one line with its amount: a phone would
+                otherwise break "Left over" from the figure it names. */}
             <div className="mt-1 text-ink">
-              {cashflowCopy.moneyIn} {formatAmount(average.inMinor)} · {cashflowCopy.moneyOut}{" "}
-              {formatAmount(average.outMinor)} · {cashflowCopy.leftOver} {formatAmount(average.leftMinor)} ·{" "}
-              {keptLine(average.keptBasisPoints)}
+              <span className="whitespace-nowrap">{cashflowCopy.moneyIn} {formatAmount(average.inMinor)}</span> ·{" "}
+              <span className="whitespace-nowrap">{cashflowCopy.moneyOut} {formatAmount(average.outMinor)}</span> ·{" "}
+              <span className="whitespace-nowrap">{cashflowCopy.leftOver} {formatAmount(average.leftMinor)}</span> ·{" "}
+              <span className="whitespace-nowrap">{keptLine(average.keptBasisPoints)}</span>
             </div>
           </>
         )}
@@ -90,8 +93,9 @@ export function CashflowMonthly({ data, formatAmount }: Props) {
       >
         <div className="text-xs text-muted">{cashflowCopy.soFar(monthLabel(current.month))}</div>
         <div className="mt-1 text-ink">
-          {cashflowCopy.moneyIn} {formatAmount(current.inMinor)} · {cashflowCopy.moneyOut}{" "}
-          {formatAmount(current.outMinor)} · {cashflowCopy.leftOver} {formatAmount(current.leftMinor)}
+          <span className="whitespace-nowrap">{cashflowCopy.moneyIn} {formatAmount(current.inMinor)}</span> ·{" "}
+          <span className="whitespace-nowrap">{cashflowCopy.moneyOut} {formatAmount(current.outMinor)}</span> ·{" "}
+          <span className="whitespace-nowrap">{cashflowCopy.leftOver} {formatAmount(current.leftMinor)}</span>
         </div>
         <div className="mt-1 text-[11.5px] text-muted">{cashflowCopy.soFarNote}</div>
       </section>
