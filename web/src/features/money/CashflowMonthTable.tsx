@@ -72,7 +72,10 @@ export function CashflowMonthTable({ months, formatAmount }: Props) {
           {cashflowCopy.confirmError}
         </p>
       )}
-      <div className="overflow-x-auto">
+      {/* The padding, given back by the negative margin, leaves room for the
+          focus ring: overflow-x-auto clips anything outside its box, which cut
+          the ring off the month names, Close and the link on the left edge. */}
+      <div className="-mx-1.5 overflow-x-auto px-1.5">
         <table data-testid="cashflow-table" className="w-full border-collapse text-[13px] sm:min-w-[520px]">
           <thead>
             <tr className="text-left text-xs text-muted">
