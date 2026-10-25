@@ -7492,6 +7492,29 @@ route with a missing guard has no second line of defence.
 - **Measuring tip:** `docker update --cpus 0` does not remove a CPU limit
   once set; recreate the container (`docker compose up -d --force-recreate
   --no-deps api`) to get back to unlimited.
+- **Design review, same day: the chart's scale belonged to the month nobody
+  judges.** With a S$50,000 bonus in the month still running, its pale bar
+  set the chart's height and the three finished months (the ones the light
+  is judged on) drew as 2px slivers, on Monthly and on Yearly. Every chart
+  test passed, because they checked direction against the zero line and the
+  style of each bar, never what the tallest bar was allowed to be. The
+  final re-walk screenshot showed it plainly, and nobody read the picture
+  for anything but the light. Fixed: only settled months set the scale, and
+  the running month is cut off at the edge (`CashflowChartScale.test.tsx`,
+  which failed before the fix). The rule: **a chart's axis comes from the
+  values the page draws conclusions from.** A value shown for information
+  only must never be the one that decides how big everything else looks.
+- **Tabular figures cost width on a phone.** Adding `.tabular` to the month
+  table pushed it 1px past its card at 375px and back into sideways
+  scrolling, because Schibsted Grotesk widens "," and "." to a digit's width
+  (the `.tabular` comment in `index.css` warns about exactly this). Measure
+  `scrollWidth` against the box after any change to a number column, not
+  just after a layout change.
+- **Correction to the walk above:** "Spent in September" on the ledger
+  (S$5,194.50) and Cashflow's Money out (S$4,069.50 once the loan transfer
+  is in) are different numbers on screen. They reconcile only by the
+  arithmetic above, and neither page says so. Reporting that as "matches"
+  overstated it.
 
 ### The household calendar's browser walk (2026-10-01)
 
