@@ -2,6 +2,11 @@
 // a human decision (grey) or has one on record (confirmed) gets a second line
 // under it holding the reason and the button, so the same spot always answers
 // "why, and what can I do about it".
+//
+// On a phone the in and out columns are dropped so left over and the light,
+// the columns that answer "was it a good month", fit without scrolling
+// sideways. The trade-off accepted: a phone shows in and out only for the
+// last finished month, in the cards above the table.
 import { Fragment, useState } from "react";
 import {
   cashflowCopy,
@@ -68,12 +73,12 @@ export function CashflowMonthTable({ months, formatAmount }: Props) {
         </p>
       )}
       <div className="overflow-x-auto">
-        <table data-testid="cashflow-table" className="w-full min-w-[520px] border-collapse text-[13px]">
+        <table data-testid="cashflow-table" className="w-full border-collapse text-[13px] sm:min-w-[520px]">
           <thead>
             <tr className="text-left text-xs text-muted">
               <th scope="col" className="py-2 pr-3 font-normal">{cashflowCopy.tableMonth}</th>
-              <th scope="col" className="py-2 pr-3 text-right font-normal">{cashflowCopy.moneyIn}</th>
-              <th scope="col" className="py-2 pr-3 text-right font-normal">{cashflowCopy.moneyOut}</th>
+              <th scope="col" className="hidden py-2 pr-3 text-right font-normal sm:table-cell">{cashflowCopy.moneyIn}</th>
+              <th scope="col" className="hidden py-2 pr-3 text-right font-normal sm:table-cell">{cashflowCopy.moneyOut}</th>
               <th scope="col" className="py-2 pr-3 text-right font-normal">{cashflowCopy.leftOver}</th>
               <th scope="col" className="py-2 pr-3 text-right font-normal">{cashflowCopy.tableKept}</th>
               <th scope="col" className="py-2 font-normal">{cashflowCopy.tableLight}</th>
@@ -97,13 +102,13 @@ export function CashflowMonthTable({ months, formatAmount }: Props) {
                         {monthLabel(month.month)}
                       </button>
                     </td>
-                    <td className="py-2 pr-3 text-right text-ink">{formatAmount(month.inMinor)}</td>
-                    <td className="py-2 pr-3 text-right text-ink">{formatAmount(month.outMinor)}</td>
+                    <td className="hidden py-2 pr-3 text-right text-ink sm:table-cell">{formatAmount(month.inMinor)}</td>
+                    <td className="hidden py-2 pr-3 text-right text-ink sm:table-cell">{formatAmount(month.outMinor)}</td>
                     <td className="py-2 pr-3 text-right text-ink">{formatAmount(month.leftMinor)}</td>
                     <td className="py-2 pr-3 text-right text-ink">{keptCell(month.keptBasisPoints)}</td>
                     <td className="py-2" data-tone={light.tone}>
                       <span className="inline-flex items-center gap-1.5 text-xs text-ink">
-                        <span aria-hidden="true" className={`inline-block h-2.5 w-2.5 rounded-full ${DOT_CLASS[light.tone]}`} />
+                        <span aria-hidden="true" className={`inline-block h-2.5 w-2.5 shrink-0 rounded-full ${DOT_CLASS[light.tone]}`} />
                         {light.label}
                       </span>
                     </td>

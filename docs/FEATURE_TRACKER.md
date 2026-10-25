@@ -15,6 +15,12 @@ needed them to exist (see "Where things stand" below).
 
 **Where things stand:** 155 of 175 features built or partly built — and **five of the 175 are 🚫**, so the honest denominator for this release is 170.
 
+> **Recounted 2026-10-25 (Cashflow design review)**. "Cashflow — monthly
+> view" moves 🟡 → ✅: the month table now fits at phone width. Money goes
+> 42/7/8 → 43/6/8. Totals **133/22/15/5 = 175**, Built + Partial **155**,
+> denominator **170**. Recounted by script before and after the edit; the
+> first run reproduced the previous table exactly.
+
 > **Recounted 2026-10-25 (Cashflow)**. Six rows the design does not draw are
 > added to Money: five ✅ and "Cashflow — monthly view" 🟡 (the month table
 > scrolls sideways at phone width). Money goes 37/6/8 → 42/7/8. Totals
@@ -1214,13 +1220,13 @@ above now states Built + Partial **113** of **134**, denominator **129**.
 | Navigation shell | 7 | 1 | 1 | 0 |
 | Household settings | 18 | 8 | 2 | 0 |
 | Overview (home) | 9 | 2 | 1 | 0 |
-| Money | 42 | 7 | 8 | 0 |
+| Money | 43 | 6 | 8 | 0 |
 | Marriage | 17 | 2 | 2 | 0 |
 | Family | 0 | 0 | 0 | 3 |
 | Household extras | 0 | 0 | 0 | 1 |
 | Platform administration | 7 | 1 | 0 | 1 |
 | Automation | 10 | 0 | 0 | 0 |
-| **Total** | **132** | **23** | **15** | **5** |
+| **Total** | **133** | **22** | **15** | **5** |
 
 ---
 
@@ -1454,7 +1460,7 @@ browser on 2026-10-25 against a freshly seeded household.
 
 | Feature | State |
 |---|---|
-| Cashflow — monthly view (no mockup) | 🟡 — `/money/cashflow`: a chart and a table of money in, money out, left over, kept and the light for each month, with a yearly bill's share spread across the months it covers and a transfer into a loan counted as money out. Walked: numbers move on add, a S$2,100 yearly bill paid on 20 Sep shows S$175 in Sep and in Oct, and the ledger's "Spent in September" reconciles with Money out. **Gap:** at phone width (375px) the month table scrolls sideways inside its card, so Left over, Kept and Light start off-screen. |
+| Cashflow — monthly view (no mockup) | ✅ — `/money/cashflow`: a chart and a table of money in, money out, left over, kept and the light for each month, with a yearly bill's share spread across the months it covers and a transfer into a loan counted as money out. Walked: numbers move on add, a S$2,100 yearly bill paid on 20 Sep shows S$175 in Sep and in Oct, and the ledger's "Spent in September" reconciles with Money out. At phone width (375px) the table drops its Money in and Money out columns so Left over, Kept and Light fit without scrolling sideways (closed by the 2026-10-25 design review; before it, those three columns started off-screen). |
 | Cashflow — yearly view (no mockup) | ✅ — calendar years with a year picker back to the oldest year that has a transaction: "kept so far" beside the same months of last year, and "heading for" the full year. Read from `GET /cashflow?year=`. |
 | Cashflow light with reasons (no mockup) | ✅ — green, yellow, red or grey, each with the reasons it is that colour, from `domain.JudgeCashflow`. It never goes above yellow on two data rules: `short_average` while fewer than three of the last three finished months can be counted, and `spending_not_checked` while the last finished month or any averaged month has not been through the "spending under half of usual" check (it needs three solid months before a month, unless the month was confirmed). In practice a new household can first reach green with six finished months. Found in the walk (one finished month of S$94.50 read "On track") and in the final review (three finished months with a sparse last one still read green). A bill with no exchange rate warns with its own sentence (`billUnconvertible`) instead of claiming it is larger than the usual left-over. |
 | Not-enough-data rule with "Looks right, count it" (no mockup) | ✅ — a finished month with no income, spending under half of usual, or an amount that could not be converted goes grey and drops out of every average. "Looks right, count it" clears the first two for that month ("Counted by Andreas on 25 Oct 2026") and Undo reverses it; stored in `cashflow_month_confirmations` via `PUT`/`DELETE /cashflow/confirmations/{month}`, owner-only. |
