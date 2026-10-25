@@ -98,7 +98,7 @@ export function CashflowMonthly({ data, formatAmount }: Props) {
 
       <section className="rounded-xl border border-hairline bg-card p-[22px]">
         <h2 className="mb-3 text-xs text-muted">{cashflowCopy.chartLabel}</h2>
-        <CashflowChart months={data.recent} currency={data.currency} />
+        <CashflowChart months={data.recent} currency={data.currency} formatAmount={formatAmount} />
       </section>
 
       <section className="rounded-xl border border-hairline bg-card p-[22px]">

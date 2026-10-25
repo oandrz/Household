@@ -2,6 +2,7 @@
 // file is the only place they become words, so the wording rule lives in one
 // spot: state facts, never advice, and never call a household "safe". Green
 // reads "On track by common guidelines".
+import { monthLabel } from "./month";
 import type {
   CashflowColour,
   CashflowGreyReason,
@@ -279,7 +280,8 @@ export const cashflowCopy = {
 
   chartLabel: "Left over each month",
   chartLegend: {
-    solid: "Finished",
+    left: "Money left over",
+    nothing: "Nothing left over",
     grey: "Not enough data",
     current: "This month so far",
     projected: "Projected",
@@ -294,3 +296,28 @@ export const cashflowCopy = {
     "A loan set up as a bill should not also be logged as a transfer, or it counts twice.",
   ],
 } as const;
+
+// The hover text for one bar, spoken the way the table speaks: a month with
+// nothing left over says so and shows the figure in brackets. `clipped` adds
+// the note that the drawn bar is shorter than the real amount.
+export function barTitle(
+  month: CashflowMonth,
+  value: number,
+  clipped: boolean,
+  formatAmount: (minor: number) => string,
+): string {
+  const name = monthLabel(month.month);
+  const cut = clipped ? " (bar cut off)" : "";
+  switch (month.status) {
+    case "grey":
+      return `${name}: not enough data`;
+    case "current":
+      return `${name} so far: ${formatAmount(value)} left over${cut}`;
+    case "future":
+      return `${name}, projected: ${formatAmount(value)} left over${cut}`;
+    default:
+      return value > 0
+        ? `${name}: ${formatAmount(value)} left over${cut}`
+        : `${name}: nothing left over (${formatAmount(value)})${cut}`;
+  }
+}

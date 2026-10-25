@@ -5,10 +5,10 @@
 // Each kind of month looks different on purpose, so a glance tells "a result"
 // from "not a result":
 //   finished   solid, green above zero and red below
-//   grey       striped: the month is there but too thin to trust
+//   grey       tinted with an outline: the month is there but too thin to trust
 //   current    pale and uncoloured: still running
 //   projected  dashed outline: a forecast, not money that happened
-import { cashflowCopy, shortMonthLabel } from "./cashflowCopy";
+import { barTitle, cashflowCopy, shortMonthLabel } from "./cashflowCopy";
 import type { CashflowMonth } from "./cashflowSchemas";
 
 const WIDTH = 320;
@@ -19,6 +19,7 @@ const PAD_BOTTOM = 24;
 const PLOT_WIDTH = WIDTH - PAD_X * 2;
 const PLOT_HEIGHT = HEIGHT - PAD_TOP - PAD_BOTTOM;
 const BAR_GAP = 4;
+const CUT_SIZE = 3;
 
 type BarStyle = "solid-positive" | "solid-negative" | "grey" | "current" | "projected";
 
@@ -50,11 +51,47 @@ function styleOf(month: CashflowMonth, value: number): BarStyle {
   }
 }
 
+// The colour a bar style is drawn in. Every style is listed so a new one
+// cannot silently fall into another's colour.
+function colourOf(style: BarStyle): string {
+  switch (style) {
+    case "solid-positive":
+    case "projected":
+      return "text-accent";
+    case "solid-negative":
+      return "text-danger";
+    case "grey":
+    case "current":
+      return "text-muted";
+    default:
+      throw new Error(`unknown bar style: ${style satisfies never}`);
+  }
+}
+
+// Grey is a faint fill plus an outline rather than diagonal stripes: the chart
+// is stretched to a fixed height, and a stripe pattern would stretch with it.
+function fillOf(style: BarStyle): string {
+  return style === "projected" ? "none" : "currentColor";
+}
+
+function opacityOf(style: BarStyle): number {
+  switch (style) {
+    case "current":
+      return 0.35;
+    case "grey":
+      return 0.25;
+    default:
+      return 1;
+  }
+}
+
+function isOutlined(style: BarStyle): boolean {
+  return style === "grey" || style === "projected";
+}
+
 // One legend entry: a small swatch drawn the way its bar is drawn, then the
-// label. The swatch is decoration; the label carries the meaning. Its stripe
-// pattern has its own id so it does not depend on the chart's <defs>.
+// label. The swatch is decoration; the label carries the meaning.
 function LegendItem({ style, label }: { style: BarStyle; label: string }) {
-  const stripes = "cashflow-legend-stripes";
   return (
     <li className="flex items-center gap-1.5">
       <svg
@@ -64,25 +101,18 @@ function LegendItem({ style, label }: { style: BarStyle; label: string }) {
         width="12"
         height="12"
         viewBox="0 0 12 12"
-        className={style === "solid-positive" ? "text-accent" : "text-muted"}
+        className={colourOf(style)}
       >
-        {style === "grey" && (
-          <defs>
-            <pattern id={stripes} width="4" height="4" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
-              <line x1="0" y1="0" x2="0" y2="4" stroke="currentColor" strokeWidth="2" />
-            </pattern>
-          </defs>
-        )}
         <rect
           x="0.5"
           y="0.5"
           width="11"
           height="11"
           rx="1"
-          fill={style === "grey" ? `url(#${stripes})` : style === "projected" ? "none" : "currentColor"}
-          stroke={style === "grey" || style === "projected" ? "currentColor" : "none"}
+          fill={fillOf(style)}
+          fillOpacity={opacityOf(style)}
+          stroke={isOutlined(style) ? "currentColor" : "none"}
           strokeDasharray={style === "projected" ? "3 2" : undefined}
-          opacity={style === "current" ? 0.35 : 1}
         />
       </svg>
       {label}
@@ -90,12 +120,38 @@ function LegendItem({ style, label }: { style: BarStyle; label: string }) {
   );
 }
 
+// Two white diagonal strokes across the clipped end of a bar, the usual "this
+// goes on" mark. Drawn in the card colour so it reads as a cut in the bar.
+function CutMark({ x, width, y, atTop }: { x: number; width: number; y: number; atTop: boolean }) {
+  const inward = atTop ? CUT_SIZE : -CUT_SIZE;
+  return (
+    <g data-testid="cashflow-bar-cut" className="text-card">
+      {[CUT_SIZE, CUT_SIZE * 2.5].map((offset) => {
+        const lineY = y + (atTop ? offset : -offset);
+        return (
+          <line
+            key={offset}
+            x1={x}
+            x2={x + width}
+            y1={lineY + inward / 2}
+            y2={lineY - inward / 2}
+            stroke="currentColor"
+            strokeWidth={1.5}
+            vectorEffect="non-scaling-stroke"
+          />
+        );
+      })}
+    </g>
+  );
+}
+
 type Props = {
   months: CashflowMonth[];
   currency: string;
+  formatAmount: (minor: number) => string;
 };
 
-export function CashflowChart({ months, currency }: Props) {
+export function CashflowChart({ months, currency, formatAmount }: Props) {
   if (months.length === 0) return null;
 
   const values = months.map(valueOf);
@@ -126,50 +182,42 @@ export function CashflowChart({ months, currency }: Props) {
           viewBox={`0 0 ${WIDTH} ${HEIGHT}`}
           role="img"
           aria-label={`${cashflowCopy.chartLabel}, ${months[0].month} to ${months[months.length - 1].month}, in ${currency}`}
-          className="w-full"
+          preserveAspectRatio="none"
+          className="h-[200px] w-full"
         >
-          <defs>
-            <pattern id="cashflow-stripes" width="4" height="4" patternUnits="userSpaceOnUse" patternTransform="rotate(45)" className="text-muted">
-              <line x1="0" y1="0" x2="0" y2="4" stroke="currentColor" strokeWidth="2" />
-            </pattern>
-          </defs>
           {months.map((month, index) => {
             const value = values[index];
             if (value === null) return null;
             const style = styleOf(month, value);
-            const y = PAD_TOP + ((max - Math.min(max, Math.max(min, value))) / span) * PLOT_HEIGHT;
-            const colourClass =
-              style === "current" || style === "grey"
-                ? "text-muted"
-                : value > 0
-                  ? "text-accent"
-                  : "text-danger";
+            const clamped = Math.min(max, Math.max(min, value));
+            const clipped = clamped !== value;
+            const y = PAD_TOP + ((max - clamped) / span) * PLOT_HEIGHT;
+            const x = PAD_X + index * slot + BAR_GAP / 2;
+            const outlined = isOutlined(style);
             return (
-              <rect
-                key={month.month}
-                data-testid="cashflow-bar"
-                data-month={month.month}
-                data-style={style}
-                x={PAD_X + index * slot + BAR_GAP / 2}
-                y={Math.min(y, baselineY)}
-                width={barWidth}
-                height={Math.max(1, Math.abs(baselineY - y))}
-                rx={1}
-                className={colourClass}
-                fill={
-                  style === "grey"
-                    ? "url(#cashflow-stripes)"
-                    : style === "projected"
-                      ? "none"
-                      : "currentColor"
-                }
-                stroke={style === "grey" || style === "projected" ? "currentColor" : "none"}
-                strokeWidth={style === "grey" || style === "projected" ? 1 : 0}
-                strokeDasharray={style === "projected" ? "3 2" : undefined}
-                opacity={style === "current" ? 0.35 : 1}
-              >
-                <title>{month.month}</title>
-              </rect>
+              <g key={month.month}>
+                <rect
+                  data-testid="cashflow-bar"
+                  data-month={month.month}
+                  data-style={style}
+                  data-clipped={clipped ? "true" : undefined}
+                  x={x}
+                  y={Math.min(y, baselineY)}
+                  width={barWidth}
+                  height={Math.max(1, Math.abs(baselineY - y))}
+                  rx={1}
+                  className={colourOf(style)}
+                  fill={fillOf(style)}
+                  fillOpacity={opacityOf(style)}
+                  stroke={outlined ? "currentColor" : "none"}
+                  strokeWidth={outlined ? 1 : 0}
+                  strokeDasharray={style === "projected" ? "3 2" : undefined}
+                  vectorEffect={outlined ? "non-scaling-stroke" : undefined}
+                >
+                  <title>{barTitle(month, value, clipped, formatAmount)}</title>
+                </rect>
+                {clipped && <CutMark x={x} width={barWidth} y={y} atTop={value > clamped} />}
+              </g>
             );
           })}
           {min < 0 && (
@@ -180,6 +228,7 @@ export function CashflowChart({ months, currency }: Props) {
               y2={baselineY}
               stroke="currentColor"
               strokeWidth={0.5}
+              vectorEffect="non-scaling-stroke"
               className="text-muted"
             />
           )}
@@ -195,7 +244,8 @@ export function CashflowChart({ months, currency }: Props) {
         ))}
       </div>
       <ul data-testid="cashflow-legend" className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[11.5px] text-muted">
-        <LegendItem style="solid-positive" label={cashflowCopy.chartLegend.solid} />
+        <LegendItem style="solid-positive" label={cashflowCopy.chartLegend.left} />
+        <LegendItem style="solid-negative" label={cashflowCopy.chartLegend.nothing} />
         <LegendItem style="grey" label={cashflowCopy.chartLegend.grey} />
         <LegendItem style="current" label={cashflowCopy.chartLegend.current} />
         <LegendItem style="projected" label={cashflowCopy.chartLegend.projected} />

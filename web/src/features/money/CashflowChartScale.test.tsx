@@ -25,7 +25,7 @@ function monthFixture(overrides: Partial<CashflowMonth> = {}): CashflowMonth {
 }
 
 function barHeights(months: CashflowMonth[]) {
-  render(<CashflowChart months={months} currency="SGD" />);
+  render(<CashflowChart months={months} currency="SGD" formatAmount={(minor) => String(minor)} />);
   const bars = within(screen.getByTestId("cashflow-chart")).getAllByTestId("cashflow-bar");
   const height = (month: string) =>
     Number(bars.find((bar) => bar.getAttribute("data-month") === month)!.getAttribute("height"));

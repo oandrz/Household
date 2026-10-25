@@ -427,12 +427,13 @@ describe("CashflowChart legend", () => {
     const swatches = within(legend).getAllByTestId("cashflow-legend-swatch");
     expect(swatches.map((swatch) => swatch.getAttribute("data-style"))).toEqual([
       "solid-positive",
+      "solid-negative",
       "grey",
       "current",
       "projected",
     ]);
     for (const swatch of swatches) expect(swatch).toHaveAttribute("aria-hidden", "true");
-    for (const label of ["Finished", "Not enough data", "This month so far", "Projected"]) {
+    for (const label of ["Money left over", "Nothing left over", "Not enough data", "This month so far", "Projected"]) {
       expect(within(legend).getByText(label)).toBeInTheDocument();
     }
   });
