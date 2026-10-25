@@ -254,18 +254,19 @@ export function CashflowChart({ months, formatAmount }: Props) {
               </g>
             );
           })}
-          {min < 0 && (
-            <line
-              x1={PAD_X}
-              x2={WIDTH - PAD_X}
-              y1={baselineY}
-              y2={baselineY}
-              stroke="currentColor"
-              strokeWidth={0.5}
-              vectorEffect="non-scaling-stroke"
-              className="text-muted"
-            />
-          )}
+          {/* Always drawn: with every month above zero the bars would
+              otherwise float over the empty months with nothing to stand on. */}
+          <line
+            data-testid="cashflow-zero-line"
+            x1={PAD_X}
+            x2={WIDTH - PAD_X}
+            y1={baselineY}
+            y2={baselineY}
+            stroke="currentColor"
+            strokeWidth={0.5}
+            vectorEffect="non-scaling-stroke"
+            className="text-muted"
+          />
         </svg>
         <ul data-testid="cashflow-chart-values" className="sr-only">
           {spoken.map((bar) => (
