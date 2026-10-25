@@ -49,6 +49,12 @@ var (
 	// ErrBudgetMonthOutOfRange refuses a budget for a month outside
 	// BudgetMonthAllowed's window.
 	ErrBudgetMonthOutOfRange = errors.New("budget month is outside the allowed range")
+	// ErrCashflowMonthOutOfRange refuses confirming a month that is not the
+	// first of a month, is before 2000-01, or is not before the current month.
+	ErrCashflowMonthOutOfRange = errors.New("cashflow month is outside the allowed range")
+	// ErrCashflowYearOutOfRange refuses a yearly summary for a year outside
+	// the household's history or in the future.
+	ErrCashflowYearOutOfRange = errors.New("cashflow year is outside the allowed range")
 
 	// ErrAmountOverflow is Money arithmetic whose answer does not fit in an
 	// int64: a sum (Money.Add), a conversion (Rate.Apply), a priced or
