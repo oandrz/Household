@@ -22,6 +22,9 @@ const BAR_GAP = 4;
 
 type BarStyle = "solid-positive" | "solid-negative" | "grey" | "current" | "projected";
 
+// Zero left over is drawn as a bad month (red), as the table does. A grey
+// month is never coloured by its sign: a month with spending missing would
+// otherwise be the tallest green bar.
 // Months with no data at all (status "none") have no value to draw.
 function valueOf(month: CashflowMonth): number | null {
   switch (month.status) {
@@ -43,7 +46,7 @@ function styleOf(month: CashflowMonth, value: number): BarStyle {
     case "future":
       return "projected";
     default:
-      return value >= 0 ? "solid-positive" : "solid-negative";
+      return value > 0 ? "solid-positive" : "solid-negative";
   }
 }
 
@@ -88,9 +91,9 @@ export function CashflowChart({ months, currency }: Props) {
             const style = styleOf(month, value);
             const y = PAD_TOP + ((max - value) / span) * PLOT_HEIGHT;
             const colourClass =
-              style === "current"
+              style === "current" || style === "grey"
                 ? "text-muted"
-                : value >= 0
+                : value > 0
                   ? "text-accent"
                   : "text-danger";
             return (

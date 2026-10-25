@@ -60,7 +60,9 @@ export function keptCell(basisPoints: number | null): string {
 
 // Tenths of a month as text: 42 -> "4.2".
 function tenthsText(tenths: number): string {
-  return `${Math.floor(tenths / 10)}.${tenths % 10}`;
+  const sign = tenths < 0 ? "-" : "";
+  const magnitude = Math.abs(tenths);
+  return `${sign}${Math.floor(magnitude / 10)}.${magnitude % 10}`;
 }
 
 function windowText(averageMonths: number): string {

@@ -154,15 +154,13 @@ func TestPageMoneyOutMatchesMonthSummaryAfterAdjustments(t *testing.T) {
 		BillCadence: domain.CadenceYearly, BillName: "Insurance"})
 	f.add(usecase.CashflowRow{OccurredOn: june, Kind: domain.TransactionTransfer, Amount: sgd(30_000),
 		ToAccountType: domain.AccountLoan, ToAccountName: "Car loan"})
-	for _, tx := range []domain.Transaction{
+	ledgerRepo.transactions = append(ledgerRepo.transactions, []domain.Transaction{
 		{HouseholdID: "house-1", Kind: domain.TransactionIncome, OccurredOn: june, Amount: sgd(900_000)},
 		{HouseholdID: "house-1", Kind: domain.TransactionExpense, OccurredOn: june, Amount: sgd(10_000)},
 		{HouseholdID: "house-1", Kind: domain.TransactionExpense, OccurredOn: june, Amount: idr},
 		{HouseholdID: "house-1", Kind: domain.TransactionExpense, OccurredOn: june, Amount: yearly},
 		{HouseholdID: "house-1", Kind: domain.TransactionTransfer, OccurredOn: june, Amount: sgd(30_000)},
-	} {
-		ledgerRepo.transactions = append(ledgerRepo.transactions, tx)
-	}
+	}...)
 
 	summary, err := ledger.MonthSummary(context.Background(), "house-1", june)
 	if err != nil {

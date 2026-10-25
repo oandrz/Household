@@ -1,7 +1,7 @@
 // The Monthly tab: the light, the last finished month's three figures, the
 // 3-month average, the month in progress (no colour: it is not a result yet),
 // the chart and the month-by-month table.
-import { cashflowCopy, keptLine } from "./cashflowCopy";
+import { cashflowCopy, greyReasonText, keptLine } from "./cashflowCopy";
 import { CashflowChart } from "./CashflowChart";
 import { CashflowFigure } from "./CashflowFigure";
 import { CashflowLight } from "./CashflowLight";
@@ -27,6 +27,14 @@ export function CashflowMonthly({ data, formatAmount }: Props) {
           <h2 id="cashflow-last-month" className="text-xs text-muted">
             {monthLabel(lastFinished.month)}
           </h2>
+          {lastFinished.status === "grey" && (
+            <div data-testid="cashflow-last-grey" className="rounded-lg border border-hairline bg-card p-3 text-[12.5px] text-muted">
+              <div className="font-semibold text-ink">{cashflowCopy.rowGrey}</div>
+              {lastFinished.grey.map((reason) => (
+                <div key={reason}>{greyReasonText(reason, lastFinished.unconvertibleCurrencies)}</div>
+              ))}
+            </div>
+          )}
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
             <CashflowFigure
               testId="cashflow-figure-in"

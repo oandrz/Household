@@ -152,6 +152,14 @@ describe("CashflowMonthly", () => {
     expect(out).not.toHaveTextContent("includes");
   });
 
+  it("marks a grey last finished month with its reasons", async () => {
+    const last = monthFixture({ status: "grey", grey: ["unconvertible"], unconvertibleCurrencies: ["IDR"] });
+    renderPage(pageFixture({ lastFinished: last, recent: [] }));
+    const out = await screen.findByTestId("cashflow-last-grey");
+    expect(out).toHaveTextContent("An IDR transaction couldn't be converted");
+    expect(out).toHaveTextContent("Not enough data");
+  });
+
   it("the average says how many months it covers", async () => {
     renderPage(pageFixture({ average: { months: 2, inMinor: 1, outMinor: 1, leftMinor: 0, keptBasisPoints: null } }));
     expect(await screen.findByText("Average of 2 months")).toBeInTheDocument();
@@ -304,6 +312,32 @@ describe("CashflowChart", () => {
     expect(by("2026-08").getAttribute("data-style")).toBe("grey");
     expect(by("2026-09").getAttribute("data-style")).toBe("current");
     expect(by("2026-10").getAttribute("data-style")).toBe("projected");
+  });
+});
+
+describe("CashflowChart honesty", () => {
+  it("never colours a grey bar by its sign, and draws zero like the table does", async () => {
+    const months = [
+      monthFixture({ month: "2026-07", status: "grey", grey: ["no_income"], leftMinor: 300000 }),
+      monthFixture({ month: "2026-08", leftMinor: 0 }),
+    ];
+    renderPage(pageFixture({ recent: months }));
+    const chart = await screen.findByTestId("cashflow-chart");
+    const bars = within(chart).getAllByTestId("cashflow-bar");
+    const grey = bars.find((bar) => bar.getAttribute("data-month") === "2026-07")!;
+    const zero = bars.find((bar) => bar.getAttribute("data-month") === "2026-08")!;
+    expect(grey.getAttribute("class")).toContain("text-muted");
+    expect(grey.getAttribute("class")).not.toContain("text-accent");
+    expect(zero.getAttribute("data-style")).toBe("solid-negative");
+    expect(zero.getAttribute("class")).toContain("text-danger");
+  });
+});
+
+describe("negative cushion", () => {
+  it("writes an overdrawn cushion with one minus sign", () => {
+    expect(cushionText({ known: true, tenths: -42, reason: "" })).toBe("-4.2 months");
+    const base = { keptBasisPoints: null, cushionTenths: -42, billName: "" };
+    expect(reasonText({ ...base, code: "cushion_under_1" }, 3)).toContain("-4.2 months");
   });
 });
 
