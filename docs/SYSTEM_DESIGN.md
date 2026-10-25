@@ -34,6 +34,7 @@ to the twelve-month trend** — both pages say so on their face — because fold
 holdings in is milestone 3 and needs a decision first about whether an
 investment account also carries uninvested cash. The moomoo import is milestone
 4 and is **not built**.
+
 **Another Money feature the design does not draw: Cashflow** (`/money/cashflow`)
 answers "are we leaving money over each month?". `CashflowService` reads the
 household's whole ledger in one query, works out money in, money out and left

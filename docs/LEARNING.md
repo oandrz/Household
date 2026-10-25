@@ -2018,14 +2018,30 @@ Three things about running those mutation checks that cost time:
   protected routes.** Both new walks also fail on an allowlist entry that
   matches no route, so a permission cannot outlive the route it was for.
 
-- **Tests for "usual spending" (the median) that could not fail when the
-  rule was broken (Cashflow, 2026-10-25).** A reviewer found that the first
-  tests for the median money out of the last six solid months passed with the
-  rule broken. The fix was figures chosen so the right answer and the
-  plausible wrong ones differ, plus a mutation check on each: break the
-  rule, watch the test fail for the expected reason, restore. Pattern 21's
-  lesson again: pick data where the right answer and the wrong ones are
-  different numbers.
+- **Median tests whose fixtures gave the same answer under the right and the
+  broken rule (Cashflow, 2026-10-25).** The first tests for "spending under
+  half of usual" (`internal/domain/cashflow_grey.go`) could not fail. A
+  reviewer copied `internal/domain` to a scratch directory and broke four
+  rules one at a time; the whole cashflow test set stayed green every time:
+  (A) remove the six-month window (`usualWindow = 1000`); (B) let grey months
+  into the median; (C) keep confirmed ("count it") months out of the median;
+  (D) for an even count, use only the lower middle value (`2*recent[n/2-1]`
+  instead of a+b). Symptom: green tests. Cause: the numbers agreed either
+  way. Outs `[100, 400x5, 1000]` have median 400 with or without the window;
+  one grey month of 10 does not move the middle pair of `[10,400,400,400]`;
+  the even rule was only tested with a == b. Break B is the dangerous one: a
+  grey low-spend month dragging "usual" down stops later months going grey,
+  so the page flatters. Fix: four discriminating tests,
+  `TestUsualIgnoresSolidMonthsOlderThanTheLastSix`,
+  `TestUsualIgnoresSeveralGreyMonthsInARow`,
+  `TestConfirmedMonthsFeedLaterMedians` and
+  `TestUsualWithAnEvenCountAveragesTheMiddlePair`, with numbers where the
+  right and broken rules disagree (`[100x6, 400x6]` then 199; `[100,300,500,700]`
+  then 199 against 200), each confirmed by re-applying its break and watching
+  it fail. **What would have caught it sooner:** for every rule with a window,
+  a filter or a tie-break, pick the fixture so the rule *without* that detail
+  gives a different answer, and prove it with a one-line mutation. Pattern
+  21's lesson again.
 
 ### 3. The simulated environment lied
 
@@ -7452,10 +7468,11 @@ route with a missing guard has no second line of defence.
   on the same data, 10 requests, was about 34 ms. About 5 times ADR 14's
   18 ms account list and 20 times under the two-second line, so it needs no
   cache and no bound on how far back the walk goes. At the allowance in
-  ADR 14 (10 a second) a household hammering this one route would use
-  roughly one CPU, which is why the number is worth rechecking if the walk
+  ADR 14 (10 a second) a household hammering this one route would use up to
+  roughly one CPU (10 x 92 ms is wall time, Postgres included), which is why the number is worth rechecking if the walk
   ever gets heavier. The household, its session and its rows were deleted
-  afterwards.
+  afterwards. Caveats: one sequential client on the dev colima
+  host, and only the api container was limited (Postgres was not).
 - **Measuring tip:** `docker update --cpus 0` does not remove a CPU limit
   once set; recreate the container (`docker compose up -d --force-recreate
   --no-deps api`) to get back to unlimited.
