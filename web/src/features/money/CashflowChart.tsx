@@ -100,10 +100,18 @@ export function CashflowChart({ months, currency }: Props) {
 
   const values = months.map(valueOf);
   const drawn = values.filter((value): value is number => value !== null);
+  // The month still running never sets the scale: one large payday in it
+  // would flatten every finished month, the ones the light judges, into a
+  // sliver. Its bar is cut off at the edge instead. It sets the scale only
+  // when it is all there is.
+  const settled = values.filter(
+    (value, index): value is number => value !== null && months[index].status !== "current",
+  );
+  const scaled = settled.length > 0 ? settled : drawn;
   // Zero is always inside the range, so a loss reads as below the line
   // rather than as a short win.
-  const max = Math.max(0, ...drawn);
-  const min = Math.min(0, ...drawn);
+  const max = Math.max(0, ...scaled);
+  const min = Math.min(0, ...scaled);
   const span = max - min || 1;
   const baselineY = PAD_TOP + (max / span) * PLOT_HEIGHT;
   const slot = PLOT_WIDTH / months.length;
@@ -129,7 +137,7 @@ export function CashflowChart({ months, currency }: Props) {
             const value = values[index];
             if (value === null) return null;
             const style = styleOf(month, value);
-            const y = PAD_TOP + ((max - value) / span) * PLOT_HEIGHT;
+            const y = PAD_TOP + ((max - Math.min(max, Math.max(min, value))) / span) * PLOT_HEIGHT;
             const colourClass =
               style === "current" || style === "grey"
                 ? "text-muted"
