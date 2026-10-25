@@ -291,6 +291,7 @@ export const cashflowCopy = {
   nextYear: "Next year",
 
   chartLabel: "Left over each month",
+  chartName: (from: string, to: string) => `Left over each month, ${from} to ${to}`,
   chartLegend: {
     left: "Money left over",
     nothing: "Nothing left over",

@@ -9,6 +9,7 @@
 //   current    pale and uncoloured: still running
 //   projected  dashed outline: a forecast, not money that happened
 import { barTitle, cashflowCopy, shortMonthLabel } from "./cashflowCopy";
+import { monthLabel } from "./month";
 import type { CashflowMonth } from "./cashflowSchemas";
 
 const WIDTH = 320;
@@ -158,7 +159,7 @@ type Props = {
   formatAmount: (minor: number) => string;
 };
 
-export function CashflowChart({ months, currency, formatAmount }: Props) {
+export function CashflowChart({ months, formatAmount }: Props) {
   if (months.length === 0) return null;
 
   const values = months.map(valueOf);
@@ -190,6 +191,15 @@ export function CashflowChart({ months, currency, formatAmount }: Props) {
   const baselineY = PAD_TOP + (max / span) * PLOT_HEIGHT;
   const slot = PLOT_WIDTH / months.length;
   const barWidth = Math.max(1, slot - BAR_GAP);
+  // The bars' titles show only on mouse hover, so the same words are also
+  // listed as text: a screen reader cannot reach a title inside role="img",
+  // and a phone has no hover.
+  const spoken = months.flatMap((month, index) => {
+    const value = values[index];
+    if (value === null) return [];
+    const clipped = Math.min(max, Math.max(min, value)) !== value;
+    return [{ key: month.month, text: barTitle(month, value, clipped, formatAmount) }];
+  });
 
   return (
     <div>
@@ -199,7 +209,7 @@ export function CashflowChart({ months, currency, formatAmount }: Props) {
           data-baseline={baselineY}
           viewBox={`0 0 ${WIDTH} ${HEIGHT}`}
           role="img"
-          aria-label={`${cashflowCopy.chartLabel}, ${months[0].month} to ${months[months.length - 1].month}, in ${currency}`}
+          aria-label={cashflowCopy.chartName(monthLabel(months[0].month), monthLabel(months[months.length - 1].month))}
           preserveAspectRatio="none"
           className="h-[200px] w-full"
         >
@@ -251,9 +261,15 @@ export function CashflowChart({ months, currency, formatAmount }: Props) {
             />
           )}
         </svg>
+        <ul data-testid="cashflow-chart-values" className="sr-only">
+          {spoken.map((bar) => (
+            <li key={bar.key}>{bar.text}</li>
+          ))}
+        </ul>
         {months.map((month, index) => (
           <span
             key={month.month}
+            aria-hidden="true"
             className="absolute bottom-0 -translate-x-1/2 whitespace-nowrap text-[11px] text-muted"
             style={{ left: `${((PAD_X + index * slot + slot / 2) / WIDTH) * 100}%` }}
           >
