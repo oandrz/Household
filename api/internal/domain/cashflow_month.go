@@ -59,6 +59,20 @@ type CashflowContribution struct {
 	Name        string
 	AmountMinor int64 // this month's share
 	PaidOn      time.Time
+	// ShareIndex and Spread place a spread-bill share: this is month ShareIndex
+	// (1-based) of a bill covering Spread months. Both are 0 for a loan.
+	ShareIndex int
+	Spread     int
+}
+
+// CashflowPaidBill is a quarterly or yearly bill paid in full during a month.
+// The ledger counts the whole amount in that month; Cashflow counts only a
+// share of it.
+type CashflowPaidBill struct {
+	Name        string
+	AmountMinor int64
+	PaidOn      time.Time
+	Spread      int
 }
 
 // CashflowMonth is one calendar month's figures.
@@ -82,6 +96,21 @@ type CashflowMonth struct {
 	// unchecked.
 	UsualChecked  bool
 	Contributions []CashflowContribution
+
+	// The fields below record the inputs of ReconcileCashflowMonth.
+	//
+	// LedgerSpentMinor is what the ledger calls "spent" for the month: every
+	// expense dated in it, spread bills at their full amount, in the primary
+	// currency. It is not OutMinor.
+	LedgerSpentMinor int64
+	// PaidInFull lists the spread bills paid during this month.
+	PaidInFull []CashflowPaidBill
+	// UnratedHere counts transactions dated in this month, other than
+	// transfers, that have no exchange rate and so add no amount.
+	UnratedHere int
+	// UnratedEarlierBill is true when a share that would land in this month
+	// comes from an earlier bill that has no exchange rate.
+	UnratedEarlierBill bool
 }
 
 // LeftMinor is what the month kept: money in minus money out.
@@ -137,6 +166,9 @@ func addCashflowItem(months []CashflowMonth, item CashflowItem) error {
 	own := monthIndex(months, item.OccurredOn)
 	if own >= 0 {
 		months[own].TransactionCount++
+		if item.Role != CashflowIgnore && item.Unconvertible != "" {
+			months[own].UnratedHere++
+		}
 	}
 	if item.Role == CashflowSpreadOut {
 		return addSpreadItem(months, item)
@@ -157,7 +189,10 @@ func addSingleMonthItem(m *CashflowMonth, item CashflowItem) error {
 	case CashflowIn:
 		m.InMinor, err = addChecked(m.InMinor, item.AmountMinor)
 	case CashflowOut:
-		m.OutMinor, err = addChecked(m.OutMinor, item.AmountMinor)
+		if m.OutMinor, err = addChecked(m.OutMinor, item.AmountMinor); err != nil {
+			return err
+		}
+		m.LedgerSpentMinor, err = addChecked(m.LedgerSpentMinor, item.AmountMinor)
 	case CashflowLoanOut:
 		if m.OutMinor, err = addChecked(m.OutMinor, item.AmountMinor); err != nil {
 			return err
@@ -189,9 +224,20 @@ func addSpreadItem(months []CashflowMonth, item CashflowItem) error {
 		m := &months[idx]
 		if item.Unconvertible != "" {
 			noteUnconvertible(m, item.Unconvertible)
+			if i > 0 {
+				m.UnratedEarlierBill = true
+			}
 			continue
 		}
 		var err error
+		if i == 0 {
+			if m.LedgerSpentMinor, err = addChecked(m.LedgerSpentMinor, item.AmountMinor); err != nil {
+				return err
+			}
+			m.PaidInFull = append(m.PaidInFull, CashflowPaidBill{
+				Name: item.Name, AmountMinor: item.AmountMinor, PaidOn: item.OccurredOn, Spread: item.Spread,
+			})
+		}
 		if m.OutMinor, err = addChecked(m.OutMinor, share); err != nil {
 			return err
 		}
@@ -200,6 +246,7 @@ func addSpreadItem(months []CashflowMonth, item CashflowItem) error {
 		}
 		m.Contributions = append(m.Contributions, CashflowContribution{
 			Kind: ContributionSpreadBill, Name: item.Name, AmountMinor: share, PaidOn: item.OccurredOn,
+			ShareIndex: i + 1, Spread: item.Spread,
 		})
 	}
 	return nil
