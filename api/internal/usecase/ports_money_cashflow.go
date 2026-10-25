@@ -6,6 +6,8 @@ package usecase
 import (
 	"context"
 	"time"
+
+	"github.com/andreasoentoro/hearth/api/internal/domain"
 )
 
 // CashflowConfirmation is one "looks right, count it" mark on a finished
@@ -28,4 +30,35 @@ type CashflowConfirmationRepository interface {
 	Confirm(ctx context.Context, householdID string, month time.Time, membershipID string, at time.Time) (CashflowConfirmation, error)
 	// Unconfirm treats a missing row as success, not as ErrNotFound.
 	Unconfirm(ctx context.Context, householdID string, month time.Time) error
+}
+
+// CashflowRow is one transaction as the cashflow page reads it: just enough to
+// decide whether it is money in, money out, a loan repayment or a bill payment
+// to spread.
+type CashflowRow struct {
+	TransactionID string
+	OccurredOn    time.Time
+	Kind          domain.TransactionKind
+	// Amount is the from side, what left the source account. For a transfer
+	// between currencies it is not what arrived.
+	Amount domain.Money
+	// ToAccountType and ToAccountName describe the destination account and are
+	// "" unless Kind is a transfer.
+	ToAccountType domain.AccountType
+	ToAccountName string
+	// BillCadence and BillName are "" unless the transaction is the expense a
+	// bill payment still points at.
+	BillCadence domain.Cadence
+	BillName    string
+}
+
+// CashflowRowReader reads a household's whole history in one query, so the
+// service never runs a query per month.
+type CashflowRowReader interface {
+	// Rows returns every transaction in the household, oldest first. The
+	// count is bounded by domain.MaxTransactions. Kind, account type and
+	// cadence are parsed with the domain Parse* functions, which refuse
+	// unknown values. A transaction that appears twice (two payments linked to
+	// it) is an error, not a double count.
+	Rows(ctx context.Context, householdID string) ([]CashflowRow, error)
 }

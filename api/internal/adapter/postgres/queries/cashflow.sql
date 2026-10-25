@@ -27,3 +27,24 @@ LEFT JOIN users u       ON u.id = m.user_id;
 -- name: UnconfirmCashflowMonth :exec
 DELETE FROM cashflow_month_confirmations
 WHERE household_id = $1 AND month = sqlc.arg(month)::date;
+
+-- ListCashflowRows returns every transaction of one household, oldest first,
+-- with the two facts the cashflow classification needs from other tables: the
+-- destination account's type (only meaningful for a transfer) and the cadence
+-- of the bill this transaction paid. Both joins are LEFT: most rows have
+-- neither. The bill_payments join also matches household_id so a payment row
+-- can never pull in another household's bill. A transaction linked by more
+-- than one payment comes back more than once; the repository refuses that
+-- rather than count a payment twice.
+-- name: ListCashflowRows :many
+SELECT t.id, t.occurred_on, t.kind, t.amount_minor, t.amount_currency,
+       ta.type     AS to_account_type,
+       ta.nickname AS to_account_name,
+       b.cadence   AS bill_cadence,
+       b.name      AS bill_name
+FROM transactions t
+LEFT JOIN accounts ta      ON ta.id = t.to_account_id
+LEFT JOIN bill_payments bp ON bp.transaction_id = t.id AND bp.household_id = t.household_id
+LEFT JOIN bills b          ON b.id = bp.bill_id AND b.household_id = t.household_id
+WHERE t.household_id = $1
+ORDER BY t.occurred_on, t.id;
