@@ -35,29 +35,29 @@ export function CashflowYearly({ data, formatAmount, onSelectYear }: Props) {
 
       <div className="flex items-center gap-2">
         {!onlyOneYear && (
-        <button
-          type="button"
-          aria-label={cashflowCopy.previousYear}
-          disabled={!canGoBack}
-          onClick={() => onSelectYear(year.year - 1)}
-          className={pickerButton}
-        >
-          ◀
-        </button>
+          <button
+            type="button"
+            aria-label={cashflowCopy.previousYear}
+            disabled={!canGoBack}
+            onClick={() => onSelectYear(year.year - 1)}
+            className={pickerButton}
+          >
+            ◀
+          </button>
         )}
         <span data-testid="cashflow-year" className="min-w-14 text-center text-[15px] font-semibold text-ink">
           {year.year}
         </span>
         {!onlyOneYear && (
-        <button
-          type="button"
-          aria-label={cashflowCopy.nextYear}
-          disabled={!canGoForward}
-          onClick={() => onSelectYear(year.year + 1)}
-          className={pickerButton}
-        >
-          ▶
-        </button>
+          <button
+            type="button"
+            aria-label={cashflowCopy.nextYear}
+            disabled={!canGoForward}
+            onClick={() => onSelectYear(year.year + 1)}
+            className={pickerButton}
+          >
+            ▶
+          </button>
         )}
       </div>
 

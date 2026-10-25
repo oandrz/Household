@@ -50,3 +50,56 @@ describe("CashflowChart scale", () => {
     expect(height("2026-10")).toBeGreaterThan(1);
   });
 });
+
+describe("CashflowChart scale below zero", () => {
+  const finished = [
+    monthFixture({ month: "2026-08", leftMinor: 100000 }),
+    monthFixture({ month: "2026-09", leftMinor: 245000 }),
+  ];
+
+  function render3(currentLeft: number) {
+    render(
+      <CashflowChart
+        months={[...finished, monthFixture({ month: "2026-10", status: "current", leftMinor: currentLeft })]}
+        currency="SGD"
+        formatAmount={(minor) => String(minor)}
+      />,
+    );
+    const chart = screen.getByTestId("cashflow-chart");
+    const bar = (month: string) =>
+      within(chart)
+        .getAllByTestId("cashflow-bar")
+        .find((el) => el.getAttribute("data-month") === month)!;
+    return { chart, bar };
+  }
+  const num = (el: Element, attr: string) => Number(el.getAttribute(attr));
+
+  it("draws a negative running month under the zero line with a real height", () => {
+    const { chart, bar } = render3(-100000);
+    const october = bar("2026-10");
+    const baseline = num(chart, "data-baseline");
+    expect(num(october, "y")).toBeCloseTo(baseline);
+    expect(num(october, "height")).toBeGreaterThan(num(bar("2026-08"), "height") * 0.9);
+    expect(october.hasAttribute("data-clipped")).toBe(false);
+    expect(chart.querySelector("line")).not.toBeNull();
+  });
+
+  it("cuts a very negative running month off at the bottom, inside its own bar, and keeps finished bars tall", () => {
+    const { chart, bar } = render3(-5000000);
+    const october = bar("2026-10");
+    expect(october.getAttribute("data-clipped")).toBe("true");
+    expect(october.querySelector("title")!.textContent).toBe("October 2026 so far: nothing left over (-5000000) (bar cut off)");
+    expect(num(bar("2026-09"), "height")).toBeGreaterThan(40);
+
+    const top = num(october, "y");
+    const bottom = top + num(october, "height");
+    const ys = [...within(chart).getByTestId("cashflow-bar-cut").querySelectorAll("line")].flatMap((l) => [
+      num(l, "y1"),
+      num(l, "y2"),
+    ]);
+    for (const y of ys) {
+      expect(y).toBeGreaterThanOrEqual(top);
+      expect(y).toBeLessThanOrEqual(bottom);
+    }
+  });
+});

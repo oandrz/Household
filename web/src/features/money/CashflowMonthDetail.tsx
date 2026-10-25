@@ -131,7 +131,7 @@ export function CashflowMonthDetail({ month, formatAmount, onClose }: Props) {
 
   return (
     <div data-testid="cashflow-month-detail" className="flex flex-col gap-3 py-2">
-      <div className="flex items-center justify-between gap-3">
+      <div className="flex max-w-[480px] items-center justify-between gap-3">
         <h3 className="text-[13px] font-semibold text-ink">
           {reconciliation === null ? monthLabel(month.month) : cashflowCopy.sum.heading(monthName)}
         </h3>

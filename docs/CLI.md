@@ -186,12 +186,18 @@ is `shown` (the other values are `no_rate` and `mismatch`):
 
 ```json
 "reconciliation": {
-  "status": "shown", "spentMinor": 30000,
+  "status": "shown", "spentMinor": 150000,
   "lines": [{"kind": "bill_in_full", "name": "Car insurance", "amountMinor": -120000,
-             "paidOn": "2026-09-12", "shareIndex": 0, "spread": 12}],
+             "paidOn": "2026-09-12", "shareIndex": 0, "spread": 12},
+            {"kind": "bill_share", "name": "Car insurance", "amountMinor": 10000,
+             "paidOn": "2026-09-12", "shareIndex": 1, "spread": 12},
+            {"kind": "loan", "name": "Car loan", "amountMinor": 40000,
+             "paidOn": "2026-09-20", "shareIndex": 0, "spread": 0}],
   "unratedCount": 0, "unratedEarlierBill": false, "unratedCurrencies": []
 }
 ```
+
+The lines add up to the month's `outMinor`: 150000 − 120000 + 10000 + 40000 = 80000.
 
 The month must be finished (not the current one) and from 2000-01 on.
 Like every owner-gated money route it needs the money capability and an

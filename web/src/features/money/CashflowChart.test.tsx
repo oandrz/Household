@@ -61,6 +61,17 @@ describe("CashflowChart", () => {
     expect(title("2026-12")).toBe("December 2026, projected: S$1,483.50 left over");
   });
 
+  it("words a running or projected month at or below zero like a finished one", () => {
+    const chart = renderChart([
+      monthFixture({ month: "2026-09", leftMinor: 500000 }),
+      monthFixture({ month: "2026-10", status: "current", leftMinor: -300000 }),
+      monthFixture({ month: "2026-12", status: "future", leftMinor: 0, projectedLeftMinor: -120000 }),
+    ]);
+    const title = (month: string) => bar(chart, month).querySelector("title")!.textContent;
+    expect(title("2026-10")).toBe("October 2026 so far: nothing left over (−S$3,000.00)");
+    expect(title("2026-12")).toBe("December 2026, projected: nothing left over (−S$1,200.00)");
+  });
+
   it("marks only a clipped bar as cut off", () => {
     const chart = renderChart([
       monthFixture({ month: "2026-08", leftMinor: 100000 }),

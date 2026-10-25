@@ -129,8 +129,9 @@ func buildSumLines(m CashflowMonth) (lines []CashflowSumLine, ok bool) {
 			Kind: LineBillInFull, Name: b.Name, AmountMinor: -b.AmountMinor, PaidOn: b.PaidOn, Spread: b.Spread,
 		})
 		// The first share of the same bill, paid the same day, lands in the
-		// month the bill was paid. Matching on ShareIndex 1 keeps a later
-		// share of an earlier bill from being taken for it.
+		// month the bill was paid. Matching the PaidOn date already rules out a
+		// later share of an earlier bill; ShareIndex == 1 is a guard that is
+		// redundant within one month, kept so the intent reads on its face.
 		for i, s := range shares {
 			if !used[i] && s.Name == b.Name && s.PaidOn.Equal(b.PaidOn) && s.ShareIndex == 1 {
 				used[i] = true

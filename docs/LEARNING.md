@@ -7470,6 +7470,11 @@ route with a missing guard has no second line of defence.
   (S$5,194.50) reconciles with Cashflow's money out (S$3,269.50 = 5,194.50 -
   2,100 lump + 175 share) before the loan transfer; Yearly is correct; no
   console errors. The light showing green on one thin month is pattern 13.
+- **A clamp to a range computed without the clamped value also clamps it at
+  zero.** The chart's scale came from finished months only, and the running
+  month was clamped into it, so a running month below zero (rent paid, salary
+  not in yet) was drawn 1px tall with no zero line. Test the negative case of
+  any clamp; the walk's data had only a positive running month.
 - **Known gap, not fixed:** at 375px the month table scrolls sideways inside
   its card, so Left over, Kept and Light start off-screen. The tracker row
   says 🟡.

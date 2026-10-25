@@ -174,7 +174,18 @@ export function CashflowChart({ months, currency, formatAmount }: Props) {
   // Zero is always inside the range, so a loss reads as below the line
   // rather than as a short win.
   const max = Math.max(0, ...scaled);
-  const min = Math.min(0, ...scaled);
+  const settledMin = Math.min(0, ...scaled);
+  // A running month below zero (rent paid, salary not in yet) may lower the
+  // floor so it is drawn under the line, but only as far as the finished
+  // months reach on the other side: a deeper dip would squash them instead.
+  // Beyond that it is cut off at the bottom, as a big payday is at the top.
+  const reach = Math.max(max, -settledMin);
+  const runningLow = Math.min(
+    0,
+    ...values.filter((value, index): value is number => value !== null && months[index].status === "current"),
+  );
+  const min =
+    settled.length > 0 && reach > 0 ? Math.min(settledMin, Math.max(runningLow, -reach)) : Math.min(settledMin, runningLow);
   const span = max - min || 1;
   const baselineY = PAD_TOP + (max / span) * PLOT_HEIGHT;
   const slot = PLOT_WIDTH / months.length;

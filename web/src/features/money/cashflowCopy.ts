@@ -309,6 +309,11 @@ export const cashflowCopy = {
   ],
 } as const;
 
+// "S$500.00 left over", or "nothing left over (−S$30.00)" at or below zero.
+function leftOver(value: number, formatAmount: (minor: number) => string): string {
+  return value > 0 ? `${formatAmount(value)} left over` : `nothing left over (${formatAmount(value)})`;
+}
+
 // The hover text for one bar, spoken the way the table speaks: a month with
 // nothing left over says so and shows the figure in brackets. `clipped` adds
 // the note that the drawn bar is shorter than the real amount.
@@ -324,12 +329,10 @@ export function barTitle(
     case "grey":
       return `${name}: not enough data`;
     case "current":
-      return `${name} so far: ${formatAmount(value)} left over${cut}`;
+      return `${name} so far: ${leftOver(value, formatAmount)}${cut}`;
     case "future":
-      return `${name}, projected: ${formatAmount(value)} left over${cut}`;
+      return `${name}, projected: ${leftOver(value, formatAmount)}${cut}`;
     default:
-      return value > 0
-        ? `${name}: ${formatAmount(value)} left over${cut}`
-        : `${name}: nothing left over (${formatAmount(value)})${cut}`;
+      return `${name}: ${leftOver(value, formatAmount)}${cut}`;
   }
 }
