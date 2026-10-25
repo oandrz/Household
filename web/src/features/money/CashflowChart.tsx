@@ -19,7 +19,8 @@ const PAD_BOTTOM = 24;
 const PLOT_WIDTH = WIDTH - PAD_X * 2;
 const PLOT_HEIGHT = HEIGHT - PAD_TOP - PAD_BOTTOM;
 const BAR_GAP = 4;
-const CUT_SIZE = 3;
+const CUT_RISE = 6;
+const CUT_RUN = 2;
 
 type BarStyle = "solid-positive" | "solid-negative" | "grey" | "current" | "projected";
 
@@ -53,13 +54,14 @@ function styleOf(month: CashflowMonth, value: number): BarStyle {
 
 // The colour a bar style is drawn in. Every style is listed so a new one
 // cannot silently fall into another's colour.
-function colourOf(style: BarStyle): string {
+function colourOf(style: BarStyle, negative = false): string {
   switch (style) {
     case "solid-positive":
-    case "projected":
       return "text-accent";
     case "solid-negative":
       return "text-danger";
+    case "projected":
+      return negative ? "text-danger" : "text-accent";
     case "grey":
     case "current":
       return "text-muted";
@@ -123,18 +125,23 @@ function LegendItem({ style, label }: { style: BarStyle; label: string }) {
 // Two white diagonal strokes across the clipped end of a bar, the usual "this
 // goes on" mark. Drawn in the card colour so it reads as a cut in the bar.
 function CutMark({ x, width, y, atTop }: { x: number; width: number; y: number; atTop: boolean }) {
-  const inward = atTop ? CUT_SIZE : -CUT_SIZE;
+  // The chart is stretched sideways to fill its card, so a slash as wide as the
+  // bar would flatten into a stripe on a wide screen. A short fixed run keeps
+  // it a slash at any width; the pointer passes through so the bar's title
+  // still shows on hover.
+  const run = Math.min(CUT_RUN, width);
+  const centre = x + width / 2;
   return (
-    <g data-testid="cashflow-bar-cut" className="text-card">
-      {[CUT_SIZE, CUT_SIZE * 2.5].map((offset) => {
+    <g data-testid="cashflow-bar-cut" className="text-card" pointerEvents="none">
+      {[CUT_RISE, CUT_RISE * 2.5].map((offset) => {
         const lineY = y + (atTop ? offset : -offset);
         return (
           <line
             key={offset}
-            x1={x}
-            x2={x + width}
-            y1={lineY + inward / 2}
-            y2={lineY - inward / 2}
+            x1={centre - run / 2}
+            x2={centre + run / 2}
+            y1={lineY + CUT_RISE / 2}
+            y2={lineY - CUT_RISE / 2}
             stroke="currentColor"
             strokeWidth={1.5}
             vectorEffect="non-scaling-stroke"
@@ -206,7 +213,7 @@ export function CashflowChart({ months, currency, formatAmount }: Props) {
                   width={barWidth}
                   height={Math.max(1, Math.abs(baselineY - y))}
                   rx={1}
-                  className={colourOf(style)}
+                  className={colourOf(style, value <= 0)}
                   fill={fillOf(style)}
                   fillOpacity={opacityOf(style)}
                   stroke={outlined ? "currentColor" : "none"}

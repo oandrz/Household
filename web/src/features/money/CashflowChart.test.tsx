@@ -115,4 +115,36 @@ describe("CashflowChart", () => {
     expect(swatches[1].getAttribute("class")).toContain("text-danger");
     expect(swatches[4].getAttribute("class")).toContain("text-accent");
   });
+
+  it("colours a projected shortfall red and a projected gain green", () => {
+    const chart = renderChart([
+      monthFixture({ month: "2026-11", status: "future", projectedLeftMinor: -5000 }),
+      monthFixture({ month: "2026-12", status: "future", projectedLeftMinor: 5000 }),
+    ]);
+    expect(bar(chart, "2026-11").getAttribute("class")).toContain("text-danger");
+    expect(bar(chart, "2026-12").getAttribute("class")).toContain("text-accent");
+  });
+
+  it("keeps the cut-off slash the same width however wide the bars are", () => {
+    const run = (count: number) => {
+      const months = Array.from({ length: count }, (_, i) =>
+        monthFixture({ month: `2026-${String(i + 1).padStart(2, "0")}`, leftMinor: 100000 }),
+      );
+      months.push(monthFixture({ month: "2027-01", status: "current", leftMinor: 9000000 }));
+      const { unmount } = render(
+        <CashflowChart months={months} currency="SGD" formatAmount={formatAmount} />,
+      );
+      const lines = Array.from(screen.getByTestId("cashflow-bar-cut").querySelectorAll("line"));
+      const result = lines.map((l) => Number(l.getAttribute("x2")) - Number(l.getAttribute("x1")));
+      const leans = lines.map((l) => Number(l.getAttribute("y1")) > Number(l.getAttribute("y2")));
+      const passes = screen.getByTestId("cashflow-bar-cut").getAttribute("pointer-events");
+      unmount();
+      return { result, leans, passes };
+    };
+    const few = run(2);
+    const many = run(10);
+    expect(few.result).toEqual(many.result);
+    expect(few.leans).toEqual([true, true]);
+    expect(few.passes).toBe("none");
+  });
 });
