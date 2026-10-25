@@ -24,6 +24,9 @@ export function CashflowYearly({ data, formatAmount, onSelectYear }: Props) {
   const currentYear = Number(data.current.month.slice(0, 4));
   const canGoBack = year.year > data.oldestYear;
   const canGoForward = year.year < currentYear;
+  // With one year of data there is nowhere to step to, so the arrows would
+  // only be two dead buttons.
+  const onlyOneYear = data.oldestYear === 0 || data.oldestYear === currentYear;
   const pickerButton = "min-h-11 min-w-11 rounded-lg border border-hairline text-[13px] text-ink transition-colors duration-[var(--transition-state)] enabled:hover:bg-canvas enabled:active:bg-toggle-off disabled:opacity-40 lg:min-h-0 lg:min-w-0 lg:px-2.5 lg:py-1";
 
   return (
@@ -31,6 +34,7 @@ export function CashflowYearly({ data, formatAmount, onSelectYear }: Props) {
       <CashflowLight light={data.light} averageMonths={data.average.months} />
 
       <div className="flex items-center gap-2">
+        {!onlyOneYear && (
         <button
           type="button"
           aria-label={cashflowCopy.previousYear}
@@ -40,9 +44,11 @@ export function CashflowYearly({ data, formatAmount, onSelectYear }: Props) {
         >
           ◀
         </button>
+        )}
         <span data-testid="cashflow-year" className="min-w-14 text-center text-[15px] font-semibold text-ink">
           {year.year}
         </span>
+        {!onlyOneYear && (
         <button
           type="button"
           aria-label={cashflowCopy.nextYear}
@@ -52,16 +58,17 @@ export function CashflowYearly({ data, formatAmount, onSelectYear }: Props) {
         >
           ▶
         </button>
+        )}
       </div>
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
         <CashflowFigure label={cashflowCopy.keptSoFar} value={formatAmount(year.keptSoFarMinor)}>
+          {year.keptBasisPoints !== null && <span>{cashflowCopy.shareKept(percentText(year.keptBasisPoints))}</span>}
           <span>
             {year.sameMonthsLastYearMinor === null
               ? cashflowCopy.noLastYear
               : cashflowCopy.sameMonthsLastYear(formatAmount(year.sameMonthsLastYearMinor))}
           </span>
-          {year.keptBasisPoints !== null && <span>{cashflowCopy.shareKept(percentText(year.keptBasisPoints))}</span>}
           {year.greyMonths > 0 && <span>{cashflowCopy.greyMonths(year.greyMonths)}</span>}
         </CashflowFigure>
         {year.headingForMinor !== null && (
@@ -92,7 +99,7 @@ export function CashflowYearly({ data, formatAmount, onSelectYear }: Props) {
                   <span className="text-ink">{bill.name}</span>
                   <span className="block text-[11.5px] text-muted">{dateLabel(bill.nextDue)}</span>
                 </span>
-                <span className="shrink-0 text-ink">
+                <span className="tabular shrink-0 text-ink">
                   {bill.unconvertible ? cashflowCopy.billUnconvertible : formatAmount(bill.amountMinor)}
                 </span>
               </li>

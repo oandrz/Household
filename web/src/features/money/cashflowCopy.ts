@@ -83,8 +83,19 @@ export function keptLine(basisPoints: number | null): string {
   return basisPoints === null ? "Kept: —" : `${percentText(basisPoints)}% of income kept`;
 }
 
+// Always two decimals: the table column lines up, and a negative share uses
+// a plain hyphen like percentText.
 export function keptCell(basisPoints: number | null): string {
-  return basisPoints === null ? "—" : `${percentText(basisPoints)}%`;
+  if (basisPoints === null) return "—";
+  const sign = basisPoints < 0 ? "-" : "";
+  const magnitude = Math.abs(basisPoints);
+  const hundredths = String(magnitude % 100).padStart(2, "0");
+  return `${sign}${Math.floor(magnitude / 100)}.${hundredths}%`;
+}
+
+// "2026-09" -> "Last finished month: September 2026".
+export function lastFinishedLabel(month: string): string {
+  return `Last finished month: ${monthLabel(month)}`;
 }
 
 // Tenths of a month as text: 42 -> "4.2".
