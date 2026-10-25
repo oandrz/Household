@@ -57,8 +57,8 @@ export function CashflowPage() {
 
   return (
     <PageContainer data-testid="cashflow-page">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
+      <div className="flex items-start justify-between gap-4">
+        <div className="min-w-0">
           <h1 className="text-[23px] font-semibold tracking-[-0.02em] text-ink">{cashflowCopy.title}</h1>
           <p className="mt-1 text-[13px] text-muted">{cashflowCopy.subtitle}</p>
         </div>
@@ -67,7 +67,7 @@ export function CashflowPage() {
           aria-label={cashflowCopy.infoButton}
           aria-expanded={infoOpen}
           onClick={() => setInfoOpen((open) => !open)}
-          className="min-h-11 min-w-11 rounded-full border border-hairline text-[13px] font-semibold text-ink lg:min-h-0 lg:min-w-0 lg:px-3 lg:py-1"
+          className="min-h-11 min-w-11 shrink-0 rounded-full border border-hairline text-[13px] font-semibold text-ink lg:min-h-0 lg:min-w-0 lg:px-3 lg:py-1"
         >
           i
         </button>
