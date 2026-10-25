@@ -62,3 +62,16 @@ type CashflowRowReader interface {
 	// it) is an error, not a double count.
 	Rows(ctx context.Context, householdID string) ([]CashflowRow, error)
 }
+
+// CashflowAccounts is the one account read the cashflow page needs: the
+// balances behind the cash cushion. AccountRepository satisfies it.
+type CashflowAccounts interface {
+	List(ctx context.Context, householdID string, includeArchived bool) ([]AccountView, error)
+}
+
+// CashflowBills is the one bill read the cashflow page needs: the live
+// quarterly and yearly bills and when each is next due. BillRepository
+// satisfies it.
+type CashflowBills interface {
+	List(ctx context.Context, householdID string, includeArchived bool) ([]BillRecord, error)
+}

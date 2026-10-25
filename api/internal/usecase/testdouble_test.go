@@ -5075,3 +5075,49 @@ func (d *apiTokenDouble) liveCount(userID string) int {
 	}
 	return n
 }
+
+// --- Cashflow ------------------------------------------------------------
+
+// cashflowRowsDouble is the in-memory CashflowRowReader. Rows are returned
+// exactly as planted, so a test controls their order.
+type cashflowRowsDouble struct{ rows []usecase.CashflowRow }
+
+func (d *cashflowRowsDouble) Rows(context.Context, string) ([]usecase.CashflowRow, error) {
+	return d.rows, nil
+}
+
+// cashflowConfirmationDouble is the in-memory CashflowConfirmationRepository.
+// Like the real one, the first confirmation of a month is the one kept.
+type cashflowConfirmationDouble struct {
+	rows        []usecase.CashflowConfirmation
+	calls       int    // every Confirm and Unconfirm, to prove a refusal never reached it
+	lastMembers string // the membership id the last Confirm received
+}
+
+func (d *cashflowConfirmationDouble) List(context.Context, string) ([]usecase.CashflowConfirmation, error) {
+	return d.rows, nil
+}
+
+func (d *cashflowConfirmationDouble) Confirm(_ context.Context, _ string, month time.Time, membershipID string, at time.Time) (usecase.CashflowConfirmation, error) {
+	d.calls++
+	d.lastMembers = membershipID
+	for _, row := range d.rows {
+		if row.Month.Equal(month) {
+			return row, nil
+		}
+	}
+	row := usecase.CashflowConfirmation{Month: month, ConfirmedByName: "Someone", ConfirmedAt: at}
+	d.rows = append(d.rows, row)
+	return row, nil
+}
+
+func (d *cashflowConfirmationDouble) Unconfirm(_ context.Context, _ string, month time.Time) error {
+	d.calls++
+	for i, row := range d.rows {
+		if row.Month.Equal(month) {
+			d.rows = append(d.rows[:i], d.rows[i+1:]...)
+			break
+		}
+	}
+	return nil
+}
