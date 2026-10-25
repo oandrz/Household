@@ -271,3 +271,24 @@ func TestAveragePerMonthRoundsOnceFromTheSum(t *testing.T) {
 		t.Errorf("no months averaged = %d, want 0", got)
 	}
 }
+
+func TestJudgeIsNeverGreenOnFewerThanThreeAveragedMonths(t *testing.T) {
+	last := solidMonth(100_000, 81_000)
+	for _, months := range []int{1, 2} {
+		// Otherwise green: 19% kept, a large cushion, nothing due.
+		avg := avgOf(months, int64(months)*100_000, int64(months)*81_000)
+		v := domain.JudgeCashflow(last, true, avg, knownCash(10_000_000), nil)
+		wantColour(t, v, domain.LightYellow, domain.ReasonShortAverage)
+	}
+	v := domain.JudgeCashflow(last, true, avgOf(3, 300_000, 243_000), knownCash(10_000_000), nil)
+	if v.Colour != domain.LightGreen {
+		t.Fatalf("three months should be green, got %s %v", v.Colour, codes(v))
+	}
+}
+
+func TestJudgeShortAverageDoesNotHideRed(t *testing.T) {
+	v := domain.JudgeCashflow(solidMonth(100_000, 120_000), true, avgOf(1, 100_000, 120_000), knownCash(10_000_000), nil)
+	if v.Colour != domain.LightRed || hasCode(v, domain.ReasonShortAverage) {
+		t.Fatalf("got %s %v", v.Colour, codes(v))
+	}
+}

@@ -123,6 +123,11 @@ const (
 	ReasonCushionUnder3      = "cushion_under_3"
 	ReasonCushionUnknown     = "cushion_unknown"
 	ReasonBillDueSoon        = "bill_due_soon"
+	// ReasonShortAverage is yellow whenever fewer than three months were
+	// averaged. The "spending under half of usual" check needs three solid
+	// months before it can run, so with fewer a month whose spending was
+	// never entered looks healthy. Hearth will not call that on track.
+	ReasonShortAverage = "short_average"
 )
 
 // Thresholds from the spec, applied as exact products.
@@ -196,6 +201,9 @@ func redReasons(avg CashflowAverage, c CashCushion) []LightReason {
 
 func yellowReasons(last CashflowMonth, avg CashflowAverage, c CashCushion, dueSoon []BillDue) []LightReason {
 	var out []LightReason
+	if avg.Months < cashflowAverageWindow {
+		out = append(out, LightReason{Code: ReasonShortAverage})
+	}
 	// 10 * sumLeft < sumIn is "kept under 10%" without rounding a percentage.
 	if productLess(cashflowKeptPercentFloor, avg.SumLeft(), avg.SumIn, 1) {
 		r := LightReason{Code: ReasonKeptUnder10}

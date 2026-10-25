@@ -110,6 +110,8 @@ export function reasonText(reason: CashflowReason, averageMonths: number): strin
       return "The cash cushion could not be worked out";
     case "bill_due_soon":
       return `${reason.billName} is due within 60 days and is larger than the average left over each month`;
+    case "short_average":
+      return `Based on only ${averageMonths} finished ${averageMonths === 1 ? "month" : "months"} so far. Hearth needs 3 before it can say on track.`;
     default:
       // A code this build has never heard of: say so rather than guess.
       return "This check could not be described";
@@ -207,11 +209,12 @@ export const cashflowCopy = {
   noLastYear: "No data for the same months last year",
   greyMonths: (count: number) => `includes ${count} ${count === 1 ? "month" : "months"} with not enough data`,
   headingFor: "Heading for",
-  headingForNote: "Kept so far plus the 3-month average for each month still to come",
+  headingForNote: (averageMonths: number) =>
+    `Kept so far plus the ${averageMonths < 3 ? `average of ${averageMonths} ${averageMonths === 1 ? "month" : "months"}` : "3-month average"} for each month still to come`,
   shareKept: (percent: string) => `${percent}% of income kept this year`,
   cashCushion: "Cash cushion",
   billsToCome: "Bills still to come this year",
-  billsToComeNote: "For information. These are already spread across the months they cover.",
+  billsToComeNote: "For information. Once paid, each is spread across the months it covers.",
   billsNone: "No quarterly or yearly bills are due before the end of the year.",
   billUnconvertible: "can't be converted",
   previousYear: "Previous year",
@@ -228,6 +231,7 @@ export const cashflowCopy = {
   infoTitle: "How to read this page",
   infoPanel: [
     "The checks use general guidelines from MoneySense: keep at least 10% of income, and 3 to 6 months of spending in cash. They are guidelines, not advice.",
+    "With fewer than 3 finished months to average, the light stays at Watch, because a month with spending missing cannot be told apart from a good one.",
     "Yearly and quarterly bills are spread over the months they cover, so one big premium does not turn a single month red.",
     "A yearly cost entered as a plain expense is not spread. Enter it as a bill instead.",
     "A loan set up as a bill should not also be logged as a transfer, or it counts twice.",

@@ -90,6 +90,23 @@ describe("CashflowPage light", () => {
     ).toBeInTheDocument();
   });
 
+  it("explains a short average in words, with the month count", async () => {
+    const shortAverage = { code: "short_average" as const, keptBasisPoints: null, cushionTenths: null, billName: "" };
+    renderPage(
+      pageFixture({
+        light: { colour: "yellow", reasons: [shortAverage] },
+        average: { months: 1, inMinor: 652000, outMinor: 9450, leftMinor: 642550, keptBasisPoints: 9855 },
+      }),
+    );
+    const light = await screen.findByTestId("cashflow-light");
+    expect(
+      within(light).getByText("Based on only 1 finished month so far. Hearth needs 3 before it can say on track."),
+    ).toBeInTheDocument();
+    expect(reasonText(shortAverage, 2)).toBe(
+      "Based on only 2 finished months so far. Hearth needs 3 before it can say on track.",
+    );
+  });
+
   it("reads 'On track by common guidelines' for green", async () => {
     renderPage(pageFixture({ light: { colour: "green", reasons: [] } }));
     expect(await screen.findByText("On track by common guidelines")).toBeInTheDocument();
@@ -115,6 +132,7 @@ describe("cashflowCopy", () => {
     }
     texts.push(...Object.values(cashflowCopy).flatMap((value) => (typeof value === "string" ? [value] : [])));
     texts.push(...cashflowCopy.infoPanel);
+    texts.push(cashflowCopy.headingForNote(1), cashflowCopy.headingForNote(3));
     for (const text of texts) {
       expect(text).not.toMatch(/\bsafe\b/i);
     }
@@ -268,6 +286,34 @@ describe("CashflowYearly", () => {
     expect(screen.queryByText("Heading for")).not.toBeInTheDocument();
   });
 
+  it("says unpaid bills are spread once paid, not already", async () => {
+    renderPage(pageFixture());
+    await screen.findByRole("tab", { name: "Yearly" });
+    openYearly();
+    expect(
+      await screen.findByText("For information. Once paid, each is spread across the months it covers."),
+    ).toBeInTheDocument();
+  });
+
+  it("heading for says how many months its average covers", async () => {
+    const data = pageFixture({ average: { months: 1, inMinor: 1, outMinor: 1, leftMinor: 0, keptBasisPoints: null } });
+    renderPage(data);
+    await screen.findByRole("tab", { name: "Yearly" });
+    openYearly();
+    expect(
+      await screen.findByText("Kept so far plus the average of 1 month for each month still to come"),
+    ).toBeInTheDocument();
+  });
+
+  it("heading for names the 3-month average once the window is full", async () => {
+    renderPage(pageFixture());
+    await screen.findByRole("tab", { name: "Yearly" });
+    openYearly();
+    expect(
+      await screen.findByText("Kept so far plus the 3-month average for each month still to come"),
+    ).toBeInTheDocument();
+  });
+
   it("says how many months lack enough data and lists bills still to come", async () => {
     const data = pageFixture();
     renderPage({ ...data, year: { ...data.year, greyMonths: 2 } });
@@ -312,6 +358,24 @@ describe("CashflowChart", () => {
     expect(by("2026-08").getAttribute("data-style")).toBe("grey");
     expect(by("2026-09").getAttribute("data-style")).toBe("current");
     expect(by("2026-10").getAttribute("data-style")).toBe("projected");
+  });
+});
+
+describe("CashflowChart legend", () => {
+  it("draws a swatch in each bar style beside its label", async () => {
+    renderPage(pageFixture());
+    const legend = await screen.findByTestId("cashflow-legend");
+    const swatches = within(legend).getAllByTestId("cashflow-legend-swatch");
+    expect(swatches.map((swatch) => swatch.getAttribute("data-style"))).toEqual([
+      "solid-positive",
+      "grey",
+      "current",
+      "projected",
+    ]);
+    for (const swatch of swatches) expect(swatch).toHaveAttribute("aria-hidden", "true");
+    for (const label of ["Finished", "Not enough data", "This month so far", "Projected"]) {
+      expect(within(legend).getByText(label)).toBeInTheDocument();
+    }
   });
 });
 

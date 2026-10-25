@@ -50,6 +50,46 @@ function styleOf(month: CashflowMonth, value: number): BarStyle {
   }
 }
 
+// One legend entry: a small swatch drawn the way its bar is drawn, then the
+// label. The swatch is decoration; the label carries the meaning. Its stripe
+// pattern has its own id so it does not depend on the chart's <defs>.
+function LegendItem({ style, label }: { style: BarStyle; label: string }) {
+  const stripes = "cashflow-legend-stripes";
+  return (
+    <li className="flex items-center gap-1.5">
+      <svg
+        data-testid="cashflow-legend-swatch"
+        data-style={style}
+        aria-hidden="true"
+        width="12"
+        height="12"
+        viewBox="0 0 12 12"
+        className={style === "solid-positive" ? "text-accent" : "text-muted"}
+      >
+        {style === "grey" && (
+          <defs>
+            <pattern id={stripes} width="4" height="4" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+              <line x1="0" y1="0" x2="0" y2="4" stroke="currentColor" strokeWidth="2" />
+            </pattern>
+          </defs>
+        )}
+        <rect
+          x="0.5"
+          y="0.5"
+          width="11"
+          height="11"
+          rx="1"
+          fill={style === "grey" ? `url(#${stripes})` : style === "projected" ? "none" : "currentColor"}
+          stroke={style === "grey" || style === "projected" ? "currentColor" : "none"}
+          strokeDasharray={style === "projected" ? "3 2" : undefined}
+          opacity={style === "current" ? 0.35 : 1}
+        />
+      </svg>
+      {label}
+    </li>
+  );
+}
+
 type Props = {
   months: CashflowMonth[];
   currency: string;
@@ -146,11 +186,11 @@ export function CashflowChart({ months, currency }: Props) {
           </span>
         ))}
       </div>
-      <ul className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[11.5px] text-muted">
-        <li>{cashflowCopy.chartLegend.solid}</li>
-        <li>{cashflowCopy.chartLegend.grey}</li>
-        <li>{cashflowCopy.chartLegend.current}</li>
-        <li>{cashflowCopy.chartLegend.projected}</li>
+      <ul data-testid="cashflow-legend" className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[11.5px] text-muted">
+        <LegendItem style="solid-positive" label={cashflowCopy.chartLegend.solid} />
+        <LegendItem style="grey" label={cashflowCopy.chartLegend.grey} />
+        <LegendItem style="current" label={cashflowCopy.chartLegend.current} />
+        <LegendItem style="projected" label={cashflowCopy.chartLegend.projected} />
       </ul>
     </div>
   );

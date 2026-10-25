@@ -23,6 +23,7 @@ export const cashflowReasonCodeSchema = z.enum([
   "cushion_under_3",
   "cushion_unknown",
   "bill_due_soon",
+  "short_average",
 ]);
 
 // "" means the cushion is known; any other value says why it is not.

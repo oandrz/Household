@@ -66,7 +66,7 @@ export function CashflowYearly({ data, formatAmount, onSelectYear }: Props) {
         </CashflowFigure>
         {year.headingForMinor !== null && (
           <CashflowFigure label={cashflowCopy.headingFor} value={formatAmount(year.headingForMinor)}>
-            <span>{cashflowCopy.headingForNote}</span>
+            <span>{cashflowCopy.headingForNote(data.average.months)}</span>
           </CashflowFigure>
         )}
         <CashflowFigure label={cashflowCopy.cashCushion} value={cushionText(cushion)}>
