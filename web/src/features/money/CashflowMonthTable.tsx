@@ -102,10 +102,10 @@ export function CashflowMonthTable({ months, formatAmount }: Props) {
                         {monthLabel(month.month)}
                       </button>
                     </td>
-                    <td className="hidden py-2 pr-3 text-right text-ink sm:table-cell">{formatAmount(month.inMinor)}</td>
-                    <td className="hidden py-2 pr-3 text-right text-ink sm:table-cell">{formatAmount(month.outMinor)}</td>
-                    <td className="py-2 pr-3 text-right text-ink">{formatAmount(month.leftMinor)}</td>
-                    <td className="py-2 pr-3 text-right text-ink">{keptCell(month.keptBasisPoints)}</td>
+                    <td className="tabular hidden py-2 pr-3 text-right text-ink sm:table-cell">{formatAmount(month.inMinor)}</td>
+                    <td className="tabular hidden py-2 pr-3 text-right text-ink sm:table-cell">{formatAmount(month.outMinor)}</td>
+                    <td className="tabular py-2 pr-3 text-right text-ink">{formatAmount(month.leftMinor)}</td>
+                    <td className="tabular py-2 pr-3 text-right text-ink">{keptCell(month.keptBasisPoints)}</td>
                     <td className="py-2" data-tone={light.tone}>
                       <span className="inline-flex items-center gap-1.5 text-xs text-ink">
                         <span aria-hidden="true" className={`inline-block h-2.5 w-2.5 shrink-0 rounded-full ${DOT_CLASS[light.tone]}`} />
