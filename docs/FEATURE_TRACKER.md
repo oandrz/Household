@@ -13,7 +13,14 @@ needed them to exist (see "Where things stand" below).
 | ⬜ | Not started |
 | 🚫 | Out of scope — three different reasons, and **the row always says which**: marked "· not built" by the design itself; cut outright by the product owner (the audit screen, §9 — the code was deleted); or **deferred past the current release** by the product owner, meaning it is expected back later (the Family calendar, §7). A 🚫 is not a promise that something will never exist — it is a statement that it is not this release's work, and the row says what would bring it back |
 
-**Where things stand:** 149 of 169 features built or partly built — and **five of the 169 are 🚫**, so the honest denominator for this release is 164.
+**Where things stand:** 155 of 175 features built or partly built — and **five of the 175 are 🚫**, so the honest denominator for this release is 170.
+
+> **Recounted 2026-10-25 (Cashflow)**. Six rows the design does not draw are
+> added to Money: five ✅ and "Cashflow — monthly view" 🟡 (the month table
+> scrolls sideways at phone width). Money goes 37/6/8 → 42/7/8. Totals
+> **132/23/15/5 = 175**, Built + Partial **155**, denominator **170**.
+> Recounted by script before and after the edit; the first run reproduced the
+> previous table exactly.
 
 > **Recounted 2026-10-18 (cutting a person's access off)**. Three rows the
 > design does not draw are added to §1, ✅: "Change password", "Sign out
@@ -1207,13 +1214,13 @@ above now states Built + Partial **113** of **134**, denominator **129**.
 | Navigation shell | 7 | 1 | 1 | 0 |
 | Household settings | 18 | 8 | 2 | 0 |
 | Overview (home) | 9 | 2 | 1 | 0 |
-| Money | 37 | 6 | 8 | 0 |
+| Money | 42 | 7 | 8 | 0 |
 | Marriage | 17 | 2 | 2 | 0 |
 | Family | 0 | 0 | 0 | 3 |
 | Household extras | 0 | 0 | 0 | 1 |
 | Platform administration | 7 | 1 | 0 | 1 |
 | Automation | 10 | 0 | 0 | 0 |
-| **Total** | **127** | **22** | **15** | **5** |
+| **Total** | **132** | **23** | **15** | **5** |
 
 ---
 
@@ -1438,6 +1445,21 @@ code *and* a walk confirming it. All five Money features are now walked.
 | A ceiling on every amount a person enters (no mockup) | 🟡 — `domain.MaxAmountMinor` (1e14 minor units: S$1 trillion, Rp 1 trillion) and `domain.CheckAmountWithinLimit`. Every write path refuses more with 422 `AMOUNT_TOO_LARGE`: transactions (amount and amount received), account opening balance, bills (create, edit, mark paid), budget caps and expected income, goals (target, planned monthly, starting balance, contribution), holding events, prices and income; the web forms, `POST /transactions`, `hearthctl` CSV import and Telegram `/spend` all reach it. Walked in a real browser 2026-10-01. Built because one expense of int64 max was accepted and every money page of that household then answered 500 (QA ISSUE-001). **One gap closed 2026-10-01, two remain.** *Closed:* a holding's quantity × unit price could overflow with both figures inside the ceiling (100,000 units priced at S$1 trillion each); the price was stored, `POST …/valuations` answered 500 and `GET /holdings` answered 500 from then on. Now every write to a holding's events or prices is checked **before it is stored**, under the holding's row lock: the most the holding ever held × every recorded price (native and household-currency) must stay within `MaxAmountMinor`, or the write is refused with 422 `HOLDING_VALUE_TOO_LARGE` and nothing is written (`domain.CheckHoldingValueWithinLimit`, `HoldingService`'s `holdingRule`, `HoldingValuationRepository.UpsertWithFold`; design `docs/superpowers/specs/2026-10-01-hearth-holding-value-limit-design.md`). It is deliberately strict: it refuses some pairs no read multiplies (a large quantity sold long before a high price was recorded). Both orders walked in a real browser 2026-10-01 (quantity then price, price then quantity, and deleting a sale). *Still open, both named in the comment at the constant or in LEARNING:* (1) A row stored before either rule existed still breaks reads, and a holding already past the limit refuses every write except the repair (delete the purchase, or re-enter that day's price lower). Nothing here repairs old rows and **production has not been checked for one**: the read-only audit SQL in that design must return zero rows before this is deployed. The database CHECK constraints for the per-amount ceiling wait on that audit and are not built. (2) The ceiling is per amount: tens of thousands of rows at the ceiling in one account still overflow its balance, and the read then fails rather than showing a clamped total. |
 | Refuse a future-dated transaction, bill payment or goal contribution (no mockup) | ✅ — built 2026-10-01 (product-owner decision 2 of `docs/superpowers/specs/2026-10-01-hearth-household-calendar-design.md`, point 6 of [ADR 12](adr/0012-one-calendar-per-household.md); closes the date half of QA ISSUE-013). A recorded fact may not be dated after the household's today; a plan may. `TransactionService.Create`/`CreateOrReplay`/`Update`, `BillService.MarkPaid` and `GoalService.AddContribution` each take the household's today and answer `422 INVALID_DATE`, "That date is in the future.", the answer holdings already gave (one error, `domain.ErrDateInFuture`, one helper, `usecase/fact_date.go`). Every channel goes through those services: the browser, `hearthctl add` and its CSV import, and Telegram, whose row is dated today by the server. Existing rows stay; an edit is checked only when it changes the stored day, so a row dated after today can still have its description corrected. Plans are untouched: a bill's next due date, a goal's target month, a budget month. The forms have no rule of their own and show the server's sentence. Walked in a real browser: each of the three refused dated tomorrow with nothing written, saved dated today, and followed the household's zone rather than the browser's when the zone was moved a day behind. **Not walked:** the real `hearthctl` binary against a running stack; the token path it uses is pinned by a Go test |
 | Warning in Settings before a primary-currency change strands every account | ⬜ |
+
+**Cashflow — is the household leaving money over?** Six rows the design does
+not draw, from `docs/superpowers/specs/2026-10-25-hearth-cashflow-design.md`.
+The owner's rule is "leftover money": money in minus money out, with a
+quarterly or yearly bill spread over the months it covers. Walked in a real
+browser on 2026-10-25 against a freshly seeded household.
+
+| Feature | State |
+|---|---|
+| Cashflow — monthly view (no mockup) | 🟡 — `/money/cashflow`: a chart and a table of money in, money out, left over, kept and the light for each month, with a yearly bill's share spread across the months it covers and a transfer into a loan counted as money out. Walked: numbers move on add, a S$2,100 yearly bill paid on 20 Sep shows S$175 in Sep and in Oct, and the ledger's "Spent in September" reconciles with Money out. **Gap:** at phone width (375px) the month table scrolls sideways inside its card, so Left over, Kept and Light start off-screen. |
+| Cashflow — yearly view (no mockup) | ✅ — calendar years with a year picker back to the oldest year that has a transaction: "kept so far" beside the same months of last year, and "heading for" the full year. Read from `GET /cashflow?year=`. |
+| Cashflow light with reasons (no mockup) | ✅ — green, yellow, red or grey, each with the reasons it is that colour, from `domain.JudgeCashflow`. It is held at yellow (`short_average`) while fewer than three months are averaged, because the "spending under half of usual" rule only switches on after three solid months; found in the walk, when one finished month of S$94.50 spending read "On track". |
+| Not-enough-data rule with "Looks right, count it" (no mockup) | ✅ — a finished month with no income, spending under half of usual, or an amount that could not be converted goes grey and drops out of every average. "Looks right, count it" clears the first two for that month ("Counted by Andreas on 25 Oct 2026") and Undo reverses it; stored in `cashflow_month_confirmations` via `PUT`/`DELETE /cashflow/confirmations/{month}`, owner-only. |
+| Cash cushion (no mockup) | ✅ — months of usual money out that the household's `cash` accounts would cover, to one decimal. Shown as "—" with a reason, never as 0, when there is no cash account, no solid month to average, or an account cannot be converted; the light cannot be green then. |
+| Open the ledger at a month from a link (no mockup) | ✅ — `/money/transactions?month=2026-09`; a month in the Cashflow table links there, and the ledger's "Spent in September" reconciles with Money out before spread bills and loan transfers. |
 
 **Portfolio — investment holdings.** Twelve rows the design does not draw at
 all: `design/Household Dashboard.dc.html` shows "Investments & CPF" only as a

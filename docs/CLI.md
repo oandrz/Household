@@ -168,6 +168,21 @@ A period whose `unrealised` is `null` carries a `reason` instead: the price
 that would have measured that end was never recorded. `realised` and `income`
 are still there -- no price is involved in either.
 
+Cashflow is also driven through `api`. The read returns the light with its
+reasons, the average, the cash cushion, the last twelve months and the chosen
+year; a grey month can be confirmed ("Looks right, count it") and un-confirmed:
+
+```bash
+hearthctl api GET '/cashflow'                      # this year
+hearthctl api GET '/cashflow?year=2025'            # an older year
+hearthctl api PUT    /cashflow/confirmations/2026-09   # no body
+hearthctl api DELETE /cashflow/confirmations/2026-09   # undo; answers 204
+```
+
+The month must be finished (not the current one) and from 2000-01 on.
+Like every owner-gated money route it needs the money capability and an
+owner.
+
 Paths are relative to `/api/v1`. The CLI adds the CSRF header on every
 non-GET; you never handle it.
 

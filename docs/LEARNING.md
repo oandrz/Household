@@ -2018,6 +2018,15 @@ Three things about running those mutation checks that cost time:
   protected routes.** Both new walks also fail on an allowlist entry that
   matches no route, so a permission cannot outlive the route it was for.
 
+- **Tests for "usual spending" (the median) that could not fail when the
+  rule was broken (Cashflow, 2026-10-25).** A reviewer found that the first
+  tests for the median money out of the last six solid months passed with the
+  rule broken. The fix was figures chosen so the right answer and the
+  plausible wrong ones differ, plus a mutation check on each: break the
+  rule, watch the test fail for the expected reason, restore. Pattern 21's
+  lesson again: pick data where the right answer and the wrong ones are
+  different numbers.
+
 ### 3. The simulated environment lied
 
 - `Modal` threw `InvalidStateError` on **every open in every real browser** —
@@ -3222,6 +3231,31 @@ to know it, the product has to say it — or make it the default.** And a
 walker's observation that would stop a first-time user from finishing the
 flow is a defect, not a note for later. This is the same shape as the
 "15 of 15 still missed day-one UX" record at the top of this pattern.
+
+**A rule that only switches on once there is enough data is silent exactly
+when data is thin, and thin data reads as good news (Cashflow, 2026-10-25).**
+The Cashflow spec made "spending under half of usual" a grey-month rule that
+applies only after three solid months, since there is no "usual" before that.
+Every test and every rich fixture had three or more months, so the rule was
+right everywhere it was exercised. On a **freshly seeded** household in the
+walk, with one finished month and S$94.50 of spending, the light read
+**green, "On track"**: the one check that would have caught missing spending
+was off, and nothing else was looking. Fixed in `6708e73`: while the average
+covers fewer than three months the light is held at yellow with the reason
+`short_average`. The same walk also found three smaller copies of the
+shape: a note under "Bills still to come" that said unpaid bills were
+"already spread" when they were not, a "Heading for" figure that claimed a
+three-month average when fewer months existed, and a chart legend with no
+swatches, so the colours explained nothing. The reviewers found two more
+before the walk: the light went green when spending was zero and the cushion
+was "known", and the chart outlined grey months in green and drew zero-left
+months green. **What would have caught it sooner:** (1) a domain test for a
+brand-new household with one finished month, written as soon as the rule
+said "only once there are N"; (2) ask of every such rule, *what does the
+user see before N?*, and make the answer "not enough data", never a good
+colour; (3) walk a freshly seeded household, not only a rich one. This is the
+same shape as the rest of this pattern: the walk was derived from a spec
+whose gap was the missing-data case.
 
 ### 14. Literal example data belongs to the seed, not the product
 
@@ -7392,6 +7426,39 @@ route with a missing guard has no second line of defence.
   at the first stack's web port. And the compose file's `name: hearth` is
   overridden by `-p`, volumes included, so `down -v` on the second project
   removes only its own data.
+
+### Cashflow's browser walk and the read at the cap (2026-10-25)
+
+- **Walked on a freshly seeded household, in a real browser.** Numbers move
+  on add; a yearly bill paid on 20 Sep spreads S$175 a month into Sep and Oct,
+  labelled on Money out; a S$800 transfer into a loan account adds to money
+  out, labelled; deleting a month's income makes it grey, "Looks right, count
+  it" gives "Counted by Andreas on 25 Oct 2026", and Undo reverses it; a month
+  opens `/money/transactions?month=2026-09`, where "Spent in September"
+  (S$5,194.50) reconciles with Cashflow's money out (S$3,269.50 = 5,194.50 -
+  2,100 lump + 175 share) before the loan transfer; Yearly is correct; no
+  console errors. The light showing green on one thin month is pattern 13.
+- **Known gap, not fixed:** at 375px the month table scrolls sideways inside
+  its card, so Left over, Kept and Light start off-screen. The tracker row
+  says 🟡.
+- **The read at the transaction cap (ADR 14's measurement).** A throwaway
+  household with 100,006 transactions over six years (80% expenses, 10%
+  income, 10% transfers a third of them into a loan, six payments on two
+  yearly bills), inserted directly with `generate_series`. The dev API
+  container was limited to 2 CPUs and 512 MiB, which is what
+  `deploy/docker-compose.prod.yml` gives it (`mem_limit: 512m` on a
+  two-CPU box). 20 requests each: `GET /api/v1/cashflow` p50 **92 ms**, max
+  131 ms; `?year=2022` p50 89 ms, max 95 ms. For comparison the account list
+  on the same data, 10 requests, was about 34 ms. About 5 times ADR 14's
+  18 ms account list and 20 times under the two-second line, so it needs no
+  cache and no bound on how far back the walk goes. At the allowance in
+  ADR 14 (10 a second) a household hammering this one route would use
+  roughly one CPU, which is why the number is worth rechecking if the walk
+  ever gets heavier. The household, its session and its rows were deleted
+  afterwards.
+- **Measuring tip:** `docker update --cpus 0` does not remove a CPU limit
+  once set; recreate the container (`docker compose up -d --force-recreate
+  --no-deps api`) to get back to unlimited.
 
 ### The household calendar's browser walk (2026-10-01)
 

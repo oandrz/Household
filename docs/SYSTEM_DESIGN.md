@@ -34,6 +34,13 @@ to the twelve-month trend** — both pages say so on their face — because fold
 holdings in is milestone 3 and needs a decision first about whether an
 investment account also carries uninvested cash. The moomoo import is milestone
 4 and is **not built**.
+**Another Money feature the design does not draw: Cashflow** (`/money/cashflow`)
+answers "are we leaving money over each month?". `CashflowService` reads the
+household's whole ledger in one query, works out money in, money out and left
+over for every month (a quarterly or yearly bill's payment is spread over the
+months it covers; a transfer into a loan counts as money out), judges each
+finished month green, yellow, red or grey, and builds a yearly view. Its one
+table is `cashflow_month_confirmations`; its flow is §5 "Cashflow".
 Marriage's first feature, Retros, is code-complete, reviewed and now walked:
 its three tables and their relationships (§6), its route group and both
 guards (§4), and its frontend — `RetrosPage.tsx`'s five screen states, a real
@@ -728,6 +735,7 @@ graph TD
         Category["CategoryService — seeds the starter<br/>set on first read; create, rename, archive"]
         Transaction["TransactionService — MonthSummary<br/>converts then adds, like Account"]
         Budget["BudgetService — Month, Save, History,<br/>RollOver; RollOver moves a closed<br/>month's Remaining into a goal, once"]
+        Cashflow["CashflowService — Page reads every<br/>transaction once, then folds months, grey rules<br/>and the light in domain/. Confirm/Unconfirm<br/>mark a month 'looks right'"]
         Goal["GoalService — composes the whole<br/>Goals screen in one List call, one<br/>card in View; a contribution moves<br/>no real money"]
         Bill["BillService — MarkPaid/UndoPayment write<br/>into TransactionRepository through<br/>BillRepository, not TransactionService;<br/>View builds one bill the way List does"]
         Retro["RetroService — Save is the shared-draft<br/>version guard; SetActionDone never<br/>touches it, a second repository entirely"]
@@ -922,6 +930,9 @@ in one file.
 | `VisionRepository` | `adapter/postgres` | Nineteenth. `Get` returns `domain.ErrNotFound` for a year never set, which `VisionService` turns into the empty vision the screen renders (decision 9) — the repository never invents a row. `Save` replaces the whole document — parent upserted, every child deleted and reinserted — in one transaction, under the same two-shape version guard `RetroRepository.Update` established: `version == 0` is a create, refused with `domain.ErrVisionChanged` if a row has appeared since the caller read the empty vision; `version > 0` is an update, `WHERE version = $n`, with a zero-row result re-read to tell "the vision is gone" apart from "someone saved first." The existence check runs on the transaction's own connection, never the pool-backed `Get` — calling `Get` from inside `Save`'s own `pgx.BeginFunc` would hold one pool connection while asking the pool for a second, which starves it under concurrent saves (`docs/LEARNING.md`). A measure naming a goal outside this household is refused inside the same transaction with `domain.ErrVisionGoalUnknown` — the `vision_measures` foreign key alone only proves the goal exists *somewhere* |
 | `GoalProgressReader` | `adapter/postgres` (`*GoalRepo` already satisfies it) | Unnumbered, like `AccountLookup`/`CategoryLookup` above — a narrow port, not a repository. One method wide on purpose, the same interface-segregation reasoning as those two, for a caller in the opposite direction: `VisionService` needs one thing from Goals, the progress of a handful of goal ids, not the forty-line `GoalRepository` contract. `ProgressByIDs` returns an entry only for an id that exists in the caller's own household; a missing id is a miss, not an error — a measure whose goal was deleted renders as a label with no figure (spec decision 8), not a failed page. Counts an *archived* goal as found, deliberately: archiving is not deletion anywhere else in this product, so a measure linked to an archived goal keeps its figure |
 | `GoalLookup` | `adapter/postgres` (`*GoalRepo` already satisfies it) | Unnumbered, the same narrow-port shape as `GoalProgressReader` directly above. One method, `Get`, and `BudgetDeps.Goals` is typed as this rather than the whole `GoalRepository` (2026-09-13): `BudgetService.RollOver` reads the target goal before `BudgetRepository.RollOverToGoal` writes, and that is the only thing Budget ever asks Goals. Held as the full nine-method repository, the budget service could create goals or delete contributions with nothing in the type system saying it should not |
+| `CashflowRowReader` | `adapter/postgres` (`cashflow_row_repo.go`) | `Rows` returns every transaction of a household, oldest first, in **one query** (joined to the destination account's type and to the bill payment that points at the expense), so the service never queries per month. Bounded by `domain.MaxTransactions` (ADR 13). Kind, account type and cadence go through the domain `Parse*` functions, which refuse unknown values, and a transaction returned twice (two payments linked to it) is an error rather than a double count. Measured 2026-10-25 at the cap: see [LEARNING](LEARNING.md) |
+| `CashflowConfirmationRepository` | `adapter/postgres` (`cashflow_confirmation_repo.go`) | `List`, `Confirm`, `Unconfirm` over `cashflow_month_confirmations`. `Confirm` is idempotent and keeps the first confirmer; `Unconfirm` on a missing row succeeds. The month window (2000-01 up to the last finished month) is checked in the service, the first-of-month rule again by the table's CHECK |
+| `CashflowAccounts`, `CashflowBills` | `adapter/postgres` (`*AccountRepo` and `*BillRepo` already satisfy them) | Unnumbered narrow ports, the `GoalLookup` shape: one `List` each, for the cash balances behind the cash cushion and the live quarterly and yearly bills behind the "bill due within 60 days" reason. Declared in `ports_money_cashflow.go` so `CashflowService` cannot reach the rest of either repository |
 | `TelegramLinkRepository` | `adapter/postgres` | Twentieth. Stores the pending deep-link nonces, hashed, that carry either a browser's sign-in request or a signed-in member's link request across to Telegram — the same table, told apart by `user_id` (§6). `Create(ctx, userID, nonceHash, expiresAt) (id, error)` **now returns the new row's id** — a port signature change, landed with the linking feature — because `TelegramLinkService.Start` hands that id straight back to the browser to poll `Status` with; the plain sign-in nonce (`TelegramAuthService.StartLink`) still calls `Create` with `userID ""` and simply discards the id, since a sign-in nonce is never polled by row id at all. `Consume` stamps `consumed_at` **and** records the redeeming `chat_id` **and now `chat_username`** in one statement, because the chat is unknown when the nonce is minted — the browser has not met Telegram yet — so redemption is the only moment they can be joined, and a redemption that failed to record its chat would be a rate limit that silently never fires; it returns a `TelegramLinkRedemption{ID, UserID}`, not the row itself, because `HandleStart`'s branch (link vs sign-in/sign-up) is exactly that pair. Absent, expired or already consumed all return `domain.ErrNotFound` from one guarded `UPDATE`, the same shape `MagicLinkRepository.Consume` uses. `ByID` reads one row back for the browser that minted it — deliberately with no ownership check of its own, so a caller that skipped the `row.UserID == session user` comparison is a bug in the caller, not a silently-safe repository (ADR 8: authorisation is not this layer's job). `CountLinksSince` (per chat, unchanged) still lives here rather than on `TelegramAccountRepository`, because the per-chat limit has to bind chats that have no account yet — a stranger repeating `/start` has no user row to count against. `CountMintsSince` is new and per **user**: it bounds how many link nonces one signed-in member can mint in an hour (decision 12, three), a table-growth control rather than a security one, since the session minting is already authenticated |
 | `TelegramAccountRepository` | `adapter/postgres` | Twenty-first. `ByChatID` resolves a chat to the user it is bound to, or `domain.ErrNotFound` — which is the entire branch key of the Telegram sign-in flow: found means "send a sign-in link", not found means "send a sign-up link" (§5). The binding is now written from **two** call sites, and this repository's own doc comment was rewritten to say so rather than to explain why `Create` did not exist: inside `SignupRepository.Provision`'s existing transaction, when a stranger creates a household from a chat, and by `Create(ctx, TelegramBinding) error`, called by `TelegramLinkService.Confirm` when a member who already has an account connects their chat from Settings. `Create` answers `domain.ErrAlreadyExists` for either `UNIQUE` — one chat per user, one user per chat — without distinguishing which: the caller already knows which side it was asking about (a fresh sign-up binds a chat that must be free; `Confirm` binds a user who must have no chat yet) and picks the sentence, rather than the repository guessing at intent. `ByUserID` reads a user's own binding back, `TelegramBinding{UserID, ChatID, ChatUsername, LinkedAt}`, and `Delete` removes it, idempotently — removing a binding that is not there is not an error, because the caller's goal ("this user has no chat") is already true. Both directions of the binding stay `UNIQUE` in the database, and that constraint, not any check in Go, is what makes a sign-in — and now a confirm — unambiguous |
 | `PlatformAdminRepository` | `adapter/postgres` | Twenty-second. `Get`/`Grant`/`Revoke`/`List` over `platform_admins`. `Grant` has exactly one call site in the whole repository outside test code — `adminctl`'s `runGrantPlatformAdmin` — which is the property [ADR 5](adr/0005-platform-admin-authorization.md) exists to keep true; there is no `AdminService` method that calls it, on purpose, since granting is not a decision the running service ever makes |
@@ -1056,7 +1067,7 @@ graph TD
     RequireFeature --> Cap
 
     Cap -->|"accounts: money"| RequireCap["requireCapability(money)<br/>403 unless the caller's membership has it"]
-    Cap -->|"transactions, categories,<br/>budgets, goals, bills, holdings: money AND owner —<br/>reads included"| RequireCapTxn["requireCapability(money)<br/>then requireOwner, both ahead<br/>of the GET/HEAD check below"]
+    Cap -->|"transactions, categories,<br/>budgets, cashflow, goals, bills, holdings: money AND owner —<br/>reads included"| RequireCapTxn["requireCapability(money)<br/>then requireOwner, both ahead<br/>of the GET/HEAD check below"]
     Cap -->|"retros, marriage/vision,<br/>marriage/agreements:<br/>marriage AND owner — reads included"| RequireCapRetro["requireCapability(marriage)<br/>then requireOwner, both ahead<br/>of the GET/HEAD check below"]
     Cap -->|"GET household/invites:<br/>owner, no capability"| RequireOwnerRead["requireOwner<br/>ahead of the GET/HEAD split"]
     Cap -->|"no — most routes"| Safe{"GET or HEAD?"}
@@ -1342,7 +1353,7 @@ first time the *server* enforces one. `/marriage`'s route was deleted in
 `/marriage/retros`, and the server-side gate below is the enforcement either
 way regardless of which routes the frontend happens to offer.)
 
-**Transactions, categories, budgets, goals, bills, holdings and retros are the routes
+**Transactions, categories, budgets, cashflow, goals, bills, holdings and retros are the routes
 where `requireOwner` gates a `GET`.** Every other owner-gated route in this
 table only reaches `requireOwner` after the `CSRF` check, which by
 construction means never on a read. These groups instead run
@@ -1517,6 +1528,8 @@ rows, and a link redemption writes neither.
 | POST | `/transactions` | session · money · owner · CSRF — an optional `Idempotency-Key` header makes the call safe to retry: same key and same fields answer the stored row with 200, same key and different fields `409 IDEMPOTENCY_KEY_REUSED` (see §5, "Idempotent create") |
 | PATCH · DELETE | `/transactions/{id}` | session · money · owner · CSRF |
 | GET | `/budgets/{month}`, `/budgets/history` | session · money · owner — same reasoning as the transactions/categories reads above |
+| GET | `/cashflow` (optional `?year=`) | session · money · owner — in the transactions group, ahead of the GET/HEAD check, so a limited member is refused before anything is read. An unreadable `year` is `400 INVALID_YEAR`; a year before the oldest transaction or after this one is `422` |
+| PUT · DELETE | `/cashflow/confirmations/{month}` | session · money · owner · CSRF — its own `requireCSRF` sub-group beside the budget writes. `month` must be a finished month from 2000-01; the confirmer is the caller's own membership, never a request value |
 | PUT | `/budgets/{month}` | session · money · owner · CSRF — its own CSRF sub-group, not the one below |
 | POST | `/budgets/{month}/rollover` | session · money · owner · CSRF — joins `PUT`'s CSRF sub-group, not a new one |
 | POST | `/categories` | session · money · owner · CSRF |
@@ -3011,6 +3024,64 @@ repository still relabels to the household's own primary currency
 regardless, but that must never be the only thing standing between a bad
 currency and a stored row.
 
+### Cashflow — one read of the whole ledger, folded in memory
+
+```mermaid
+sequenceDiagram
+    participant B as Browser
+    participant H as handleGetCashflow
+    participant Svc as CashflowService
+    participant Rows as CashflowRowReader
+    participant Dom as domain/cashflow_*
+    participant DB as Postgres
+
+    B->>H: GET /api/v1/cashflow?year=2026
+    Note over H: session, money, owner already passed
+    H->>Svc: Page(householdID, scope.Today, year)
+    Svc->>Rows: Rows(householdID)
+    Rows->>DB: one SELECT: every transaction, its destination<br/>account type, its bill payment's cadence
+    DB-->>Svc: rows, oldest first
+    Svc->>Svc: ClassifyCashflow each row, convert to primary<br/>(an amount with no rate marks its month, not the page)
+    Svc->>Dom: BuildCashflowMonths(items, first, current)
+    Svc->>Svc: Confirmations.List, then MarkCashflowGrey
+    Svc->>Svc: CashflowAverageOf, cushion from CashflowAccounts,<br/>due bills from CashflowBills
+    Svc->>Dom: JudgeCashflow(last, avg, cushion, billsDue)
+    Svc-->>H: CashflowPage
+    H-->>B: 200 JSON
+```
+
+**One query, then arithmetic.** The ledger is read once and folded in memory
+rather than queried per month, because a household's history is capped
+(`domain.MaxTransactions`, ADR 13) and twelve-plus round trips would cost more
+than the fold. Measured on 2026-10-25 with 100,006 transactions over six
+years under the production container's limits (2 CPUs, 512 MiB), the read took
+about 92 ms (p50) and 131 ms at worst, so it needs no cache; if it ever
+passed about two seconds the fix is to bound how far back the walk goes.
+
+**What counts.** Money in is income. Money out is expenses plus a transfer into
+a `loan` account; a transfer between the household's own other accounts is ignored, so a missing exchange rate on one cannot grey a month. A payment on a quarterly or yearly bill is not money out in
+the month it was paid: it is spread evenly over the months it covers
+(`SpreadMonths`), so a S$2,100 yearly bill reads S$175 a month. The current
+month is unfinished and is shown "so far", with no colour, and is left out of
+every average.
+
+**Grey means "don't know", and it is never flattering.** A finished month with
+no income, with spending under half of usual (only once three solid months
+exist), or with an amount that could not be converted is grey and drops out of
+the averages. "Looks right, count it" writes a `cashflow_month_confirmations`
+row that clears the first two; it never clears a missing exchange rate. The
+light (`JudgeCashflow`) cannot be green on missing data: no average, a cushion
+that could not be worked out, zero spending, or an average over fewer than
+three months (`short_average`) all hold it at yellow or grey.
+
+**The page.** `CashflowPage.tsx` makes one `GET /cashflow` (`useCashflow.ts`,
+validated by `cashflowSchemas.ts`) and every money write refreshes it, so the
+numbers move the moment a transaction is added. A month links to
+`/money/transactions?month=YYYY-MM`, which opens the ledger at that month.
+
+**Authorisation is the router's.** `CashflowService` takes no actor; `Confirm`
+is handed the caller's membership id by the handler (ADR 8).
+
 ### Goals — a contribution moves no real money; a rollover is one transaction each way
 
 ```mermaid
@@ -3963,6 +4034,8 @@ erDiagram
     accounts ||--o{ transactions : "from (nullable, CASCADE)"
     accounts ||--o{ transactions : "to (nullable, CASCADE)"
     households ||--o{ budgets : has
+    households ||--o{ cashflow_month_confirmations : "confirms months (CASCADE)"
+    memberships ||--o{ cashflow_month_confirmations : "confirmed by (nullable, SET NULL)"
     budgets ||--o{ budget_lines : has
     categories ||--o{ budget_lines : caps
     households ||--o{ goals : has
@@ -4194,6 +4267,12 @@ erDiagram
         bigint received_amount_minor "nullable — transfer only"
         char received_amount_currency "nullable, paired with the amount above"
         text idempotency_key "nullable — partial UNIQUE (household_id, key); a retry-safe create's handle, freed when the row is deleted"
+    }
+    cashflow_month_confirmations {
+        uuid household_id PK,FK "ON DELETE CASCADE"
+        date month PK "first of the month, CHECK, 2000-01 or later"
+        uuid confirmed_by_membership_id FK "nullable, SET NULL"
+        timestamptz confirmed_at
     }
     budgets {
         uuid id PK
@@ -4707,6 +4786,14 @@ Notes that are not obvious from the shapes:
   account, which transactions themselves reference. `DELETE
   /api/v1/transactions/{id}` really deletes the row and answers `204`, the one
   response in this product allowed to carry no body.
+- **`cashflow_month_confirmations` is at most one row per month, so it needs no
+  `LimitKind`.** The service only accepts months from 2000-01 up to the last
+  finished month, which is a small fixed ceiling (ADR 13). The primary key
+  `(household_id, month)` is what makes `Confirm` idempotent, and the table's
+  CHECK refuses a month that is not the first of a month. A member who leaves
+  keeps the row: `confirmed_by_membership_id` becomes NULL and the page shows
+  no name. The table stores a *judgement*, not a figure: every number on the
+  Cashflow page is recomputed from `transactions` on each read.
 - **`budgets` and `budget_lines` carry no `currency` column at all.** A cap
   is a plan, not a transaction, and it lives in the household's primary
   currency by construction (Budget spec decision 9). Changing the
