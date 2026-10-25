@@ -45,7 +45,7 @@ type CashflowBillToCome struct {
 type CashflowPage struct {
 	Currency        string
 	HasTransactions bool
-	OldestYear      int // 0 when HasTransactions is false
+	OldestYear      int // 0 when HasTransactions is false; never before cashflowFirstYear otherwise
 	Light           domain.CashflowVerdict
 	Average         domain.CashflowAverage
 	Cushion         domain.CashCushion
@@ -91,7 +91,9 @@ func (s *CashflowService) Page(ctx context.Context, householdID string, today ti
 		if oldest := monthStart(rows[0].OccurredOn); oldest.Before(first) {
 			first = oldest
 		}
-		oldestYear = first.Year()
+		// The page never shows a year before cashflowFirstYear, so one
+		// mistyped older date must not offer one in the year picker.
+		oldestYear = max(first.Year(), cashflowFirstYear)
 	}
 	if year == 0 {
 		year = current.Year()

@@ -249,6 +249,32 @@ finished month and the 3-month average**, never the current month.
 | **Yellow: watch** (any) | 3-month average Kept **under 10%** · the last finished month was **negative** · cash cushion **1 to under 3 months**, or **"—"** (couldn't be worked out) · a **quarterly or yearly bill due within 60 days** is larger than the 3-month average left over (a cash-timing warning: the money must exist on the day, even though it is spread for judging) |
 | **Green: on track** (all) | 3-month average Kept **10% or more** · cash cushion **3 months or more** · nothing above fired |
 
+**Correction, 2026-10-25: two more yellow reasons.** The table above is the
+approved rule set, kept as it was approved; the build adds two yellow reasons
+to it, and green now also needs neither of them to fire.
+
+- **Why.** The browser walk found the light green ("On track") on a new
+  household with one finished month of S$94.50 spending: the "spending under
+  half of usual" grey rule only runs once three solid months exist, so a
+  month with spending missing looked like a good one. The first fix held the
+  light at yellow while fewer than three months were averaged. The final
+  review then found that fix lifted too early: three solid months in the
+  window does not mean each of them had three solid months before it, so
+  three finished months with a sparse third one still read green.
+- **`short_average` (yellow):** fewer than 3 of the last 3 finished months can
+  be averaged (the others are grey or before the history began).
+- **`spending_not_checked` (yellow):** the last finished month, or any month
+  in the 3-month average, has not been through the "spending under half of
+  usual" check, because it had fewer than 3 solid months before it. A month
+  the owner confirmed with "Looks right, count it" counts as checked.
+- **Effect.** A new household cannot be green before it has six finished
+  months: the three it is judged on, each with three solid months before it.
+  Red and grey still win over both reasons.
+- **This is an open owner decision.** It never flatters a household, which is
+  the owner's stated top fear, but it does keep a careful new household at
+  Watch for its first six months. The owner should be told about this
+  correction when they read this document.
+
 Thresholds come from Singapore's MoneySense general guidance (save at least
 10% of income; keep 3 to 6 months of expenses as an emergency fund). They are
 the same for every household, and the *"i"* panel says they are general
@@ -303,6 +329,9 @@ As approved in `cashflow-layout.html` (option A), with the corrections above:
 needs ("log income and spending for a month to see cashflow") and links to
 Add transaction. With fewer than 3 finished months, the light still works, but
 the average is labelled with how many months it covers.
+**Correction, 2026-10-25:** "the light still works" now means it never goes
+above yellow (Watch) until the reasons `short_average` and
+`spending_not_checked` stop firing; see the correction under *Traffic light*.
 
 ## Constraints from the codebase
 

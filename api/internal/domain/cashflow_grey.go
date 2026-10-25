@@ -15,13 +15,17 @@ const (
 )
 
 // MarkCashflowGrey walks the finished months from oldest to newest and
-// sets Grey, Status and Confirmed. Months that are not solid on entry (the
-// current month, for one) are left alone.
+// sets Grey, Status, Confirmed and UsualChecked. Months that are not solid on
+// entry (the current month, for one) are left alone.
 //
 // Confirming a month ("looks right, count it") clears no_income and
 // under_half_usual but never unconvertible: a missing exchange rate is a
 // fact, not a judgement. A month that ends up grey does not enter later
 // months' "usual"; a confirmed month that ends up solid does.
+//
+// A stored confirmation on a month with nothing to clear is not in effect:
+// Confirmed stays false and it does not make the month checked. Don't count
+// it: the figures may have changed since someone looked.
 func MarkCashflowGrey(months []CashflowMonth, confirmed map[time.Time]bool) {
 	var solidOuts []int64
 	for i := range months {
@@ -31,6 +35,7 @@ func MarkCashflowGrey(months []CashflowMonth, confirmed map[time.Time]bool) {
 		}
 		judgement := judgementReasons(*m, solidOuts)
 		m.Confirmed = confirmed[m.Month] && len(judgement) > 0
+		m.UsualChecked = usualCheckRuns(solidOuts) || m.Confirmed
 		m.Grey = nil
 		if !m.Confirmed {
 			m.Grey = append(m.Grey, judgement...)
@@ -60,6 +65,12 @@ func judgementReasons(m CashflowMonth, solidOuts []int64) []GreyReason {
 	return reasons
 }
 
+// usualCheckRuns reports whether there are enough earlier solid months for
+// the under-half-of-usual check to run at all.
+func usualCheckRuns(solidOuts []int64) bool {
+	return len(solidOuts) >= usualMinMonths
+}
+
 // underHalfOfUsual reports whether out is less than half the median of the
 // last usualWindow entries of solidOuts. It needs at least usualMinMonths
 // entries. The comparison multiplies instead of dividing so it is exact:
@@ -67,7 +78,7 @@ func judgementReasons(m CashflowMonth, solidOuts []int64) []GreyReason {
 // middle pair a, b it is 4·out < a + b. big.Int keeps the products from
 // overflowing on absurdly large amounts.
 func underHalfOfUsual(out int64, solidOuts []int64) bool {
-	if len(solidOuts) < usualMinMonths {
+	if !usualCheckRuns(solidOuts) {
 		return false
 	}
 	recent := slices.Clone(solidOuts[max(0, len(solidOuts)-usualWindow):])

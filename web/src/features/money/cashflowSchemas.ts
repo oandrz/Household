@@ -24,6 +24,7 @@ export const cashflowReasonCodeSchema = z.enum([
   "cushion_unknown",
   "bill_due_soon",
   "short_average",
+  "spending_not_checked",
 ]);
 
 // "" means the cushion is known; any other value says why it is not.
@@ -42,6 +43,9 @@ const cashflowReasonSchema = z.object({
   keptBasisPoints: z.number().nullable(),
   cushionTenths: z.number().nullable(),
   billName: z.string(),
+  // True when a due bill has no exchange rate: it warns without having been
+  // compared with the average left over.
+  billUnconvertible: z.boolean(),
 });
 export type CashflowReason = z.infer<typeof cashflowReasonSchema>;
 

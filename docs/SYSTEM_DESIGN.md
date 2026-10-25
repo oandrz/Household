@@ -3072,8 +3072,18 @@ exist), or with an amount that could not be converted is grey and drops out of
 the averages. "Looks right, count it" writes a `cashflow_month_confirmations`
 row that clears the first two; it never clears a missing exchange rate. The
 light (`JudgeCashflow`) cannot be green on missing data: no average, a cushion
-that could not be worked out, zero spending, or an average over fewer than
-three months (`short_average`) all hold it at yellow or grey.
+that could not be worked out, or zero spending hold it at yellow or grey. Two
+more yellow reasons cover the months the grey rules cannot yet see:
+`short_average` while fewer than three of the last three finished months can be
+counted, and `spending_not_checked` while the last finished month or any
+averaged month is not `UsualChecked`. `MarkCashflowGrey` sets `UsualChecked`
+when the under-half-of-usual check actually ran on the month (three solid
+months before it) or the month's confirmation is in effect, and
+`CashflowAverageOf` counts the averaged months without it as `Unchecked`. The
+two counts differ on purpose: three solid months in the window does not mean
+each had three solid months before it, so `short_average` alone let a sparse
+third month through as green. A due bill with no exchange rate carries
+`BillUnconvertible` on its reason, because no comparison was made.
 
 **The page.** `CashflowPage.tsx` makes one `GET /cashflow` (`useCashflow.ts`,
 validated by `cashflowSchemas.ts`) and every money write refreshes it, so the

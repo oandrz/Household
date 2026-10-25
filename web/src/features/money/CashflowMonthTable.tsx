@@ -112,6 +112,12 @@ export function CashflowMonthTable({ months, formatAmount }: Props) {
                     <tr>
                       <td colSpan={6} className="pb-2">
                         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted">
+                          {/* A confirmation never clears a missing exchange rate, so a
+                              counted month can still be grey: say why beside who counted it. */}
+                          {month.status === "grey" &&
+                            month.grey.map((reason) => (
+                              <span key={reason}>{greyReasonText(reason, month.unconvertibleCurrencies)}</span>
+                            ))}
                           {month.confirmation !== null ? (
                             <>
                               <span>{confirmationText(month.confirmation)}</span>
@@ -125,21 +131,16 @@ export function CashflowMonthTable({ months, formatAmount }: Props) {
                               </button>
                             </>
                           ) : (
-                            <>
-                              {month.grey.map((reason) => (
-                                <span key={reason}>{greyReasonText(reason, month.unconvertibleCurrencies)}</span>
-                              ))}
-                              {canCountIt(month) && (
-                                <button
-                                  type="button"
-                                  disabled={busy}
-                                  onClick={() => confirm.mutate(month.month)}
-                                  className="min-h-11 font-semibold text-accent disabled:opacity-60 lg:min-h-0"
-                                >
-                                  {cashflowCopy.countIt}
-                                </button>
-                              )}
-                            </>
+                            canCountIt(month) && (
+                              <button
+                                type="button"
+                                disabled={busy}
+                                onClick={() => confirm.mutate(month.month)}
+                                className="min-h-11 font-semibold text-accent disabled:opacity-60 lg:min-h-0"
+                              >
+                                {cashflowCopy.countIt}
+                              </button>
+                            )
                           )}
                         </div>
                       </td>

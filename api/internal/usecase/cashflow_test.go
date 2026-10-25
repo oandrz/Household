@@ -449,3 +449,71 @@ func TestPagePropagatesAnFXFailure(t *testing.T) {
 		t.Fatalf("err = %v, want the provider outage, not a grey month", err)
 	}
 }
+
+func TestPagePropagatesAnFXFailureOnACashAccount(t *testing.T) {
+	// Every transaction is in SGD, so only the IDR account asks for a rate.
+	f := newCashflowFixture(t)
+	f.solidQuarter()
+	f.addAccount("idr-cash", domain.AccountCash, domain.Money{Amount: 100_000_000, Currency: "IDR"}, true, false)
+	outage := errors.New("rate provider down")
+	f.fx.failWith(outage)
+	if _, err := f.svc.Page(context.Background(), "house-1", cashflowToday, 0); !errors.Is(err, outage) {
+		t.Fatalf("err = %v, want the provider outage, not an unknown cushion", err)
+	}
+}
+
+func TestPagePropagatesAnFXFailureOnABill(t *testing.T) {
+	// Every transaction is in SGD, so only the IDR bill asks for a rate.
+	f := newCashflowFixture(t)
+	f.solidQuarter()
+	f.bills.add(usecase.BillRecord{Bill: domain.Bill{
+		ID: "b", HouseholdID: "house-1", Name: "Villa tax", Cadence: domain.CadenceQuarterly,
+		Amount: domain.Money{Amount: 1_000_000, Currency: "IDR"}, NextDue: ptr(cashflowToday.AddDate(0, 0, 10)),
+	}})
+	outage := errors.New("rate provider down")
+	f.fx.failWith(outage)
+	if _, err := f.svc.Page(context.Background(), "house-1", cashflowToday, 0); !errors.Is(err, outage) {
+		t.Fatalf("err = %v, want the provider outage, not an unconvertible bill", err)
+	}
+}
+
+func TestPageOldestYearIsNeverBeforeTheFirstShownYear(t *testing.T) {
+	// One mistyped 1999 date must not offer a year the page then refuses.
+	f := newCashflowFixture(t)
+	f.income(cfDay(1999, time.December, 25), sgd(500_000))
+	p := f.page(t)
+	if p.OldestYear != 2000 {
+		t.Fatalf("OldestYear = %d, want 2000", p.OldestYear)
+	}
+	if _, err := f.svc.Page(context.Background(), "house-1", cashflowToday, p.OldestYear); err != nil {
+		t.Fatalf("the oldest year offered must load: %v", err)
+	}
+}
+
+func TestPageLightNeedsTheMissingSpendingCheckOnEveryAveragedMonth(t *testing.T) {
+	// Three ordinary months with a big cushion: everything else is green, but
+	// none of April, May or June had three solid months before it.
+	f := newCashflowFixture(t)
+	f.solidQuarter()
+	f.addAccount("cash", domain.AccountCash, sgd(5_000_000), true, false)
+	p := f.page(t)
+	if p.Light.Colour != domain.LightYellow || !hasReason(p.Light, domain.ReasonSpendingNotChecked) {
+		t.Fatalf("light = %+v, want yellow spending_not_checked", p.Light)
+	}
+	if p.Average.Unchecked != 3 {
+		t.Fatalf("average = %+v, want 3 unchecked", p.Average)
+	}
+
+	// Three more ordinary months before them, and the light can be green.
+	// Rows arrive oldest first, as the repository returns them.
+	f = newCashflowFixture(t)
+	for _, m := range []time.Month{time.January, time.February, time.March} {
+		f.income(cfDay(2026, m, 25), sgd(500_000))
+		f.expense(cfDay(2026, m, 10), sgd(300_000))
+	}
+	f.solidQuarter()
+	f.addAccount("cash", domain.AccountCash, sgd(5_000_000), true, false)
+	if p := f.page(t); p.Light.Colour != domain.LightGreen {
+		t.Fatalf("light = %+v, want green with six checked months", p.Light)
+	}
+}

@@ -74,7 +74,14 @@ type CashflowMonth struct {
 	Grey                    []GreyReason
 	UnconvertibleCurrencies []string // sorted, unique
 	Confirmed               bool
-	Contributions           []CashflowContribution
+	// UsualChecked is true when something has vouched that no spending is
+	// missing: the under-half-of-usual check ran on this month (it had
+	// enough solid months before it), or Confirmed is set. It is false until
+	// MarkCashflowGrey runs, so a month nobody marked is never trusted.
+	// JudgeCashflow will not show green while a month it rests on is
+	// unchecked.
+	UsualChecked  bool
+	Contributions []CashflowContribution
 }
 
 // LeftMinor is what the month kept: money in minus money out.

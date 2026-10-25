@@ -7,8 +7,14 @@ import (
 	"github.com/andreasoentoro/hearth/api/internal/domain"
 )
 
+// solidMonth is a last finished month with a long enough history behind it
+// that the under-half-of-usual check ran on it. healthy() and the other
+// averages below likewise have Unchecked 0: every averaged month was checked.
 func solidMonth(in, out int64) domain.CashflowMonth {
-	return domain.CashflowMonth{Month: cfMonth(2026, time.September), Status: domain.CashflowSolid, InMinor: in, OutMinor: out}
+	return domain.CashflowMonth{
+		Month: cfMonth(2026, time.September), Status: domain.CashflowSolid, InMinor: in, OutMinor: out,
+		UsualChecked: true,
+	}
 }
 
 func avgOf(n int, sumIn, sumOut int64) domain.CashflowAverage {
@@ -167,13 +173,17 @@ func TestJudgeYellowWhenADueBillExceedsUsualLeftOver(t *testing.T) {
 	bills := []domain.BillDue{{Name: "Car insurance", AmountMinor: 210_000}}
 	v := domain.JudgeCashflow(last, true, usualLeft190k(), knownCash(10_000_000), bills)
 	wantColour(t, v, domain.LightYellow, "bill_due_soon")
-	if v.Reasons[0].BillName != "Car insurance" {
-		t.Fatalf("bill name = %q", v.Reasons[0].BillName)
+	if v.Reasons[0].BillName != "Car insurance" || v.Reasons[0].BillUnconvertible {
+		t.Fatalf("reason = %+v, want Car insurance, convertible", v.Reasons[0])
 	}
 
+	// No comparison was made for a bill with no rate, and the reason says so.
 	bills = []domain.BillDue{{Name: "Foreign tax", Unconvertible: true}}
 	v = domain.JudgeCashflow(last, true, usualLeft190k(), knownCash(10_000_000), bills)
 	wantColour(t, v, domain.LightYellow, "bill_due_soon")
+	if v.Reasons[0].BillName != "Foreign tax" || !v.Reasons[0].BillUnconvertible {
+		t.Fatalf("reason = %+v, want Foreign tax, unconvertible", v.Reasons[0])
+	}
 }
 
 func TestJudgeWorstColourWinsAndKeepsOnlyItsReasons(t *testing.T) {

@@ -42,7 +42,7 @@ function pageFixture(overrides: Partial<CashflowData> = {}): CashflowData {
     oldestYear: 2024,
     light: {
       colour: "yellow",
-      reasons: [{ code: "kept_under_10", keptBasisPoints: 600, cushionTenths: null, billName: "" }],
+      reasons: [{ code: "kept_under_10", keptBasisPoints: 600, cushionTenths: null, billName: "", billUnconvertible: false }],
     },
     average: { months: 3, inMinor: 500000, outMinor: 450000, leftMinor: 50000, keptBasisPoints: 1000 },
     cushion: { known: true, tenths: 42, reason: "" },
@@ -90,8 +90,10 @@ describe("CashflowPage light", () => {
     ).toBeInTheDocument();
   });
 
+  const noFigures = { keptBasisPoints: null, cushionTenths: null, billName: "", billUnconvertible: false };
+
   it("explains a short average in words, with the month count", async () => {
-    const shortAverage = { code: "short_average" as const, keptBasisPoints: null, cushionTenths: null, billName: "" };
+    const shortAverage = { ...noFigures, code: "short_average" as const };
     renderPage(
       pageFixture({
         light: { colour: "yellow", reasons: [shortAverage] },
@@ -100,11 +102,40 @@ describe("CashflowPage light", () => {
     );
     const light = await screen.findByTestId("cashflow-light");
     expect(
-      within(light).getByText("Based on only 1 finished month so far. Hearth needs 3 before it can say on track."),
+      within(light).getByText(
+        "Only 1 of the last 3 months can be counted. Hearth needs all 3 before it can say on track. A month marked not enough data can sometimes be counted with “Looks right, count it”.",
+      ),
     ).toBeInTheDocument();
+    // A long history with one grey month in the window: still true, because
+    // it never claims the household is new.
     expect(reasonText(shortAverage, 2)).toBe(
-      "Based on only 2 finished months so far. Hearth needs 3 before it can say on track.",
+      "Only 2 of the last 3 months can be counted. Hearth needs all 3 before it can say on track. A month marked not enough data can sometimes be counted with “Looks right, count it”.",
     );
+  });
+
+  it("says when the missing-spending check has not run on every month", async () => {
+    renderPage(pageFixture({ light: { colour: "yellow", reasons: [{ ...noFigures, code: "spending_not_checked" }] } }));
+    const light = await screen.findByTestId("cashflow-light");
+    expect(within(light).getByText("Watch")).toBeInTheDocument();
+    expect(
+      within(light).getByText(
+        "Hearth can't yet tell whether some spending is missing: it needs 3 earlier finished months to compare each month against.",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("does not claim a comparison for a bill that could not be converted", async () => {
+    const unconvertible = { ...noFigures, code: "bill_due_soon" as const, billName: "Villa tax", billUnconvertible: true };
+    const convertible = { ...noFigures, code: "bill_due_soon" as const, billName: "Car insurance" };
+    renderPage(pageFixture({ light: { colour: "yellow", reasons: [unconvertible, convertible] } }));
+    const light = await screen.findByTestId("cashflow-light");
+    expect(
+      within(light).getByText("Villa tax is due within 60 days and its amount couldn't be converted, so it can't be compared with the average left over"),
+    ).toBeInTheDocument();
+    expect(
+      within(light).getByText("Car insurance is due within 60 days and is larger than the average left over each month"),
+    ).toBeInTheDocument();
+    expect(within(light).queryByText(/Villa tax.*larger/)).not.toBeInTheDocument();
   });
 
   it("reads 'On track by common guidelines' for green", async () => {
@@ -119,8 +150,10 @@ describe("cashflowCopy", () => {
     for (const code of cashflowReasonCodeSchema.options) {
       for (const tenths of [null, 0, 9, 10, 29, 30]) {
         for (const kept of [null, 0, 600, 1000]) {
-          const reason: CashflowReason = { code, keptBasisPoints: kept, cushionTenths: tenths, billName: "Rent" };
-          texts.push(reasonText(reason, 3), reasonText(reason, 1));
+          for (const billUnconvertible of [false, true]) {
+            const reason: CashflowReason = { code, keptBasisPoints: kept, cushionTenths: tenths, billName: "Rent", billUnconvertible };
+            texts.push(reasonText(reason, 3), reasonText(reason, 1));
+          }
         }
       }
     }
@@ -139,7 +172,7 @@ describe("cashflowCopy", () => {
   });
 
   it("says 'just under' when a figure equals its threshold after rounding", () => {
-    const base = { keptBasisPoints: null, cushionTenths: null, billName: "" };
+    const base = { keptBasisPoints: null, cushionTenths: null, billName: "", billUnconvertible: false };
     expect(reasonText({ ...base, code: "cushion_under_3", cushionTenths: 30 }, 3)).toContain("just under 3 months");
     expect(reasonText({ ...base, code: "cushion_under_1", cushionTenths: 10 }, 3)).toContain("just under 1 month");
     expect(reasonText({ ...base, code: "kept_under_10", keptBasisPoints: 1000 }, 3)).toContain("just under 10%");
@@ -226,6 +259,21 @@ describe("CashflowMonthTable", () => {
         return String(url) === "/api/v1/cashflow/confirmations/2026-08" && init?.method === "DELETE";
       })).toBe(true);
     });
+  });
+
+  it("a confirmed month that is still grey shows why next to who counted it", async () => {
+    const stillGrey = monthFixture({
+      month: "2026-08",
+      status: "grey",
+      grey: ["unconvertible"],
+      unconvertibleCurrencies: ["IDR"],
+      confirmation: { confirmedAt: "2026-10-25T08:00:00Z", confirmedByName: "Alex" },
+    });
+    renderPage(pageFixture({ recent: [stillGrey] }));
+    expect(await screen.findByText("Counted by Alex on 25 Oct 2026")).toBeInTheDocument();
+    expect(screen.getByText("An IDR transaction couldn't be converted")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Undo" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Looks right, count it" })).not.toBeInTheDocument();
   });
 
   it("an unconvertible-only grey month does not offer count it", async () => {
@@ -400,7 +448,7 @@ describe("CashflowChart honesty", () => {
 describe("negative cushion", () => {
   it("writes an overdrawn cushion with one minus sign", () => {
     expect(cushionText({ known: true, tenths: -42, reason: "" })).toBe("-4.2 months");
-    const base = { keptBasisPoints: null, cushionTenths: -42, billName: "" };
+    const base = { keptBasisPoints: null, cushionTenths: -42, billName: "", billUnconvertible: false };
     expect(reasonText({ ...base, code: "cushion_under_1" }, 3)).toContain("-4.2 months");
   });
 });
@@ -421,6 +469,15 @@ describe("CashflowPage states", () => {
     expect(panel).toHaveTextContent(/not advice/i);
     expect(panel).toHaveTextContent(/enter it as a bill/i);
     expect(panel).toHaveTextContent(/transfer/i);
+  });
+
+  it("says in the info panel what holds the light at Watch", async () => {
+    renderPage(pageFixture());
+    fireEvent.click(await screen.findByRole("button", { name: "About these numbers" }));
+    const panel = screen.getByTestId("cashflow-info");
+    expect(panel).toHaveTextContent(/never goes above Watch/);
+    expect(panel).toHaveTextContent(/all of the last 3 finished months/);
+    expect(panel).toHaveTextContent(/at least 3 counted months before it/);
   });
 
   it("shows the owner-only message on a 403", async () => {

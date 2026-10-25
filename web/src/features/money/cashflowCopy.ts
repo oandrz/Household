@@ -109,9 +109,17 @@ export function reasonText(reason: CashflowReason, averageMonths: number): strin
     case "cushion_unknown":
       return "The cash cushion could not be worked out";
     case "bill_due_soon":
-      return `${reason.billName} is due within 60 days and is larger than the average left over each month`;
+      // With no exchange rate nothing was compared, so the sentence must not
+      // claim the bill is larger.
+      return reason.billUnconvertible
+        ? `${reason.billName} is due within 60 days and its amount couldn't be converted, so it can't be compared with the average left over`
+        : `${reason.billName} is due within 60 days and is larger than the average left over each month`;
     case "short_average":
-      return `Based on only ${averageMonths} finished ${averageMonths === 1 ? "month" : "months"} so far. Hearth needs 3 before it can say on track.`;
+      // Worded to be true for a new household and for a long history with a
+      // grey month in the window alike.
+      return `Only ${averageMonths} of the last 3 months can be counted. Hearth needs all 3 before it can say on track. A month marked not enough data can sometimes be counted with “Looks right, count it”.`;
+    case "spending_not_checked":
+      return "Hearth can't yet tell whether some spending is missing: it needs 3 earlier finished months to compare each month against.";
     default:
       // A code this build has never heard of: say so rather than guess.
       return "This check could not be described";
@@ -231,7 +239,7 @@ export const cashflowCopy = {
   infoTitle: "How to read this page",
   infoPanel: [
     "The checks use general guidelines from MoneySense: keep at least 10% of income, and 3 to 6 months of spending in cash. They are guidelines, not advice.",
-    "With fewer than 3 finished months to average, the light stays at Watch, because a month with spending missing cannot be told apart from a good one.",
+    "The light never goes above Watch until it can count all of the last 3 finished months, and each of them has been compared with at least 3 counted months before it or marked “Looks right, count it”. Until then, a month with spending missing cannot be told apart from a good one.",
     "Yearly and quarterly bills are spread over the months they cover, so one big premium does not turn a single month red.",
     "A yearly cost entered as a plain expense is not spread. Enter it as a bill instead.",
     "A loan set up as a bill should not also be logged as a transfer, or it counts twice.",

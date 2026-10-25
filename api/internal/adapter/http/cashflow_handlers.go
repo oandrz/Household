@@ -13,10 +13,11 @@ import (
 const cashflowDayLayout = "2006-01-02"
 
 type cashflowReasonDTO struct {
-	Code            string `json:"code"`
-	KeptBasisPoints *int64 `json:"keptBasisPoints"`
-	CushionTenths   *int64 `json:"cushionTenths"`
-	BillName        string `json:"billName"`
+	Code              string `json:"code"`
+	KeptBasisPoints   *int64 `json:"keptBasisPoints"`
+	CushionTenths     *int64 `json:"cushionTenths"`
+	BillName          string `json:"billName"`
+	BillUnconvertible bool   `json:"billUnconvertible"`
 }
 
 type cashflowLightDTO struct {
@@ -195,7 +196,8 @@ func toCashflowLightDTO(v domain.CashflowVerdict) cashflowLightDTO {
 	reasons := make([]cashflowReasonDTO, 0, len(v.Reasons))
 	for _, r := range v.Reasons {
 		reasons = append(reasons, cashflowReasonDTO{
-			Code: r.Code, KeptBasisPoints: r.KeptBasisPoints, CushionTenths: r.CushionTenths, BillName: r.BillName,
+			Code: r.Code, KeptBasisPoints: r.KeptBasisPoints, CushionTenths: r.CushionTenths,
+			BillName: r.BillName, BillUnconvertible: r.BillUnconvertible,
 		})
 	}
 	return cashflowLightDTO{Colour: string(v.Colour), Reasons: reasons}

@@ -9,8 +9,11 @@ import (
 // Grey months drop out, so Months is 0, 1, 2 or 3.
 type CashflowAverage struct {
 	Months int
-	SumIn  int64
-	SumOut int64
+	// Unchecked is how many of the averaged months are not UsualChecked:
+	// nothing has shown that their spending is complete.
+	Unchecked int
+	SumIn     int64
+	SumOut    int64
 }
 
 // SumLeft is what the window kept in total. Money in and out are never
@@ -43,6 +46,9 @@ func CashflowAverageOf(months []CashflowMonth, current time.Time) CashflowAverag
 			continue
 		}
 		avg.Months++
+		if !m.UsualChecked {
+			avg.Unchecked++
+		}
 		avg.SumIn += m.InMinor
 		avg.SumOut += m.OutMinor
 	}
@@ -124,10 +130,15 @@ const (
 	ReasonCushionUnknown     = "cushion_unknown"
 	ReasonBillDueSoon        = "bill_due_soon"
 	// ReasonShortAverage is yellow whenever fewer than three months were
-	// averaged. The "spending under half of usual" check needs three solid
-	// months before it can run, so with fewer a month whose spending was
-	// never entered looks healthy. Hearth will not call that on track.
+	// averaged: too little to call a household on track.
 	ReasonShortAverage = "short_average"
+	// ReasonSpendingNotChecked is yellow whenever the last finished month or
+	// any averaged month is not UsualChecked. Until the "spending under half
+	// of usual" check has run on a month, a month whose spending was never
+	// entered looks like a good one. Don't drop it for short_average: three
+	// solid months in the window does not mean each had three solid months
+	// before it.
+	ReasonSpendingNotChecked = "spending_not_checked"
 )
 
 // Thresholds from the spec, applied as exact products.
@@ -144,6 +155,9 @@ type LightReason struct {
 	KeptBasisPoints *int64
 	CushionTenths   *int64
 	BillName        string
+	// BillUnconvertible is true when the bill has no exchange rate, so it
+	// warns without having been compared with the usual left-over.
+	BillUnconvertible bool
 }
 
 // CashflowVerdict is the light and the reasons of its colour only. Green has
@@ -204,6 +218,9 @@ func yellowReasons(last CashflowMonth, avg CashflowAverage, c CashCushion, dueSo
 	if avg.Months < cashflowAverageWindow {
 		out = append(out, LightReason{Code: ReasonShortAverage})
 	}
+	if !last.UsualChecked || avg.Unchecked > 0 {
+		out = append(out, LightReason{Code: ReasonSpendingNotChecked})
+	}
 	// 10 * sumLeft < sumIn is "kept under 10%" without rounding a percentage.
 	if productLess(cashflowKeptPercentFloor, avg.SumLeft(), avg.SumIn, 1) {
 		r := LightReason{Code: ReasonKeptUnder10}
@@ -225,7 +242,7 @@ func yellowReasons(last CashflowMonth, avg CashflowAverage, c CashCushion, dueSo
 		// A bill is a worry when the usual monthly left-over cannot cover it:
 		// amount > sumLeft / n, compared as amount * n > sumLeft.
 		if b.Unconvertible || productLess(avg.SumLeft(), 1, b.AmountMinor, int64(avg.Months)) {
-			out = append(out, LightReason{Code: ReasonBillDueSoon, BillName: b.Name})
+			out = append(out, LightReason{Code: ReasonBillDueSoon, BillName: b.Name, BillUnconvertible: b.Unconvertible})
 		}
 	}
 	return out

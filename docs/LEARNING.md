@@ -3265,13 +3265,29 @@ three-month average when fewer months existed, and a chart legend with no
 swatches, so the colours explained nothing. The reviewers found two more
 before the walk: the light went green when spending was zero and the cushion
 was "known", and the chart outlined grey months in green and drew zero-left
-months green. **What would have caught it sooner:** (1) a domain test for a
+months green. **It happened again in the fix itself.** `short_average` stood in for the
+missing-spending check until that check could run, but the two counted
+different things: `short_average` lifted once the 3-month window held three
+solid months, while the check on a month needs three solid months *before*
+it. With exactly three finished months (S$4,000, S$4,000, then S$94.50 out)
+the window was full, the check had never run on September, and the light was
+green with no reasons. The final whole-branch review found it by reasoning
+about the two counts; no test did, because every test of the stand-in
+checked the months *before* it lifted, never the first month after. Fixed by
+recording on each month whether the check ran (`UsualChecked`) and holding
+the light at yellow, `spending_not_checked`, until it ran on every month the
+light rests on. **What would have caught it sooner:** (1) a domain test for a
 brand-new household with one finished month, written as soon as the rule
 said "only once there are N"; (2) ask of every such rule, *what does the
 user see before N?*, and make the answer "not enough data", never a good
-colour; (3) walk a freshly seeded household, not only a rich one. This is the
-same shape as the rest of this pattern: the walk was derived from a spec
-whose gap was the missing-data case.
+colour; (3) walk a freshly seeded household, not only a rich one; (4) **when
+one guard stands in for another until the other can run, test the first
+month the stand-in lifts. It must be a month the real guard already runs
+on.** If the two guards count different things, write the hand-off as one
+rule ("has the real guard run on this?") rather than two counts that happen
+to agree on the usual fixture. This is the same shape as the rest of this
+pattern: the walk was derived from a spec whose gap was the missing-data
+case.
 
 ### 14. Literal example data belongs to the seed, not the product
 

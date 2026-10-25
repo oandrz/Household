@@ -33,7 +33,7 @@ const page = {
   oldestYear: 2024,
   light: {
     colour: "yellow",
-    reasons: [{ code: "kept_under_10", keptBasisPoints: 600, cushionTenths: null, billName: "" }],
+    reasons: [{ code: "kept_under_10", keptBasisPoints: 600, cushionTenths: null, billName: "", billUnconvertible: false }],
   },
   average: { months: 3, inMinor: 0, outMinor: 0, leftMinor: 0, keptBasisPoints: 1200 },
   cushion: { known: true, tenths: 42, reason: "" },
