@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { fetchAndParse } from "../../api/client";
 import { accountSchema, accountsResponseSchema, type Account, type AccountsResponse } from "./schemas";
+import { cashflowRootKey } from "./useCashflow";
 import type { AccountEditValues, AccountFormValues } from "./AccountModal";
 
 export function accountsQueryKey(includeArchived: boolean) {
@@ -31,6 +32,8 @@ function invalidateAccounts(queryClient: QueryClient) {
   return Promise.all([
     queryClient.invalidateQueries({ queryKey: accountsQueryKey(false) }),
     queryClient.invalidateQueries({ queryKey: accountsQueryKey(true) }),
+    // Cashflow's cushion is built from the cash accounts.
+    queryClient.invalidateQueries({ queryKey: cashflowRootKey }),
   ]);
 }
 

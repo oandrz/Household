@@ -28,6 +28,7 @@
 import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { apiFetch, fetchAndParse } from "../../api/client";
 import { accountsQueryKey } from "./useAccounts";
+import { cashflowRootKey } from "./useCashflow";
 import {
   billPaymentResponseSchema,
   billResponseSchema,
@@ -136,6 +137,8 @@ function invalidateBills(queryClient: QueryClient) {
   return Promise.all([
     queryClient.invalidateQueries({ queryKey: billsQueryKey(false) }),
     queryClient.invalidateQueries({ queryKey: billsQueryKey(true) }),
+    // A bill's cadence or next due date changes Cashflow's due-soon list.
+    queryClient.invalidateQueries({ queryKey: cashflowRootKey }),
   ]);
 }
 
