@@ -131,7 +131,7 @@ function SumList({
       </tbody>
       <tfoot>
         <tr className="text-[14px] font-semibold">
-          <th scope="row" className="border-t border-hairline pr-3 pt-2 text-left align-baseline">
+          <th scope="row" className="border-t border-hairline pr-3 pt-2 text-left align-baseline font-semibold">
             <span data-part="label" className="text-ink">{total}</span>
           </th>
           <td data-part="amount" className="tabular border-t border-hairline pt-2 text-right align-baseline whitespace-nowrap text-ink">

@@ -87,7 +87,7 @@ describe("year picker", () => {
     expect(screen.queryByRole("button", { name: "Next year" })).not.toBeInTheDocument();
   });
 
-  it("left-aligns the year label when there are no arrows, and centres it when there are", async () => {
+  it("left-aligns the year label when there are no arrows", async () => {
     renderPage(2026);
     await openYearly();
     expect(screen.getByTestId("cashflow-year")).not.toHaveClass("text-center");
@@ -158,5 +158,25 @@ describe("open month", () => {
     expect(open.closest("tr")).toHaveClass("bg-canvas");
     const detailRow = screen.getByTestId("cashflow-month-detail").closest("tr");
     expect(detailRow).toHaveClass("bg-canvas");
+  });
+
+  it("shades the note line between the row and its detail too", async () => {
+    const grey = monthFixture({ status: "grey", grey: ["no_income"] });
+    renderPage(2024, { recent: [grey] });
+    const button = await screen.findByRole("button", { name: "September 2026" });
+    const noteRow = button.closest("tr")?.nextElementSibling as HTMLElement;
+    expect(noteRow).toHaveTextContent("Looks right, count it");
+    expect(noteRow).not.toHaveClass("bg-canvas");
+    fireEvent.click(button);
+    expect(noteRow).toHaveClass("bg-canvas");
+    expect(within(noteRow).getByRole("button", { name: "Looks right, count it" })).toHaveClass("enabled:hover:bg-toggle-off");
+  });
+
+  it("pads the open block's contents from tablet width up", async () => {
+    renderPage(2024);
+    const button = await screen.findByRole("button", { name: "September 2026" });
+    fireEvent.click(button);
+    expect(button.closest("td")).toHaveClass("sm:pl-2");
+    expect(screen.getByTestId("cashflow-month-detail").closest("td")).toHaveClass("sm:px-2");
   });
 });

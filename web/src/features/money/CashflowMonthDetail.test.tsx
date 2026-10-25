@@ -74,6 +74,15 @@ describe("CashflowMonthDetail worked sum", () => {
     expect(within(footer).getByRole("cell")).toHaveTextContent("S$4,069.50");
   });
 
+  it("sets the total label in the same weight as its amount", async () => {
+    const detail = await open(monthFixture());
+    const footer = within(detail).getByRole("table").querySelector("tfoot") as HTMLElement;
+    const label = within(footer).getByRole("rowheader");
+    const amount = within(footer).getByRole("cell");
+    expect(label).toHaveClass("font-semibold");
+    expect(amount.closest("tr")).toHaveClass("font-semibold");
+  });
+
   it("shows September's sum in order with signs on the amounts only", async () => {
     const detail = await open(monthFixture());
     expect(within(detail).getByRole("heading", { name: "How September's money out adds up" })).toBeInTheDocument();

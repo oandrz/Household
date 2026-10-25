@@ -108,7 +108,7 @@ export function CashflowMonthTable({ months, formatAmount }: Props) {
               return (
                 <Fragment key={month.month}>
                   <tr className={`border-t border-hairline ${open ? OPEN_BLOCK : ""}`}>
-                    <td className="py-2 pr-2 sm:pr-3">
+                    <td className={`py-2 pr-2 sm:pr-3 ${open ? "sm:pl-2" : ""}`}>
                       <button
                         type="button"
                         aria-expanded={open}
@@ -117,14 +117,14 @@ export function CashflowMonthTable({ months, formatAmount }: Props) {
                         className="min-h-11 text-left font-semibold text-accent hover:underline lg:min-h-0"
                       >
                         {monthLabel(month.month)}
-                        <span aria-hidden="true" className="ml-1 text-xs text-muted">{open ? "▾" : "▸"}</span>
+                        <span aria-hidden="true" className="ml-1 inline-block text-xs text-muted">{open ? "▾" : "▸"}</span>
                       </button>
                     </td>
                     <td className="tabular hidden py-2 pr-3 text-right text-ink sm:table-cell">{formatAmount(month.inMinor)}</td>
                     <td className="tabular hidden py-2 pr-3 text-right text-ink sm:table-cell">{formatAmount(month.outMinor)}</td>
                     <td className="tabular py-2 pr-2 text-right text-ink sm:pr-3">{formatAmount(month.leftMinor)}</td>
                     <td className="tabular py-2 pr-2 text-right text-ink sm:pr-3">{keptCell(month.keptBasisPoints)}</td>
-                    <td className="py-2" data-tone={light.tone}>
+                    <td className={`py-2 ${open ? "sm:pr-2" : ""}`} data-tone={light.tone}>
                       <span className="inline-flex items-center gap-1.5 text-xs text-ink">
                         <span aria-hidden="true" className={`inline-block h-2.5 w-2.5 shrink-0 rounded-full ${DOT_CLASS[light.tone]}`} />
                         {light.label}
@@ -133,7 +133,7 @@ export function CashflowMonthTable({ months, formatAmount }: Props) {
                   </tr>
                   {showNote && (
                     <tr className={open ? OPEN_BLOCK : ""}>
-                      <td colSpan={6} className="pb-2">
+                      <td colSpan={6} className={`pb-2 ${open ? "sm:pl-2" : ""}`}>
                         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted">
                           {/* A confirmation never clears a missing exchange rate, so a
                               counted month can still be grey: say why beside who counted it. */}
@@ -171,7 +171,7 @@ export function CashflowMonthTable({ months, formatAmount }: Props) {
                   )}
                   {open && (
                     <tr className={OPEN_BLOCK}>
-                      <td id={`cashflow-detail-${month.month}`} colSpan={6}>
+                      <td id={`cashflow-detail-${month.month}`} colSpan={6} className="sm:px-2">
                         <CashflowMonthDetail month={month} formatAmount={formatAmount} onClose={() => setOpenMonth(null)} />
                       </td>
                     </tr>
