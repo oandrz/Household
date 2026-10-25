@@ -7547,6 +7547,20 @@ route with a missing guard has no second line of defence.
 - **A walk can only show data the household has.** This seeded household has
   no grey "not enough data" month, so that bar style was checked by its
   test and legend only, not by eye.
+- **A bar's `<title>` is not a text equivalent.** The second design review
+  (2026-10-26) found the chart's figures reachable only by mouse hover: a
+  screen reader cannot read a `<title>` inside `role="img"`, a phone cannot
+  hover, and Yearly has no table to fall back on. The chart's label also
+  named its months as keys ("2026-03 to 2026-08"). Every test passed,
+  because they asserted the title text, which was right; nothing asked who
+  could get to it. The chart now lists every bar's title as visually hidden
+  text and writes a cut-off bar's real figure under the legend. Before
+  trusting a figure that only shows on hover, ask how a keyboard, a screen
+  reader and a phone reach it.
+- **`overflow-x-auto` clips focus rings.** A table wrapper that may scroll
+  sideways cuts off anything outside its box, including the 2px ring (2px
+  offset) on a control at its left edge. Give the wrapper padding and the
+  same negative margin, and tab to the first control to check.
 
 ### The household calendar's browser walk (2026-10-01)
 
