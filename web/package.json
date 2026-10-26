@@ -10,12 +10,12 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@tanstack/react-query": "5.104.1",
-    "@tanstack/react-router": "1.170.41",
+    "@tanstack/react-query": "5.104.4",
+    "@tanstack/react-router": "1.170.45",
     "qrcode-generator": "2.0.4",
-    "react": "^19.3.0",
-    "react-dom": "^19.3.0",
-    "zod": "4.6.5"
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "zod": "4.6.7"
   },
   "devDependencies": {
     "@eslint/js": "^9.36.0",
@@ -31,11 +31,11 @@
     "eslint-plugin-react-refresh": "^0.5.7",
     "globals": "^16.4.0",
     "jsdom": "29.1.1",
-    "prettier": "3.9.9",
+    "prettier": "3.9.10",
     "tailwindcss": "4.3.3",
     "typescript": "~5.8.3",
-    "typescript-eslint": "^8.71.1",
-    "vite": "^8.3.3",
-    "vitest": "5.0.3"
+    "typescript-eslint": "^8.71.2",
+    "vite": "^8.3.4",
+    "vitest": "5.0.5"
   }
 }
