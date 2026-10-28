@@ -3,7 +3,7 @@ module github.com/andreasoentoro/hearth/api
 go 1.26.9
 
 require (
-	github.com/go-chi/chi/v5 v5.3.2
+	github.com/go-chi/chi/v5 v5.4.0
 	github.com/wneessen/go-mail v0.8.1
 	golang.org/x/term v0.46.0
 )
