@@ -159,7 +159,9 @@ export function reasonText(reason: CashflowReason, averageMonths: number): strin
       // grey month in the window alike.
       return `Only ${averageMonths} of the last 3 months can be counted. Hearth needs all 3 before it can say on track. A month marked not enough data can sometimes be counted with “Looks right, count it”.`;
     case "spending_not_checked":
-      return "Hearth can't yet tell whether some spending is missing: it needs 3 earlier finished months to compare each month against.";
+      // "Each of the last 3", not "3 earlier months": a household with four
+      // months sees three before the latest one and would expect green.
+      return "Hearth can't yet tell whether some spending is missing: each of the last 3 finished months needs 3 counted months before it to compare against.";
     default:
       // A code this build has never heard of: say so rather than guess.
       return "This check could not be described";

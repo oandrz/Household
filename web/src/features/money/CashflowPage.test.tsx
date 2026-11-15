@@ -121,7 +121,7 @@ describe("CashflowPage light", () => {
     expect(within(light).getByText("Watch")).toBeInTheDocument();
     expect(
       within(light).getByText(
-        "Hearth can't yet tell whether some spending is missing: it needs 3 earlier finished months to compare each month against.",
+        "Hearth can't yet tell whether some spending is missing: each of the last 3 finished months needs 3 counted months before it to compare against.",
       ),
     ).toBeInTheDocument();
   });
