@@ -89,7 +89,7 @@ export function CashflowMonthTable({ months, formatAmount }: Props) {
           focus ring: overflow-x-auto clips anything outside its box, which cut
           the ring off the month names, Close and the link on the left edge. */}
       <div className="-mx-1.5 overflow-x-auto px-1.5">
-        <table data-testid="cashflow-table" className="w-full border-collapse text-[13px] sm:min-w-[520px]">
+        <table data-testid="cashflow-table" aria-label={cashflowCopy.tableHeading} className="w-full border-collapse text-[13px] sm:min-w-[520px]">
           <thead>
             <tr className="text-left text-xs text-muted">
               <th scope="col" className="py-2 pr-2 font-normal sm:pr-3">{cashflowCopy.tableMonth}</th>
