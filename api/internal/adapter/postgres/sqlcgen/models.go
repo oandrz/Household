@@ -140,6 +140,13 @@ type BudgetLine struct {
 	CapMinor   int64
 }
 
+type CashflowMonthConfirmation struct {
+	HouseholdID             pgtype.UUID
+	Month                   pgtype.Date
+	ConfirmedByMembershipID pgtype.UUID
+	ConfirmedAt             pgtype.Timestamptz
+}
+
 type Category struct {
 	ID          pgtype.UUID
 	HouseholdID pgtype.UUID

@@ -238,6 +238,26 @@ describe("TransactionsPage", () => {
     expect(await screen.findByLabelText(/month/i)).toHaveValue("2026-07");
   });
 
+  it("starts the month filter on initialMonth and asks the server for it", async () => {
+    stubFetchRoutes({
+      "GET /api/v1/currencies": CURRENCIES,
+      "GET /api/v1/categories": { status: 200, body: { categories: [] } },
+      "GET /api/v1/household/members": { status: 200, body: [] },
+      "GET /api/v1/accounts": { status: 200, body: { accounts: [accountFixture()] } },
+      "GET /api/v1/transactions?month=2026-08": {
+        status: 200,
+        body: {
+          transactions: [],
+          nextCursor: null,
+          summary: fullSummary({ month: "2026-08", count: 0, spentMinor: 0 }),
+        },
+      },
+    });
+    renderWithRouter(<TransactionsPage initialMonth="2026-08" />);
+
+    expect(await screen.findByLabelText(/month/i)).toHaveValue("2026-08");
+  });
+
   // "Spent this month" is a claim, and it is only true while the month is the
   // server's own default. Choosing July left that label sitting above a July
   // figure under a header already reading "10 in July 2026" -- found in the

@@ -21,7 +21,7 @@ import { createAppQueryClient } from "../api/queryClient";
 import { createUnauthorizedHandler } from "../api/unauthorizedRedirect";
 import type { InvitePreview, Me } from "../features/auth/schemas";
 import { stubFetchRoutes } from "../test/fetchStub";
-import { routeTree } from "./router";
+import { cashflowSearch, routeTree } from "./router";
 
 function meFixture(overrides: Partial<Me> = {}): Me {
   return {
@@ -408,6 +408,55 @@ describe("the real route tree", () => {
     expect(router.state.location.pathname).toBe("/money/transactions");
   });
 
+  // The Cashflow month drill-down links here. The month is where the filter
+  // starts, so the first list request must already name it.
+  describe("/money/transactions?month=", () => {
+    function stubLedger(listKey: string) {
+      const fetchMock = stubFetchRoutes({
+        "GET /api/v1/auth/me": { status: 200, body: meFixture() },
+        "GET /api/v1/currencies": {
+          status: 200,
+          body: { currencies: [{ code: "SGD", symbol: "S$", name: "Singapore dollar" }] },
+        },
+        "GET /api/v1/categories": { status: 200, body: { categories: [] } },
+        "GET /api/v1/household/members": { status: 200, body: [] },
+        "GET /api/v1/accounts": { status: 200, body: { accounts: [] } },
+        [listKey]: {
+          status: 200,
+          body: {
+            transactions: [],
+            nextCursor: null,
+            summary: { currency: "SGD", month: "2026-08", count: 0, spentMinor: 0, excludedNoRate: [] },
+          },
+        },
+      });
+      return fetchMock;
+    }
+
+    it("opens the ledger filtered to the month in the URL", async () => {
+      const fetchMock = stubLedger("GET /api/v1/transactions?month=2026-08");
+
+      renderApp("/money/transactions?month=2026-08");
+
+      expect(await screen.findByLabelText(/month/i)).toHaveValue("2026-08");
+      const urls = fetchMock.mock.calls.map(([input]) => String(input));
+      expect(urls).toContain("/api/v1/transactions?month=2026-08");
+    });
+
+    it("ignores a malformed month in the URL", async () => {
+      // Only the month-less list route is registered: a request that kept the
+      // bad month would hit the stub's loud "no stub registered" error.
+      const fetchMock = stubLedger("GET /api/v1/transactions");
+
+      renderApp("/money/transactions?month=2026-8");
+
+      expect(await screen.findByLabelText(/month/i)).toHaveValue("2026-08");
+      const urls = fetchMock.mock.calls.map(([input]) => String(input));
+      expect(urls).toContain("/api/v1/transactions");
+      expect(urls.some((url) => url.includes("month="))).toBe(false);
+    });
+  });
+
   // Task 11's analogue of the transactions redirect above: moneyBudgetRoute
   // has to sit under moneyGuardRoute too, for the same reason -- a member
   // without money must never reach the Budget screen.
@@ -639,6 +688,65 @@ describe("the real route tree", () => {
 
     expect(await screen.findByTestId("bills-page")).toBeInTheDocument();
     expect(router.state.location.pathname).toBe("/money/bills");
+  });
+
+  it("redirects a member without the money capability away from /money/cashflow", async () => {
+    stubFetchRoutes({
+      "GET /api/v1/auth/me": {
+        status: 200,
+        body: meFixture({
+          membership: {
+            id: "membership-2",
+            householdId: "household-1",
+            userId: "user-2",
+            role: "limited",
+            capabilities: ["calendar", "chores"],
+          },
+          capabilities: ["calendar", "chores"],
+        }),
+      },
+    });
+
+    const { router } = renderApp("/money/cashflow");
+
+    await waitFor(() => expect(router.state.location.pathname).toBe("/"));
+    expect(
+      await screen.findByRole("heading", { level: 1, name: "Overview" }),
+    ).toBeInTheDocument();
+  });
+
+  it("mounts the Cashflow page at /money/cashflow", async () => {
+    stubFetchRoutes({
+      "GET /api/v1/auth/me": { status: 200, body: meFixture() },
+      "GET /api/v1/currencies": { status: 200, body: { currencies: [] } },
+      "GET /api/v1/cashflow": {
+        status: 200,
+        body: {
+          currency: "SGD",
+          hasTransactions: false,
+          oldestYear: 0,
+          light: { colour: "grey", reasons: [] },
+          average: { months: 0, inMinor: 0, outMinor: 0, leftMinor: 0, keptBasisPoints: null },
+          cushion: { known: false, tenths: null, reason: "no_cash_accounts" },
+          lastFinished: null,
+          current: {
+            month: "2026-10", status: "current", inMinor: 0, outMinor: 0, leftMinor: 0,
+            keptBasisPoints: null, spreadMinor: 0, loanMinor: 0, transactionCount: 0, grey: [],
+            unconvertibleCurrencies: [], projectedLeftMinor: null, confirmation: null, contributions: [], reconciliation: null,
+          },
+          recent: [],
+          year: {
+            year: 2026, months: [], keptSoFarMinor: 0, incomeMinor: 0, greyMonths: 0,
+            keptBasisPoints: null, sameMonthsLastYearMinor: null, headingForMinor: null, billsToCome: [],
+          },
+        },
+      },
+    });
+
+    const { router } = renderApp("/money/cashflow");
+
+    expect(await screen.findByTestId("cashflow-page")).toBeInTheDocument();
+    expect(router.state.location.pathname).toBe("/money/cashflow");
   });
 
   // Task 10: Marriage's own route came back in the same change as its
@@ -1200,5 +1308,22 @@ describe("the real route tree", () => {
     expect(await screen.findByText("Page not found.")).toBeInTheDocument();
     expect(screen.queryByText("Hearth · Operator")).not.toBeInTheDocument();
     expect(router.state.location.pathname).toBe("/admin/flags");
+  });
+});
+
+describe("/money/cashflow search", () => {
+  it("keeps the yearly view and a four-digit year", () => {
+    expect(cashflowSearch({ view: "yearly", year: "2025" })).toEqual({ view: "yearly", year: 2025 });
+    expect(cashflowSearch({ view: "yearly", year: 2025 })).toEqual({ view: "yearly", year: 2025 });
+  });
+
+  it("drops a view that is not yearly and a year that is not a number", () => {
+    expect(cashflowSearch({ view: "weird", year: "abc" })).toEqual({});
+  });
+
+  it("drops a year outside 2000 to 9999 or with a fraction", () => {
+    expect(cashflowSearch({ year: "1999" })).toEqual({});
+    expect(cashflowSearch({ year: 10000 })).toEqual({});
+    expect(cashflowSearch({ year: 2025.5 })).toEqual({});
   });
 });

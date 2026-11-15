@@ -243,6 +243,7 @@ describe("Sidebar", () => {
       "Goals",
       "Portfolio",
       "Bills",
+      "Cashflow",
       "Garden",
     ]);
     expect(screen.getByTestId("sidebar-space-label")).toHaveTextContent("Money");
@@ -271,6 +272,7 @@ describe("Sidebar", () => {
       "Goals",
       "Portfolio",
       "Bills",
+      "Cashflow",
     ]);
     expect(screen.getByRole("link", { name: "Finances" })).toHaveAttribute("href", "/money");
     expect(screen.getByRole("link", { name: "Transactions" })).toHaveAttribute(
@@ -288,6 +290,10 @@ describe("Sidebar", () => {
     expect(screen.getByRole("link", { name: "Bills" })).toHaveAttribute(
       "href",
       "/money/bills",
+    );
+    expect(screen.getByRole("link", { name: "Cashflow" })).toHaveAttribute(
+      "href",
+      "/money/cashflow",
     );
   });
 

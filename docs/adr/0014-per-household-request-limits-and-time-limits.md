@@ -120,3 +120,17 @@ the import's pacing leaves the app half of it.
 - limits in nginx arrive;
 - the pool size, the caps in ADR 13, or the heaviest read changes;
 - a real household meets a `429`.
+
+## Follow-up, 2026-10-25: the heaviest read changed
+
+`GET /cashflow` reads a household's whole ledger, so it is now the heaviest
+read on capped data, not the account list. At 100,006 transactions under the
+production container's limits (2 CPUs, 512 MiB) it measured 92 ms (p50) and
+131 ms at worst, about five times the 18 ms above. At the refill rate of 10 a
+second, one household calling only this route could use up to roughly one CPU of
+the box's two (10 x 92 ms is wall time, Postgres included), not a fifth of one. No change is made here: the cost is 20
+times under the two-second line, and the household that would do this is one
+member refreshing a page. Raise it as a decision if a real household meets a
+`429` on Cashflow. Caveats: one sequential client on the dev colima host, and only the api
+container was limited. Method and figures: `docs/LEARNING.md`, "Cashflow's browser
+walk and the read at the cap".

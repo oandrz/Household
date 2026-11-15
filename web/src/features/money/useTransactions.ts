@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { apiFetch, fetchAndParse } from "../../api/client";
 import { accountsQueryKey } from "./useAccounts";
+import { cashflowRootKey } from "./useCashflow";
 import {
   categoriesResponseSchema,
   transactionSchema,
@@ -88,6 +89,8 @@ function invalidateLedger(queryClient: QueryClient) {
     queryClient.invalidateQueries({ queryKey: ["transactions"] }),
     queryClient.invalidateQueries({ queryKey: accountsQueryKey(false) }),
     queryClient.invalidateQueries({ queryKey: accountsQueryKey(true) }),
+    // Cashflow is built from the ledger.
+    queryClient.invalidateQueries({ queryKey: cashflowRootKey }),
   ]);
 }
 

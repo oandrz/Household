@@ -373,6 +373,14 @@ func newTestEnvWith(t *testing.T, clk usecase.Clock, outbox usecase.MailOutbox) 
 		Accounts:   accountRepo,
 		Categories: categoryRepo,
 	})
+	cashflowSvc := usecase.NewCashflowService(usecase.CashflowDeps{
+		Households:    households,
+		Rows:          postgres.NewCashflowRowRepo(db),
+		Confirmations: postgres.NewCashflowConfirmationRepo(db),
+		Accounts:      accountRepo,
+		Bills:         postgres.NewBillRepo(db),
+		FX:            fxProvider,
+	})
 	retroSvc := usecase.NewRetroService(postgres.NewRetroRepo(db), postgres.NewRetroActionRepo(db), households, usage)
 	// goalRepo doubles as the GoalProgressReader, the same reasoning
 	// cmd/api/main.go's own wiring comment gives: Vision needs one
@@ -431,6 +439,7 @@ func newTestEnvWith(t *testing.T, clk usecase.Clock, outbox usecase.MailOutbox) 
 		Transactions:   transactionSvc,
 		Categories:     categorySvc,
 		Budgets:        budgetSvc,
+		Cashflow:       cashflowSvc,
 		Goals:          goalSvc,
 		Holdings:       holdingSvc,
 		Bills:          billSvc,

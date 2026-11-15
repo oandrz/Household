@@ -49,6 +49,7 @@ type Deps struct {
 	Transactions *usecase.TransactionService
 	Categories   *usecase.CategoryService
 	Budgets      *usecase.BudgetService
+	Cashflow     *usecase.CashflowService
 	Goals        *usecase.GoalService
 	Holdings     *usecase.HoldingService
 	Bills        *usecase.BillService
@@ -404,6 +405,7 @@ func NewRouter(deps Deps) http.Handler {
 				txn.Get("/categories", handleListCategories(deps))
 				txn.Get("/budgets/{month}", handleGetBudgetMonth(deps))
 				txn.Get("/budgets/history", handleBudgetHistory(deps))
+				txn.Get("/cashflow", handleGetCashflow(deps))
 
 				txn.Group(func(w chi.Router) {
 					w.Use(requireCSRF)
@@ -433,6 +435,15 @@ func NewRouter(deps Deps) http.Handler {
 					w.Use(requireCSRF)
 					w.Put("/budgets/{month}", handlePutBudgetMonth(deps))
 					w.Post("/budgets/{month}/rollover", handleRolloverBudgetMonth(deps))
+				})
+
+				// Confirming a month is a write behind the same money+owner
+				// stack as a budget write, so it sits in its own requireCSRF
+				// subgroup and the read above stays outside it.
+				txn.Group(func(w chi.Router) {
+					w.Use(requireCSRF)
+					w.Put("/cashflow/confirmations/{month}", handleConfirmCashflowMonth(deps))
+					w.Delete("/cashflow/confirmations/{month}", handleUnconfirmCashflowMonth(deps))
 				})
 
 				// Goals sit in the same money+owner group as transactions,

@@ -82,7 +82,7 @@ func TestReadRoutesRejectALimitedMember(t *testing.T) {
 		{
 			name:  "without Money",
 			email: env.limitedEmail, password: env.limitedPassword,
-			wantChecked: 18,
+			wantChecked: 19,
 		},
 		{
 			name:  "with Money",
@@ -90,7 +90,7 @@ func TestReadRoutesRejectALimitedMember(t *testing.T) {
 			// A limited member holding Money reads the account list with
 			// every balance removed (TestAccountsAreRedactedForALimitedMember).
 			alsoAllowed: map[string]bool{"GET /api/v1/accounts": true},
-			wantChecked: 17,
+			wantChecked: 18,
 		},
 	}
 

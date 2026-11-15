@@ -2018,6 +2018,31 @@ Three things about running those mutation checks that cost time:
   protected routes.** Both new walks also fail on an allowlist entry that
   matches no route, so a permission cannot outlive the route it was for.
 
+- **Median tests whose fixtures gave the same answer under the right and the
+  broken rule (Cashflow, 2026-10-25).** The first tests for "spending under
+  half of usual" (`internal/domain/cashflow_grey.go`) could not fail. A
+  reviewer copied `internal/domain` to a scratch directory and broke four
+  rules one at a time; the whole cashflow test set stayed green every time:
+  (A) remove the six-month window (`usualWindow = 1000`); (B) let grey months
+  into the median; (C) keep confirmed ("count it") months out of the median;
+  (D) for an even count, use only the lower middle value (`2*recent[n/2-1]`
+  instead of a+b). Symptom: green tests. Cause: the numbers agreed either
+  way. Outs `[100, 400x5, 1000]` have median 400 with or without the window;
+  one grey month of 10 does not move the middle pair of `[10,400,400,400]`;
+  the even rule was only tested with a == b. Break B is the dangerous one: a
+  grey low-spend month dragging "usual" down stops later months going grey,
+  so the page flatters. Fix: four discriminating tests,
+  `TestUsualIgnoresSolidMonthsOlderThanTheLastSix`,
+  `TestUsualIgnoresSeveralGreyMonthsInARow`,
+  `TestConfirmedMonthsFeedLaterMedians` and
+  `TestUsualWithAnEvenCountAveragesTheMiddlePair`, with numbers where the
+  right and broken rules disagree (`[100x6, 400x6]` then 199; `[100,300,500,700]`
+  then 199 against 200), each confirmed by re-applying its break and watching
+  it fail. **What would have caught it sooner:** for every rule with a window,
+  a filter or a tie-break, pick the fixture so the rule *without* that detail
+  gives a different answer, and prove it with a one-line mutation. Pattern
+  21's lesson again.
+
 ### 3. The simulated environment lied
 
 - `Modal` threw `InvalidStateError` on **every open in every real browser** —
@@ -3222,6 +3247,47 @@ to know it, the product has to say it — or make it the default.** And a
 walker's observation that would stop a first-time user from finishing the
 flow is a defect, not a note for later. This is the same shape as the
 "15 of 15 still missed day-one UX" record at the top of this pattern.
+
+**A rule that only switches on once there is enough data is silent exactly
+when data is thin, and thin data reads as good news (Cashflow, 2026-10-25).**
+The Cashflow spec made "spending under half of usual" a grey-month rule that
+applies only after three solid months, since there is no "usual" before that.
+Every test and every rich fixture had three or more months, so the rule was
+right everywhere it was exercised. On a **freshly seeded** household in the
+walk, with one finished month and S$94.50 of spending, the light read
+**green, "On track"**: the one check that would have caught missing spending
+was off, and nothing else was looking. Fixed in `6708e73`: while the average
+covers fewer than three months the light is held at yellow with the reason
+`short_average`. The same walk also found three smaller copies of the
+shape: a note under "Bills still to come" that said unpaid bills were
+"already spread" when they were not, a "Heading for" figure that claimed a
+three-month average when fewer months existed, and a chart legend with no
+swatches, so the colours explained nothing. The reviewers found two more
+before the walk: the light went green when spending was zero and the cushion
+was "known", and the chart outlined grey months in green and drew zero-left
+months green. **It happened again in the fix itself.** `short_average` stood in for the
+missing-spending check until that check could run, but the two counted
+different things: `short_average` lifted once the 3-month window held three
+solid months, while the check on a month needs three solid months *before*
+it. With exactly three finished months (S$4,000, S$4,000, then S$94.50 out)
+the window was full, the check had never run on September, and the light was
+green with no reasons. The final whole-branch review found it by reasoning
+about the two counts; no test did, because every test of the stand-in
+checked the months *before* it lifted, never the first month after. Fixed by
+recording on each month whether the check ran (`UsualChecked`) and holding
+the light at yellow, `spending_not_checked`, until it ran on every month the
+light rests on. **What would have caught it sooner:** (1) a domain test for a
+brand-new household with one finished month, written as soon as the rule
+said "only once there are N"; (2) ask of every such rule, *what does the
+user see before N?*, and make the answer "not enough data", never a good
+colour; (3) walk a freshly seeded household, not only a rich one; (4) **when
+one guard stands in for another until the other can run, test the first
+month the stand-in lifts. It must be a month the real guard already runs
+on.** If the two guards count different things, write the hand-off as one
+rule ("has the real guard run on this?") rather than two counts that happen
+to agree on the usual fixture. This is the same shape as the rest of this
+pattern: the walk was derived from a spec whose gap was the missing-data
+case.
 
 ### 14. Literal example data belongs to the seed, not the product
 
@@ -7392,6 +7458,132 @@ route with a missing guard has no second line of defence.
   at the first stack's web port. And the compose file's `name: hearth` is
   overridden by `-p`, volumes included, so `down -v` on the second project
   removes only its own data.
+
+### Cashflow's browser walk and the read at the cap (2026-10-25)
+
+- **Walked on a freshly seeded household, in a real browser.** Numbers move
+  on add; a yearly bill paid on 20 Sep spreads S$175 a month into Sep and Oct,
+  labelled on Money out; a S$800 transfer into a loan account adds to money
+  out, labelled; deleting a month's income makes it grey, "Looks right, count
+  it" gives "Counted by Andreas on 25 Oct 2026", and Undo reverses it; a month
+  opens `/money/transactions?month=2026-09`, where "Spent in September"
+  (S$5,194.50) reconciles with Cashflow's money out (S$3,269.50 = 5,194.50 -
+  2,100 lump + 175 share) before the loan transfer; Yearly is correct; no
+  console errors. The light showing green on one thin month is pattern 13.
+- **A clamp to a range computed without the clamped value also clamps it at
+  zero.** The chart's scale came from finished months only, and the running
+  month was clamped into it, so a running month below zero (rent paid, salary
+  not in yet) was drawn 1px tall with no zero line. Test the negative case of
+  any clamp; the walk's data had only a positive running month.
+- **Known gap, not fixed:** at 375px the month table scrolls sideways inside
+  its card, so Left over, Kept and Light start off-screen. The tracker row
+  says 🟡.
+- **The read at the transaction cap (ADR 14's measurement).** A throwaway
+  household with 100,006 transactions over six years (80% expenses, 10%
+  income, 10% transfers a third of them into a loan, six payments on two
+  yearly bills), inserted directly with `generate_series`. The dev API
+  container was limited to 2 CPUs and 512 MiB, which is what
+  `deploy/docker-compose.prod.yml` gives it (`mem_limit: 512m` on a
+  two-CPU box). 20 requests each: `GET /api/v1/cashflow` p50 **92 ms**, max
+  131 ms; `?year=2022` p50 89 ms, max 95 ms. For comparison the account list
+  on the same data, 10 requests, was about 34 ms. About 5 times ADR 14's
+  18 ms account list and 20 times under the two-second line, so it needs no
+  cache and no bound on how far back the walk goes. At the allowance in
+  ADR 14 (10 a second) a household hammering this one route would use up to
+  roughly one CPU (10 x 92 ms is wall time, Postgres included), which is why the number is worth rechecking if the walk
+  ever gets heavier. The household, its session and its rows were deleted
+  afterwards. Caveats: one sequential client on the dev colima
+  host, and only the api container was limited (Postgres was not).
+- **Measuring tip:** `docker update --cpus 0` does not remove a CPU limit
+  once set; recreate the container (`docker compose up -d --force-recreate
+  --no-deps api`) to get back to unlimited.
+- **Design review, same day: the chart's scale belonged to the month nobody
+  judges.** With a S$50,000 bonus in the month still running, its pale bar
+  set the chart's height and the three finished months (the ones the light
+  is judged on) drew as 2px slivers, on Monthly and on Yearly. Every chart
+  test passed, because they checked direction against the zero line and the
+  style of each bar, never what the tallest bar was allowed to be. The
+  final re-walk screenshot showed it plainly, and nobody read the picture
+  for anything but the light. Fixed: only settled months set the scale, and
+  the running month is cut off at the edge (`CashflowChartScale.test.tsx`,
+  which failed before the fix). The rule: **a chart's axis comes from the
+  values the page draws conclusions from.** A value shown for information
+  only must never be the one that decides how big everything else looks.
+- **Tabular figures cost width on a phone.** Adding `.tabular` to the month
+  table pushed it 1px past its card at 375px and back into sideways
+  scrolling, because Schibsted Grotesk widens "," and "." to a digit's width
+  (the `.tabular` comment in `index.css` warns about exactly this). Measure
+  `scrollWidth` against the box after any change to a number column, not
+  just after a layout change.
+- **Correction to the walk above:** "Spent in September" on the ledger
+  (S$5,194.50) and Cashflow's Money out (S$4,069.50 once the loan transfer
+  is in) are different numbers on screen. They reconcile only by the
+  arithmetic above, and neither page says so. Reporting that as "matches"
+  overstated it.
+
+- **Review fixes, same day: the worked sum, and what the second walk
+  caught.** The September sum now reads S$5,194.50, -S$2,100.00, +S$175.00,
+  +S$800.00 = S$4,069.50, and "Spent in September 2026" on the Transactions
+  page is the same S$5,194.50. That settles the correction above: the screen
+  now shows the arithmetic instead of leaving the reader to find it. A Go
+  parity test asserts the sum's total equals the row's Money out, so the two
+  cannot drift.
+- **Address and screen disagreed.** The tab and year were read from the
+  address once, into state, so clicking the sidebar "Cashflow" link while on
+  Yearly changed the address to a plain `/money/cashflow` and left Yearly on
+  screen; a reload then showed Monthly. Every test mounted the page fresh, so
+  none could see it. The fix follows the props (`CashflowPage.test.tsx`,
+  "follows the address when it changes without a remount", which failed
+  before). The rule: **state seeded from the address must also follow the
+  address**, and a test must change the address under a mounted page, not
+  only mount at a new one.
+- **A stretched SVG stretches everything drawn in it.** The chart is a
+  fixed-height `preserveAspectRatio="none"` SVG, so a stripe pattern is
+  squashed with the box and a slash as wide as the bar flattens to a
+  near-horizontal line at desktop width. Grey bars use a fill plus an
+  outline, and the cut-off slashes keep a small fixed run so they stay
+  steep. The walk measured the chart at 200px tall at both 1440px and 375px.
+  Check a chart's drawing at two widths, not one.
+- **A walk can only show data the household has.** This seeded household has
+  no grey "not enough data" month, so that bar style was checked by its
+  test and legend only, not by eye.
+- **A bar's `<title>` is not a text equivalent.** The second design review
+  (2026-10-26) found the chart's figures reachable only by mouse hover: a
+  screen reader cannot read a `<title>` inside `role="img"`, a phone cannot
+  hover, and Yearly has no table to fall back on. The chart's label also
+  named its months as keys ("2026-03 to 2026-08"). Every test passed,
+  because they asserted the title text, which was right; nothing asked who
+  could get to it. The chart now lists every bar's title as visually hidden
+  text and writes a cut-off bar's real figure under the legend. Before
+  trusting a figure that only shows on hover, ask how a keyboard, a screen
+  reader and a phone reach it.
+- **`overflow-x-auto` clips focus rings.** A table wrapper that may scroll
+  sideways cuts off anything outside its box, including the 2px ring (2px
+  offset) on a control at its left edge. Give the wrapper padding and the
+  same negative margin, and tab to the first control to check.
+- **A `<th>` is bold until told otherwise.** Turning the worked sum from a
+  list into a table (so a screen reader hears each label with its amount)
+  made its "= Money out" label render at weight 700 beside a 600 amount:
+  Tailwind's preflight does not reset `th`'s browser weight, and a class on
+  the `<tr>` does not reach a cell that sets its own. Every jsdom test
+  passed, because none can compute a weight; measuring `fontWeight` in the
+  browser found it. When a list becomes a table, set the weight on each
+  `th` and measure it.
+- **A second page that lists the same bill must reuse the first page's
+  rule for it.** Three weeks after the Cashflow walks, the Yearly view's
+  "Bills still to come this year" listed Gift fund as "10 Nov 2026" on
+  15 November. The Bills page has said "Overdue since 10 Nov" since it
+  shipped, and `billCopy.ts` even writes the rule down ("names it as
+  overdue rather than printing a past date as though upcoming"). The
+  Cashflow service kept overdue bills in the list on purpose but dropped
+  the flag, and every walk had run before the first due date passed, so
+  no screen ever showed a past date. Two lessons: a list built from
+  another feature's records inherits that feature's display rules, so
+  look for them before writing the row; and a walk only covers the dates
+  it ran on. Re-walking a date-driven page after the calendar has moved
+  found this and a confusing Watch sentence in one pass. The fix uses
+  `domain.IsOverdue`, the Bills page's own rule, so the two pages cannot
+  drift.
 
 ### The household calendar's browser walk (2026-10-01)
 

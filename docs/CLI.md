@@ -168,6 +168,41 @@ A period whose `unrealised` is `null` carries a `reason` instead: the price
 that would have measured that end was never recorded. `realised` and `income`
 are still there -- no price is involved in either.
 
+Cashflow is also driven through `api`. The read returns the light with its
+reasons, the average, the cash cushion, the last twelve months and the chosen
+year; a grey month can be confirmed ("Looks right, count it") and un-confirmed:
+
+```bash
+hearthctl api GET '/cashflow'                      # this year
+hearthctl api GET '/cashflow?year=2025'            # an older year
+hearthctl api PUT    /cashflow/confirmations/2026-09   # no body
+hearthctl api DELETE /cashflow/confirmations/2026-09   # undo; answers 204
+```
+
+Every month that has figures also carries a `reconciliation`: the worked sum
+from the Transactions page's `spentMinor` to the month's `outMinor`. It is
+`null` for a `future` or `none` month, and its `lines` are empty unless `status`
+is `shown` (the other values are `no_rate` and `mismatch`):
+
+```json
+"reconciliation": {
+  "status": "shown", "spentMinor": 150000,
+  "lines": [{"kind": "bill_in_full", "name": "Car insurance", "amountMinor": -120000,
+             "paidOn": "2026-09-12", "shareIndex": 0, "spread": 12},
+            {"kind": "bill_share", "name": "Car insurance", "amountMinor": 10000,
+             "paidOn": "2026-09-12", "shareIndex": 1, "spread": 12},
+            {"kind": "loan", "name": "Car loan", "amountMinor": 40000,
+             "paidOn": "2026-09-20", "shareIndex": 0, "spread": 0}],
+  "unratedCount": 0, "unratedEarlierBill": false, "unratedCurrencies": []
+}
+```
+
+The lines add up to the month's `outMinor`: 150000 − 120000 + 10000 + 40000 = 80000.
+
+The month must be finished (not the current one) and from 2000-01 on.
+Like every owner-gated money route it needs the money capability and an
+owner.
+
 Paths are relative to `/api/v1`. The CLI adds the CSRF header on every
 non-GET; you never handle it.
 

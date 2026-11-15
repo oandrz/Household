@@ -17,6 +17,7 @@
 //       /money/budget RequireCapability("money") -> Budget (Task 11; BudgetPage stub -- Task 12 builds the real screen)
 //       /money/goals RequireCapability("money") -> Goals (Task 11; the real GoalsPage)
 //       /money/bills RequireCapability("money") -> Bills (the real BillsPage)
+//       /money/cashflow RequireCapability("money") -> Cashflow (CashflowPage)
 //       /marriage/retros RequireCapability("marriage") -> Retros (Task 10; RetrosPage)
 //       /marriage/vision RequireCapability("marriage") -> Vision & goals (Task 11; VisionPage)
 //       /settings                                   -- the real Settings screen (Task 20)
@@ -100,6 +101,7 @@ import { RetrosPage } from "../features/marriage/RetrosPage";
 import { VisionPage } from "../features/marriage/VisionPage";
 import { BillsPage } from "../features/money/BillsPage";
 import { BudgetPage } from "../features/money/BudgetPage";
+import { CashflowPage } from "../features/money/CashflowPage";
 import { FinancesPage } from "../features/money/FinancesPage";
 import { GoalsPage } from "../features/money/GoalsPage";
 import { PortfolioPage } from "../features/money/PortfolioPage";
@@ -243,10 +245,26 @@ const moneyIndexRoute = createRoute({
 // `money` would reach a ledger the sidebar never offered them --
 // router.test.tsx's own "redirects a member without the money capability
 // away from /money/transactions" pins exactly this.
+function wellFormedMonth(value: unknown): string | undefined {
+  return typeof value === "string" && /^\d{4}-\d{2}$/.test(value) ? value : undefined;
+}
 const moneyTransactionsRoute = createRoute({
   getParentRoute: () => moneyGuardRoute,
   path: "transactions",
-  component: TransactionsPage,
+  // A link (the Cashflow month drill-down) opens the ledger at a month.
+  validateSearch: (search: Record<string, unknown>): { month?: string } => {
+    const month = wellFormedMonth(search.month);
+    return month === undefined ? {} : { month };
+  },
+  // Named for the rules-of-hooks reason SettingsRouteComponent gives below.
+  component: function MoneyTransactionsRouteComponent() {
+    const search = useSearch({ from: "/authenticated/shell/money/transactions" });
+    // Checked again here: TanStack merges the raw URL search over what
+    // validateSearch returns (see the invite note on the settings route), so a
+    // malformed month would otherwise still arrive. Only a well-formed
+    // YYYY-MM may start the filter; the server rejects anything else.
+    return <TransactionsPage initialMonth={wellFormedMonth(search.month)} />;
+  },
 });
 // A sibling of moneyTransactionsRoute, same reasoning: nested under
 // moneyGuardRoute (not the shell) so RequireCapability still runs --
@@ -308,6 +326,31 @@ const moneyBillsRoute = createRoute({
   getParentRoute: () => moneyGuardRoute,
   path: "bills",
   component: BillsPage,
+});
+// Cashflow joins the other Money pages under the same guard. The read is
+// owner-only on the server too, so the page handles that refusal itself.
+// The tab and the year live in the address so a reload or a shared link lands
+// on the same view; Monthly and the current year have no parameter.
+type CashflowSearch = { view?: "yearly"; year?: number };
+export function cashflowSearch(search: Record<string, unknown>): CashflowSearch {
+  const result: CashflowSearch = {};
+  if (search.view === "yearly") result.view = "yearly";
+  const year = typeof search.year === "number" ? search.year : /^\d{4}$/.test(String(search.year)) ? Number(search.year) : NaN;
+  if (Number.isInteger(year) && year >= 2000 && year <= 9999) result.year = year;
+  return result;
+}
+const moneyCashflowRoute = createRoute({
+  getParentRoute: () => moneyGuardRoute,
+  path: "cashflow",
+  validateSearch: cashflowSearch,
+  // Named for the rules-of-hooks reason SettingsRouteComponent gives below.
+  component: function MoneyCashflowRouteComponent() {
+    const search = useSearch({ from: "/authenticated/shell/money/cashflow" });
+    // Checked again here for the reason moneyTransactionsRoute gives: the raw
+    // URL search is merged over validateSearch's result.
+    const clean = cashflowSearch(search);
+    return <CashflowPage initialView={clean.view ?? "monthly"} initialYear={clean.year} />;
+  },
 });
 
 // Marriage's own guard, the moneyGuardRoute shape restated: a pathless route
@@ -656,6 +699,7 @@ export const routeTree = rootRoute.addChildren([
         moneyPortfolioRoute,
     moneyPortfolioReportRoute,
         moneyBillsRoute,
+        moneyCashflowRoute,
       ]),
       marriageGuardRoute.addChildren([
         marriageIndexRoute,

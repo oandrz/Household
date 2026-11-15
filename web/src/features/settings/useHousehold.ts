@@ -5,6 +5,7 @@ import { z } from "zod";
 import { fetchAndParse } from "../../api/client";
 import { householdSchema, type Household } from "../auth/schemas";
 import { meQueryKey } from "../auth/useAuth";
+import { cashflowRootKey } from "../money/useCashflow";
 
 // GET /household's body: the household, plus what Settings must know before it
 // offers a field. primaryCurrencyLocked is true when the server would refuse a
@@ -57,6 +58,8 @@ export function useUpdateHousehold() {
       return Promise.all([
         queryClient.invalidateQueries({ queryKey: householdQueryKey }),
         queryClient.invalidateQueries({ queryKey: meQueryKey }),
+        // Cashflow is totalled in the primary currency.
+        queryClient.invalidateQueries({ queryKey: cashflowRootKey }),
       ]);
     },
   });

@@ -28,6 +28,7 @@
 //     accounts, transactions, categories and budgets
 //   - ports_money_goal.go: the money slice's goal ports
 //   - ports_money_bill.go: the money slice's bill ports
+//   - ports_money_cashflow.go: the money slice's cashflow ports
 //   - ports_money_holding.go: the money slice's investment-holding ports
 //   - ports_marriage_retro.go: the marriage slice's monthly retro ports
 //   - ports_marriage_vision.go: the marriage slice's vision ports,

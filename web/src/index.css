@@ -22,6 +22,9 @@
   --color-danger-border: #d97a66;
   --color-danger-soft: #fdf6f4;
 
+  /* The "Watch" amber on Money > Cashflow's light. Text-safe on white. */
+  --color-warn: #8a5a00;
+
   /* The invite screen's "Joining as ..." callout. */
   --color-callout: #f4f8f6;
   --color-callout-border: #cfe0d8;
