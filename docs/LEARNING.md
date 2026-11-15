@@ -7569,6 +7569,21 @@ route with a missing guard has no second line of defence.
   passed, because none can compute a weight; measuring `fontWeight` in the
   browser found it. When a list becomes a table, set the weight on each
   `th` and measure it.
+- **A second page that lists the same bill must reuse the first page's
+  rule for it.** Three weeks after the Cashflow walks, the Yearly view's
+  "Bills still to come this year" listed Gift fund as "10 Nov 2026" on
+  15 November. The Bills page has said "Overdue since 10 Nov" since it
+  shipped, and `billCopy.ts` even writes the rule down ("names it as
+  overdue rather than printing a past date as though upcoming"). The
+  Cashflow service kept overdue bills in the list on purpose but dropped
+  the flag, and every walk had run before the first due date passed, so
+  no screen ever showed a past date. Two lessons: a list built from
+  another feature's records inherits that feature's display rules, so
+  look for them before writing the row; and a walk only covers the dates
+  it ran on. Re-walking a date-driven page after the calendar has moved
+  found this and a confusing Watch sentence in one pass. The fix uses
+  `domain.IsOverdue`, the Bills page's own rule, so the two pages cannot
+  drift.
 
 ### The household calendar's browser walk (2026-10-01)
 
