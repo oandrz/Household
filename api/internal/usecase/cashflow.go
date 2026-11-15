@@ -31,13 +31,15 @@ func NewCashflowService(d CashflowDeps) *CashflowService {
 
 // CashflowBillToCome is a live quarterly or yearly bill still to be paid this
 // year, overdue ones included. Unconvertible means the amount has no rate and
-// AmountMinor is 0.
+// AmountMinor is 0. Overdue uses domain.IsOverdue, the Bills page's rule, so
+// the two pages never disagree about the same bill.
 type CashflowBillToCome struct {
 	BillID        string
 	Name          string
 	AmountMinor   int64
 	NextDue       time.Time
 	Unconvertible bool
+	Overdue       bool
 }
 
 // CashflowPage is everything the page shows, in the household's primary
@@ -372,6 +374,7 @@ func (b spreadBills) toCome(today time.Time) []CashflowBillToCome {
 	var out []CashflowBillToCome
 	for _, bill := range b {
 		if !bill.NextDue.After(endOfYear) {
+			bill.Overdue = domain.IsOverdue(bill.NextDue, today)
 			out = append(out, bill)
 		}
 	}

@@ -51,7 +51,7 @@ const page = {
     sameMonthsLastYearMinor: null,
     headingForMinor: null,
     billsToCome: [
-      { billId: "bill-1", name: "Car insurance", amountMinor: 210000, nextDue: "2026-12-01", unconvertible: false },
+      { billId: "bill-1", name: "Car insurance", amountMinor: 210000, nextDue: "2026-12-01", unconvertible: false, overdue: false },
     ],
   },
 };

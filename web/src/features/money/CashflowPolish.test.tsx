@@ -38,7 +38,7 @@ function pageFixture(oldestYear: number): CashflowData {
       year: 2026, months: [september], keptSoFarMinor: 900000, incomeMinor: 4500000, greyMonths: 0,
       keptBasisPoints: 2000, sameMonthsLastYearMinor: 700000, headingForMinor: 1100000,
       billsToCome: [
-        { billId: "bill-1", name: "Car insurance", amountMinor: 210000, nextDue: "2026-12-01", unconvertible: false },
+        { billId: "bill-1", name: "Car insurance", amountMinor: 210000, nextDue: "2026-12-01", unconvertible: false, overdue: false },
       ],
     },
   } as CashflowData;

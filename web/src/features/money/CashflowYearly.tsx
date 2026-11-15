@@ -97,7 +97,11 @@ export function CashflowYearly({ data, formatAmount, onSelectYear }: Props) {
               <li key={bill.billId} className="flex items-baseline justify-between gap-3 text-[13px]">
                 <span className="min-w-0">
                   <span className="text-ink">{bill.name}</span>
-                  <span className="block text-xs text-muted">{dateLabel(bill.nextDue)}</span>
+                  {bill.overdue ? (
+                    <span className="block text-xs text-danger">{cashflowCopy.billOverdue(dateLabel(bill.nextDue))}</span>
+                  ) : (
+                    <span className="block text-xs text-muted">{dateLabel(bill.nextDue)}</span>
+                  )}
                 </span>
                 <span className="tabular shrink-0 text-ink">
                   {bill.unconvertible ? cashflowCopy.billUnconvertible : formatAmount(bill.amountMinor)}

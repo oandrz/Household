@@ -61,7 +61,7 @@ function pageFixture(overrides: Partial<CashflowData> = {}): CashflowData {
       sameMonthsLastYearMinor: 700000,
       headingForMinor: 1100000,
       billsToCome: [
-        { billId: "bill-1", name: "Car insurance", amountMinor: 210000, nextDue: "2026-12-01", unconvertible: false },
+        { billId: "bill-1", name: "Car insurance", amountMinor: 210000, nextDue: "2026-12-01", unconvertible: false, overdue: false },
       ],
     },
     ...overrides,

@@ -98,6 +98,7 @@ type cashflowBillToComeDTO struct {
 	AmountMinor   int64  `json:"amountMinor"`
 	NextDue       string `json:"nextDue"`
 	Unconvertible bool   `json:"unconvertible"`
+	Overdue       bool   `json:"overdue"`
 }
 
 type cashflowYearDTO struct {
@@ -257,6 +258,7 @@ func toCashflowYearDTO(p usecase.CashflowPage) cashflowYearDTO {
 		dto.BillsToCome = append(dto.BillsToCome, cashflowBillToComeDTO{
 			BillID: b.BillID, Name: b.Name, AmountMinor: b.AmountMinor,
 			NextDue: b.NextDue.Format(cashflowDayLayout), Unconvertible: b.Unconvertible,
+			Overdue: b.Overdue,
 		})
 	}
 	return dto

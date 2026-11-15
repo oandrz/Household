@@ -131,6 +131,7 @@ const cashflowBillToComeSchema = z.object({
   amountMinor: z.number(),
   nextDue: z.string(),
   unconvertible: z.boolean(),
+  overdue: z.boolean(),
 });
 
 const cashflowYearSchema = z.object({

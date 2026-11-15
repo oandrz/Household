@@ -340,6 +340,27 @@ func TestPageBillsToComeOnlyForTheCurrentYear(t *testing.T) {
 	}
 }
 
+// A bill whose due date has passed stays in the list but is marked overdue,
+// by the same rule as the Bills page: due today is not overdue yet.
+func TestPageBillsToComeMarksOnlyPastDueBillsOverdue(t *testing.T) {
+	f := newCashflowFixture(t)
+	f.solidQuarter()
+	f.addBill("yesterday", domain.CadenceYearly, 100, cashflowToday.AddDate(0, 0, -1), false)
+	f.addBill("today", domain.CadenceYearly, 200, cashflowToday, false)
+	f.addBill("tomorrow", domain.CadenceYearly, 300, cashflowToday.AddDate(0, 0, 1), false)
+
+	got := map[string]bool{}
+	for _, b := range f.page(t).BillsToCome {
+		got[b.Name] = b.Overdue
+	}
+	want := map[string]bool{"yesterday": true, "today": false, "tomorrow": false}
+	for name, overdue := range want {
+		if v, ok := got[name]; !ok || v != overdue {
+			t.Fatalf("bills to come overdue = %v, want %v", got, want)
+		}
+	}
+}
+
 func TestPageBillWithoutARateIsUnconvertibleAndFiresTheBillDueCheck(t *testing.T) {
 	f := newCashflowFixture(t)
 	f.fx.withNoRates()
